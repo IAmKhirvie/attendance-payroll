@@ -1,0 +1,1 @@
+"""Attendance & Payroll Management Platform."""

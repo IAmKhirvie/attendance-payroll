@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="200" height="150" viewBox="0 0 200 150">
+  <rect width="200" height="150" fill="#fafafa"/>
+  <!-- Empty box -->
+  <rect x="50" y="30" width="100" height="80" rx="8" fill="#f3f4f6" stroke="#e5e7eb" stroke-width="2"/>
+  <!-- Dashed lines (empty content) -->
+  <line x1="70" y1="55" x2="130" y2="55" stroke="#d1d5db" stroke-width="2" stroke-dasharray="6,4"/>
+  <line x1="70" y1="75" x2="110" y2="75" stroke="#d1d5db" stroke-width="2" stroke-dasharray="6,4"/>
+  <line x1="70" y1="95" x2="120" y2="95" stroke="#d1d5db" stroke-width="2" stroke-dasharray="6,4"/>
+  <!-- Magnifying glass -->
+  <circle cx="155" cy="45" r="15" fill="none" stroke="#9ca3af" stroke-width="3"/>
+  <line x1="166" y1="56" x2="180" y2="70" stroke="#9ca3af" stroke-width="3" stroke-linecap="round"/>
+  <!-- Text -->
+  <text x="100" y="135" text-anchor="middle" font-family="system-ui" font-size="12" fill="#9ca3af">No data found</text>
+</svg>
