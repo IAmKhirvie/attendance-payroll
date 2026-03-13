@@ -79,6 +79,7 @@ class Employee(Base):
 
     # Call time / Schedule settings
     call_time = Column(String(5), nullable=True, default="08:00")  # Official call time (HH:MM format)
+    time_out = Column(String(5), nullable=True, default="17:00")  # Official time out (HH:MM format)
     buffer_minutes = Column(Integer, nullable=True, default=10)  # Minutes before call time to be in (e.g., 10 = should be in by 7:50 if call time is 8:00)
     is_flexible = Column(Boolean, default=False)  # If true, no lates are calculated for this employee
 

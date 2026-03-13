@@ -866,6 +866,7 @@ async def get_payslip(
     if emp:
         employee_settings = {
             "call_time": emp.call_time or "08:00",
+            "time_out": emp.time_out or "17:00",
             "buffer_minutes": emp.buffer_minutes if emp.buffer_minutes is not None else 10,
             "is_flexible": emp.is_flexible or False,
             "work_hours_per_day": float(emp.work_hours_per_day or 8),
@@ -1244,6 +1245,11 @@ async def update_payslip_attendance(
             employee.call_time = attendance['call_time']
             preset_saved = True
             preset_fields.append(f"call time: {attendance['call_time']}")
+
+        if 'time_out' in attendance:
+            employee.time_out = attendance['time_out']
+            preset_saved = True
+            preset_fields.append(f"time out: {attendance['time_out']}")
 
         if 'buffer_minutes' in attendance:
             employee.buffer_minutes = int(attendance['buffer_minutes'])
@@ -1967,7 +1973,7 @@ def generate_payslip_png(payslip: Payslip, company_name: str = "I CAN LANGUAGE C
 
     # === SALARY SECTION HEADERS ===
     left_col = margin
-    left_val = margin + 95
+    left_val = margin + 110
     right_col = mid_x + 5
     right_val = width - margin - 10
 
@@ -2041,7 +2047,7 @@ def generate_payslip_png(payslip: Payslip, company_name: str = "I CAN LANGUAGE C
     late_amt = float(earnings.get('late_deduction', 0) or deductions.get('late_amount', 0) or 0)
     absences_total = absent_amt + late_amt
 
-    draw.text((left_col, y), "Absences / Lates", fill='black', font=font_small)
+    draw.text((left_col, y), "Abs / Late", fill='black', font=font_small)
     draw.text((left_val, y), fmt(absences_total), fill='black', font=font_normal, anchor='rt')
     y += row_height + 8
 

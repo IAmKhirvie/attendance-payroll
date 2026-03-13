@@ -152,7 +152,7 @@ export function PayrollPage() {
   const [editMode, setEditMode] = useState(false);
   const [editEarnings, setEditEarnings] = useState<Record<string, number>>({});
   const [editDeductions, setEditDeductions] = useState<Record<string, number>>({});
-  const [editAttendance, setEditAttendance] = useState<{ days_worked?: number; days_absent?: number; late_count?: number; total_late_minutes?: number; overtime_hours?: number; work_hours_per_day?: number; call_time?: string; buffer_minutes?: number; is_flexible?: boolean; recalculate_deductions?: boolean }>({});
+  const [editAttendance, setEditAttendance] = useState<{ days_worked?: number; days_absent?: number; late_count?: number; total_late_minutes?: number; overtime_hours?: number; work_hours_per_day?: number; call_time?: string; time_out?: string; buffer_minutes?: number; is_flexible?: boolean; recalculate_deductions?: boolean }>({});
   const [saving, setSaving] = useState(false);
 
   // Payroll Settings
@@ -224,6 +224,44 @@ export function PayrollPage() {
     } finally {
       setLoadingTrash(false);
     }
+  };
+
+  // Auto-calculate work hours and basic salary based on schedule
+  const calculateFromSchedule = (timeIn: string, timeOut: string) => {
+    const BASE_SALARY = settings?.default_basic_salary || 15200; // Base salary for 8 hours
+    const BASE_HOURS = 8;
+    const LUNCH_BREAK = 1; // 1 hour lunch break
+
+    // Parse times
+    const [inH, inM] = timeIn.split(':').map(Number);
+    const [outH, outM] = timeOut.split(':').map(Number);
+
+    // Calculate total hours
+    let totalMinutes = (outH * 60 + outM) - (inH * 60 + inM);
+    if (totalMinutes < 0) totalMinutes += 24 * 60; // Handle overnight shifts
+
+    const totalHours = totalMinutes / 60;
+    const workHours = Math.max(0, totalHours - LUNCH_BREAK); // Subtract lunch
+
+    // Calculate salary proportionally
+    const basicSalary = Math.round((BASE_SALARY * workHours / BASE_HOURS) * 100) / 100;
+
+    return { workHours, basicSalary };
+  };
+
+  const handleScheduleChange = (field: 'call_time' | 'time_out', value: string) => {
+    const newAttendance = { ...editAttendance, [field]: value };
+    const timeIn = field === 'call_time' ? value : (editAttendance.call_time || '08:00');
+    const timeOut = field === 'time_out' ? value : (editAttendance.time_out || '17:00');
+
+    const { workHours, basicSalary } = calculateFromSchedule(timeIn, timeOut);
+
+    // Update attendance with new work hours
+    newAttendance.work_hours_per_day = workHours;
+    setEditAttendance(newAttendance);
+
+    // Update earnings with new basic salary (semi-monthly = monthly / 2)
+    setEditEarnings({ ...editEarnings, basic_semi: basicSalary / 2 });
   };
 
   const handleRestoreRun = async (id: number) => {
@@ -666,6 +704,7 @@ export function PayrollPage() {
       overtime_hours: selectedPayslip.overtime_hours,
       work_hours_per_day: empSettings.work_hours_per_day || selectedPayslip.deductions?.work_hours_per_day_used || 8,
       call_time: empSettings.call_time || "08:00",
+      time_out: empSettings.time_out || "17:00",
       buffer_minutes: empSettings.buffer_minutes ?? 10,
       is_flexible: empSettings.is_flexible || false,
       recalculate_deductions: false,
@@ -1472,14 +1511,24 @@ export function PayrollPage() {
                 <h4 className="font-semibold text-blue-800">Employee Settings (Saved as Default)</h4>
                 <span className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded">Auto-saves to employee record</span>
               </div>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
                 {/* Call Time */}
                 <div>
-                  <label className="block text-xs text-gray-600 mb-1">Call Time</label>
+                  <label className="block text-xs text-gray-600 mb-1">Time In</label>
                   <input
                     type="time"
                     value={editAttendance.call_time || "08:00"}
-                    onChange={(e) => setEditAttendance({ ...editAttendance, call_time: e.target.value })}
+                    onChange={(e) => handleScheduleChange('call_time', e.target.value)}
+                    className="w-full px-3 py-2 border border-blue-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                {/* Time Out */}
+                <div>
+                  <label className="block text-xs text-gray-600 mb-1">Time Out</label>
+                  <input
+                    type="time"
+                    value={editAttendance.time_out || "17:00"}
+                    onChange={(e) => handleScheduleChange('time_out', e.target.value)}
                     className="w-full px-3 py-2 border border-blue-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500"
                   />
                 </div>
