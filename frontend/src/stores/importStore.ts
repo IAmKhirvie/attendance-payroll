@@ -15,6 +15,19 @@ interface ImportedRecord {
   has_exception: boolean;
 }
 
+interface PayrollResult {
+  payroll_run_id?: number;
+  period_start?: string;
+  period_end?: string;
+  cutoff?: number;
+  employee_count?: number;
+  total_gross?: number;
+  total_deductions?: number;
+  total_net?: number;
+  status?: string;
+  error?: string;
+}
+
 interface ImportResult {
   message: string;
   filename: string;
@@ -27,6 +40,11 @@ interface ImportResult {
     employees_found: number;
   };
   records: ImportedRecord[];
+  payroll?: PayrollResult;
+}
+
+interface ImportOptions {
+  forceReimport?: boolean;
 }
 
 interface ImportState {
@@ -36,7 +54,7 @@ interface ImportState {
   error: string | null;
 
   // Actions
-  startUpload: (file: File) => Promise<void>;
+  startUpload: (file: File, options?: ImportOptions) => Promise<void>;
   clearResult: () => void;
 }
 
@@ -46,7 +64,7 @@ export const useImportStore = create<ImportState>((set) => ({
   importResult: null,
   error: null,
 
-  startUpload: async (file: File) => {
+  startUpload: async (file: File, options?: ImportOptions) => {
     set({ isUploading: true, uploadProgress: 'Uploading file...', error: null });
 
     try {
@@ -58,6 +76,12 @@ export const useImportStore = create<ImportState>((set) => ({
       const formData = new FormData();
       formData.append('file', file);
       formData.append('create_employees', 'true');
+      formData.append('auto_generate_payroll', 'true');
+      if (options?.forceReimport) {
+        formData.append('force_reimport', 'true');
+      }
+
+      set({ uploadProgress: 'Importing attendance & generating payroll...' });
 
       const response = await api.post('/attendance/import', formData, {
         headers: { 'Content-Type': 'multipart/form-data' }

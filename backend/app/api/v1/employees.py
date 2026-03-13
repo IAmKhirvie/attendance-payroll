@@ -124,6 +124,48 @@ async def delete_department(
 
 # === Employees ===
 
+@router.get("/without-users")
+async def list_employees_without_users(
+    current_admin: User = Depends(get_current_admin),
+    db: Session = Depends(get_db)
+):
+    """
+    List active employees who don't have user accounts yet.
+    Useful for previewing before syncing.
+    """
+    # Get all active employees
+    employees = db.query(Employee).filter(
+        Employee.status == 'active',
+        Employee.is_active == True
+    ).all()
+
+    # Check which ones don't have users
+    without_users = []
+    with_users = []
+
+    for emp in employees:
+        existing_user = db.query(User).filter(User.employee_id == emp.id).first()
+        emp_data = {
+            "id": emp.id,
+            "employee_no": emp.employee_no,
+            "full_name": emp.full_name,
+            "email": emp.email,
+            "status": emp.status
+        }
+        if existing_user:
+            emp_data["user_email"] = existing_user.email
+            with_users.append(emp_data)
+        else:
+            without_users.append(emp_data)
+
+    return {
+        "without_users": without_users,
+        "with_users": with_users,
+        "total_without": len(without_users),
+        "total_with": len(with_users)
+    }
+
+
 @router.get("", response_model=EmployeeListResponse)
 async def list_employees(
     page: int = Query(1, ge=1),
@@ -395,46 +437,4 @@ async def sync_employees_to_users(
         "skipped": skipped,
         "errors": errors,
         "temp_password": TEMP_PASSWORD
-    }
-
-
-@router.get("/without-users")
-async def list_employees_without_users(
-    current_admin: User = Depends(get_current_admin),
-    db: Session = Depends(get_db)
-):
-    """
-    List active employees who don't have user accounts yet.
-    Useful for previewing before syncing.
-    """
-    # Get all active employees
-    employees = db.query(Employee).filter(
-        Employee.status == 'active',
-        Employee.is_active == True
-    ).all()
-
-    # Check which ones don't have users
-    without_users = []
-    with_users = []
-
-    for emp in employees:
-        existing_user = db.query(User).filter(User.employee_id == emp.id).first()
-        emp_data = {
-            "id": emp.id,
-            "employee_no": emp.employee_no,
-            "full_name": emp.full_name,
-            "email": emp.email,
-            "status": emp.status
-        }
-        if existing_user:
-            emp_data["user_email"] = existing_user.email
-            with_users.append(emp_data)
-        else:
-            without_users.append(emp_data)
-
-    return {
-        "without_users": without_users,
-        "with_users": with_users,
-        "total_without": len(without_users),
-        "total_with": len(with_users)
     }

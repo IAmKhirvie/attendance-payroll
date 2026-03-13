@@ -222,6 +222,9 @@ class PayslipListResponse(BaseModel):
 
 class PayrollSettingsUpdate(BaseModel):
     """Update payroll settings request."""
+    # Default basic salary
+    default_basic_salary: Optional[Decimal] = None
+
     # Attendance-based deductions (PHP amounts)
     absent_rate_per_day: Optional[Decimal] = None
     late_rate_per_minute: Optional[Decimal] = None
@@ -249,6 +252,10 @@ class PayrollSettingsUpdate(BaseModel):
 class PayrollSettingsResponse(BaseModel):
     """Payroll settings response."""
     id: int
+
+    # Default basic salary
+    default_basic_salary: Decimal
+
     # Attendance-based deductions
     absent_rate_per_day: Decimal
     late_rate_per_minute: Decimal

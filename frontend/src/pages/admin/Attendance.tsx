@@ -285,12 +285,15 @@ export function AttendancePage() {
     }
   };
 
+  const [forceReimport, setForceReimport] = useState(false);
+
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
     // Start upload in global store (continues even when navigating away)
-    startUpload(file);
+    startUpload(file, { forceReimport });
+    setForceReimport(false);
 
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
@@ -375,14 +378,34 @@ export function AttendancePage() {
       </div>
 
       {activeTab === 'import' && (
-        <div className="card">
-          <h2 className="text-lg font-semibold text-gray-900 mb-4">Import Time Report</h2>
-          <p className="text-gray-600 mb-4">
-            Upload the NGTimereport file from your biometric system (XLS/XLSX format).
-            The system will automatically parse employee attendance data.
-          </p>
+        <div className="space-y-6">
+          {/* Instructions Card */}
+          <div className="card bg-gradient-to-r from-blue-50 to-indigo-50 border-blue-200">
+            <h2 className="text-lg font-semibold text-gray-900 mb-3 flex items-center gap-2">
+              <svg className="w-5 h-5 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              How to Import Attendance
+            </h2>
+            <ol className="list-decimal list-inside space-y-2 text-gray-700 text-sm">
+              <li><strong>Export from biometric device:</strong> Get the NGTimereport XLS file from your time tracking system</li>
+              <li><strong>Upload the file:</strong> Click the upload area below or drag and drop your file</li>
+              <li><strong>Review results:</strong> Check the imported attendance records for any issues</li>
+              <li><strong>Payroll auto-generated:</strong> The system automatically creates payroll based on attendance</li>
+              <li><strong>Review payroll:</strong> Go to Payroll page to review and adjust if needed (e.g., partial days for some teachers)</li>
+            </ol>
+            <div className="mt-3 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+              <p className="text-sm text-yellow-800">
+                <strong>Note:</strong> If a teacher only works 2 days, you can adjust their payroll in the Payroll section after import.
+              </p>
+            </div>
+          </div>
 
-          <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center">
+          {/* Upload Card */}
+          <div className="card">
+            <h2 className="text-lg font-semibold text-gray-900 mb-4">Upload Time Report</h2>
+
+            <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center">
             <input
               type="file"
               ref={fileInputRef}
@@ -415,18 +438,36 @@ export function AttendancePage() {
             </label>
           </div>
 
-          {/* Error Display */}
-          {error && (
-            <div className="mt-4 p-4 bg-red-50 border border-red-200 rounded-lg">
-              <div className="flex items-center justify-between">
-                <p className="text-red-700">{error}</p>
-                <button onClick={clearResult} className="text-red-500 hover:text-red-700">
-                  Dismiss
-                </button>
+            {/* Error Display */}
+            {error && (
+              <div className="mt-4 p-4 bg-red-50 border border-red-200 rounded-lg">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex-1">
+                    <p className="text-red-700">{error}</p>
+                    {error.includes('already been imported') && (
+                      <div className="mt-3 flex items-center gap-3">
+                        <label className="flex items-center gap-2 text-sm">
+                          <input
+                            type="checkbox"
+                            checked={forceReimport}
+                            onChange={(e) => setForceReimport(e.target.checked)}
+                            className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                          />
+                          <span className="text-gray-700">Replace existing import data</span>
+                        </label>
+                        {forceReimport && (
+                          <span className="text-xs text-gray-500">(Upload the file again to replace)</span>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                  <button onClick={clearResult} className="text-red-500 hover:text-red-700 whitespace-nowrap">
+                    Dismiss
+                  </button>
+                </div>
               </div>
-            </div>
-          )}
-
+            )}
+          </div>
         </div>
       )}
 
@@ -442,6 +483,44 @@ export function AttendancePage() {
             </div>
           ) : (
             <>
+              {/* Payroll Generated Card */}
+              {importResult.payroll && !importResult.payroll.error && (
+                <div className="card bg-gradient-to-r from-green-50 to-emerald-50 border-green-200">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h3 className="font-semibold text-gray-900 flex items-center gap-2">
+                        <svg className="w-5 h-5 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        Payroll Auto-Generated
+                      </h3>
+                      <p className="text-sm text-gray-600 mt-1">
+                        {importResult.payroll.cutoff === 1 ? '1st Cutoff' : '2nd Cutoff'} • {importResult.payroll.period_start} to {importResult.payroll.period_end}
+                      </p>
+                      <div className="flex gap-4 mt-2 text-sm">
+                        <span><strong>{importResult.payroll.employee_count}</strong> employees</span>
+                        <span>Total Net: <strong className="text-green-700">₱{importResult.payroll.total_net?.toLocaleString()}</strong></span>
+                      </div>
+                    </div>
+                    <a
+                      href="/admin/payroll"
+                      className="bg-green-600 hover:bg-green-700 text-white font-semibold px-6 py-3 rounded-lg shadow-md transition-colors"
+                    >
+                      Review Payroll →
+                    </a>
+                  </div>
+                </div>
+              )}
+
+              {importResult.payroll?.error && (
+                <div className="card bg-yellow-50 border-yellow-200">
+                  <p className="text-yellow-800">
+                    <strong>Note:</strong> Payroll could not be auto-generated: {importResult.payroll.error}
+                  </p>
+                  <p className="text-sm text-yellow-700 mt-1">You can create payroll manually in the Payroll section.</p>
+                </div>
+              )}
+
               {/* Summary Cards */}
               <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
                 <div className="card text-center py-3">

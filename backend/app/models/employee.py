@@ -70,6 +70,18 @@ class Employee(Base):
     pagibig_contribution = Column(Numeric(10, 2), nullable=True)  # Pag-IBIG employee share
     tax_amount = Column(Numeric(10, 2), nullable=True)  # Withholding tax
 
+    # Payroll Preset - remembered days per cutoff (if set, overrides attendance-based calculation)
+    default_days_per_cutoff = Column(Numeric(4, 1), nullable=True)  # e.g., 2.0 for teachers who work 2 days
+
+    # Work hours per day for this employee (used in late/undertime calculation)
+    # Default is 8, but can be 6, 4, etc. depending on schedule
+    work_hours_per_day = Column(Numeric(4, 2), nullable=True, default=8)  # e.g., 6.0 for part-time
+
+    # Call time / Schedule settings
+    call_time = Column(String(5), nullable=True, default="08:00")  # Official call time (HH:MM format)
+    buffer_minutes = Column(Integer, nullable=True, default=10)  # Minutes before call time to be in (e.g., 10 = should be in by 7:50 if call time is 8:00)
+    is_flexible = Column(Boolean, default=False)  # If true, no lates are calculated for this employee
+
     # Biometric
     biometric_id = Column(String(50), nullable=True, index=True)  # ID from biometric device
 

@@ -29,6 +29,45 @@ from app.schemas.payroll import (
 router = APIRouter()
 
 
+def generate_coded_filename(payslip: Payslip, extension: str = "pdf") -> str:
+    """
+    Generate a coded filename for payslip downloads.
+    Format: REC-{initials}{emp_short}-{YYMM}{cutoff}.{ext}
+    Example: REC-GT02-2601A.pdf (Gemma Termulo, emp ending in 02, Jan 2026, 1st cutoff)
+    """
+    # Get initials from name
+    if payslip.employee:
+        names = payslip.employee.full_name.split()
+        initials = ''.join(n[0].upper() for n in names if n)[:3]  # Max 3 initials
+        # Get last 2 digits of employee number
+        emp_no = payslip.employee.employee_no or "00"
+        emp_short = ''.join(filter(str.isdigit, emp_no))[-2:] or "00"
+    else:
+        initials = "XX"
+        emp_short = "00"
+
+    # Get period code (YYMM)
+    if payslip.payroll_run:
+        period_code = payslip.payroll_run.period_start.strftime('%y%m')
+        cutoff = 'A' if payslip.payroll_run.cutoff == 1 else 'B'
+    else:
+        period_code = "0000"
+        cutoff = "X"
+
+    return f"REC-{initials}{emp_short}-{period_code}{cutoff}.{extension}"
+
+
+def generate_coded_sheet_filename(payroll_run: PayrollRun, page: int) -> str:
+    """
+    Generate a coded filename for payslip sheet downloads.
+    Format: BATCH-{YYMM}{cutoff}-P{page}.png
+    Example: BATCH-2601A-P1.png
+    """
+    period_code = payroll_run.period_start.strftime('%y%m')
+    cutoff = 'A' if payroll_run.cutoff == 1 else 'B'
+    return f"BATCH-{period_code}{cutoff}-P{page}.png"
+
+
 # === Deduction Configuration ===
 
 @router.get("/deductions", response_model=List[DeductionConfigResponse])
@@ -272,14 +311,8 @@ async def delete_payroll_run(
     Soft delete payroll run (Admin only).
 
     Moves the payroll run to trash instead of permanently deleting.
-    Requires a detailed deletion reason with:
-    - Minimum 100 valid English words (4+ letters)
-    - Words must be recognizable English words
-
-    Use force=true with reason for non-DRAFT runs.
+    Requires a deletion reason. Use force=true with reason for non-DRAFT runs.
     """
-    from app.services.word_validator import validate_deletion_reason
-
     run = db.query(PayrollRun).filter(
         PayrollRun.id == run_id,
         PayrollRun.is_deleted == False
@@ -287,22 +320,11 @@ async def delete_payroll_run(
     if not run:
         raise HTTPException(status_code=404, detail="Payroll run not found")
 
-    # Always require a reason for deletion (minimum 100 valid words)
-    if not reason:
+    # Require a reason for deletion
+    if not reason or not reason.strip():
         raise HTTPException(
             status_code=400,
-            detail="A detailed deletion reason is required (minimum 100 valid English words, 4+ letters each)."
-        )
-
-    # Validate the deletion reason
-    is_valid, error_msg, stats = validate_deletion_reason(reason, min_words=100)
-    if not is_valid:
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "message": error_msg,
-                "stats": stats
-            }
+            detail="A deletion reason is required."
         )
 
     if run.status != PayrollStatus.DRAFT:
@@ -326,8 +348,7 @@ async def delete_payroll_run(
         metadata={
             "action": "SOFT_DELETE",
             "status": str(run.status.value),
-            "employee_count": run.employee_count,
-            "word_stats": stats
+            "employee_count": run.employee_count
         }
     )
 
@@ -341,8 +362,7 @@ async def delete_payroll_run(
 
     return {
         "message": "Payroll run moved to trash",
-        "run_id": run_id,
-        "word_stats": stats
+        "run_id": run_id
     }
 
 
@@ -609,6 +629,148 @@ async def lock_payroll_run(
     return {"message": "Payroll run locked"}
 
 
+@router.post("/runs/{run_id}/recalculate")
+async def recalculate_payroll_run(
+    run_id: int,
+    current_admin: User = Depends(get_current_admin),
+    db: Session = Depends(get_db)
+):
+    """
+    Recalculate all payslips in a payroll run using current employee salaries.
+    This updates basic_semi, daily rates, and recalculates deductions.
+    """
+    from decimal import Decimal
+    from sqlalchemy.orm.attributes import flag_modified
+    from app.services.payroll_calculator import get_payroll_settings, calculate_ican_daily_rate, calculate_ican_minute_rate
+
+    run = db.query(PayrollRun).filter(PayrollRun.id == run_id).first()
+    if not run:
+        raise HTTPException(status_code=404, detail="Payroll run not found")
+
+    if run.status == PayrollStatus.LOCKED:
+        raise HTTPException(status_code=400, detail="Cannot recalculate locked payroll")
+
+    # Get all payslips for this run
+    payslips = db.query(Payslip).filter(Payslip.payroll_run_id == run_id).all()
+    if not payslips:
+        raise HTTPException(status_code=400, detail="No payslips found in this payroll run")
+
+    settings = get_payroll_settings(db)
+    updated_count = 0
+    total_gross = Decimal('0')
+    total_deductions = Decimal('0')
+    total_net = Decimal('0')
+
+    for payslip in payslips:
+        employee = db.query(Employee).filter(Employee.id == payslip.employee_id).first()
+        if not employee:
+            continue
+
+        # Get employee's current basic salary
+        monthly_basic = float(employee.basic_salary or 0)
+        basic_semi = monthly_basic / 2
+
+        # Get work hours for this employee
+        work_hours = float(employee.work_hours_per_day or settings.work_hours_per_day or 8)
+
+        # Calculate rates using ICAN formula
+        working_days = settings.working_days_per_year or 261
+        daily_rate = calculate_ican_daily_rate(monthly_basic, working_days)
+        minute_rate = calculate_ican_minute_rate(daily_rate, work_hours)
+
+        # Update earnings
+        current_earnings = dict(payslip.earnings or {})
+        current_earnings['basic_semi'] = basic_semi
+        current_earnings['allowance_semi'] = float(employee.allowance or 0) / 2
+        current_earnings['productivity_incentive_semi'] = float(employee.productivity_incentive or 0) / 2
+        current_earnings['language_incentive_semi'] = float(employee.language_incentive or 0) / 2
+
+        # Calculate absent deduction
+        days_absent = float(payslip.days_absent or 0)
+        absent_deduction = days_absent * daily_rate
+        current_earnings['absent_deduction'] = absent_deduction
+
+        # Calculate late deduction
+        late_minutes = float(payslip.total_late_minutes or 0)
+        late_deduction = late_minutes * minute_rate
+        current_earnings['late_deduction'] = late_deduction
+
+        # Store calculation info
+        current_earnings['_calculation_info'] = {
+            'monthly_basic': monthly_basic,
+            'work_hours_per_day': work_hours,
+        }
+
+        payslip.earnings = current_earnings
+        flag_modified(payslip, 'earnings')
+
+        # Update deductions with rates and current employee values
+        current_deductions = dict(payslip.deductions or {})
+        current_deductions['absences_daily_rate_used'] = daily_rate
+        current_deductions['late_minute_rate_used'] = minute_rate
+        current_deductions['work_hours_per_day_used'] = work_hours
+        current_deductions['absences_amount'] = absent_deduction
+        current_deductions['late_amount'] = late_deduction
+
+        # Update government deductions from employee's current values
+        current_deductions['sss'] = float(employee.sss_contribution or 0)
+        current_deductions['philhealth'] = float(employee.philhealth_contribution or 0)
+        current_deductions['pagibig'] = float(employee.pagibig_contribution or 0)
+        current_deductions['tax'] = float(employee.tax_amount or 0)
+
+        payslip.deductions = current_deductions
+        flag_modified(payslip, 'deductions')
+
+        # Recalculate totals
+        total_earnings = Decimal('0')
+        for k, v in current_earnings.items():
+            if k.startswith('_') or k in ['absent_deduction', 'late_deduction']:
+                continue
+            if v is not None:
+                try:
+                    total_earnings += Decimal(str(v))
+                except:
+                    pass
+        # Subtract deductions from earnings
+        total_earnings -= Decimal(str(absent_deduction))
+        total_earnings -= Decimal(str(late_deduction))
+        payslip.total_earnings = total_earnings
+
+        # Calculate total deductions (government + loans)
+        ded_total = Decimal('0')
+        for f in ['sss', 'philhealth', 'pagibig', 'tax', 'loans']:
+            v = current_deductions.get(f, 0)
+            if v:
+                try:
+                    ded_total += Decimal(str(v))
+                except:
+                    pass
+        payslip.total_deductions = ded_total
+
+        # Calculate net pay
+        payslip.net_pay = payslip.total_earnings - payslip.total_deductions
+
+        total_gross += payslip.total_earnings
+        total_deductions += payslip.total_deductions
+        total_net += payslip.net_pay
+        updated_count += 1
+
+    # Update payroll run totals
+    run.total_gross = total_gross
+    run.total_deductions = total_deductions
+    run.total_net = total_net
+
+    db.commit()
+
+    return {
+        "message": f"Recalculated {updated_count} payslips",
+        "updated_count": updated_count,
+        "total_gross": float(total_gross),
+        "total_deductions": float(total_deductions),
+        "total_net": float(total_net)
+    }
+
+
 # === Payslips ===
 
 @router.get("/payslips")
@@ -698,6 +860,18 @@ async def get_payslip(
         if not payslip.is_released:
             raise HTTPException(status_code=404, detail="Payslip not found")
 
+    # Get employee schedule settings
+    emp = payslip.employee
+    employee_settings = {}
+    if emp:
+        employee_settings = {
+            "call_time": emp.call_time or "08:00",
+            "buffer_minutes": emp.buffer_minutes if emp.buffer_minutes is not None else 10,
+            "is_flexible": emp.is_flexible or False,
+            "work_hours_per_day": float(emp.work_hours_per_day or 8),
+            "basic_salary": float(emp.basic_salary or 0),
+        }
+
     return {
         "id": payslip.id,
         "payroll_run_id": payslip.payroll_run_id,
@@ -720,7 +894,8 @@ async def get_payslip(
         "adjustment_notes": payslip.adjustment_notes,
         "is_released": payslip.is_released,
         "released_at": payslip.released_at.isoformat() if payslip.released_at else None,
-        "created_at": payslip.created_at.isoformat() if payslip.created_at else None
+        "created_at": payslip.created_at.isoformat() if payslip.created_at else None,
+        "employee_settings": employee_settings
     }
 
 
@@ -871,11 +1046,13 @@ async def update_payslip_earnings(
         raise HTTPException(status_code=400, detail="Cannot modify locked payroll")
 
     from decimal import Decimal
+    from sqlalchemy.orm.attributes import flag_modified
 
-    # Update earnings
-    current_earnings = payslip.earnings or {}
+    # Update earnings - create new dict to ensure SQLAlchemy detects change
+    current_earnings = dict(payslip.earnings or {})
     current_earnings.update(earnings)
     payslip.earnings = current_earnings
+    flag_modified(payslip, 'earnings')
 
     # Recalculate total earnings
     total = Decimal('0')
@@ -915,11 +1092,13 @@ async def update_payslip_deductions(
         raise HTTPException(status_code=400, detail="Cannot modify locked payroll")
 
     from decimal import Decimal
+    from sqlalchemy.orm.attributes import flag_modified
 
-    # Update deductions
-    current_deductions = payslip.deductions or {}
+    # Update deductions - create new dict to ensure SQLAlchemy detects change
+    current_deductions = dict(payslip.deductions or {})
     current_deductions.update(deductions)
     payslip.deductions = current_deductions
+    flag_modified(payslip, 'deductions')
 
     # Recalculate total deductions (exclude non-amount fields)
     amount_fields = ['absences_amount', 'late_amount', 'sss', 'philhealth', 'pagibig', 'tax', 'loans']
@@ -938,6 +1117,162 @@ async def update_payslip_deductions(
 
     db.commit()
     return {"message": "Deductions updated", "total_deductions": float(total), "net_pay": float(payslip.net_pay)}
+
+
+@router.patch("/payslips/{payslip_id}/attendance")
+async def update_payslip_attendance(
+    payslip_id: int,
+    attendance: dict,
+    current_admin: User = Depends(get_current_admin),
+    db: Session = Depends(get_db)
+):
+    """
+    Update payslip attendance data (Admin only).
+    HR can manually adjust days worked, late count, overtime hours.
+    Use this for teachers with partial schedules (e.g., only 2 days/week).
+    """
+    payslip = db.query(Payslip).filter(Payslip.id == payslip_id).first()
+    if not payslip:
+        raise HTTPException(status_code=404, detail="Payslip not found")
+
+    # Check if locked
+    run = db.query(PayrollRun).filter(PayrollRun.id == payslip.payroll_run_id).first()
+    if run and run.status == PayrollStatus.LOCKED:
+        raise HTTPException(status_code=400, detail="Cannot modify locked payroll")
+
+    from decimal import Decimal
+
+    # Update attendance fields
+    if 'days_worked' in attendance:
+        payslip.days_worked = attendance['days_worked']
+    if 'days_absent' in attendance:
+        payslip.days_absent = attendance['days_absent']
+    if 'late_count' in attendance:
+        payslip.late_count = attendance['late_count']
+    if 'total_late_minutes' in attendance:
+        payslip.total_late_minutes = attendance['total_late_minutes']
+    if 'overtime_hours' in attendance:
+        payslip.overtime_hours = attendance['overtime_hours']
+    if 'undertime_minutes' in attendance:
+        payslip.undertime_minutes = attendance['undertime_minutes']
+
+    # Recalculate deductions based on new attendance (optional)
+    if attendance.get('recalculate_deductions', False):
+        employee = db.query(Employee).filter(Employee.id == payslip.employee_id).first()
+        if employee:
+            from app.services.payroll_calculator import get_payroll_settings, calculate_ican_daily_rate, calculate_ican_minute_rate
+            from sqlalchemy.orm.attributes import flag_modified
+            settings = get_payroll_settings(db)
+            monthly_basic = float(employee.basic_salary or 0)
+
+            # Use work hours from request, or employee's setting, or fall back to global settings
+            emp_work_hours = float(
+                attendance.get('work_hours_per_day') or
+                employee.work_hours_per_day or
+                settings.work_hours_per_day or 8
+            )
+
+            if settings.use_ican_formula and monthly_basic > 0:
+                daily_rate = calculate_ican_daily_rate(monthly_basic, int(settings.working_days_per_year or 261))
+                minute_rate = calculate_ican_minute_rate(daily_rate, emp_work_hours)
+
+                # Create new deductions dict to ensure SQLAlchemy detects changes
+                deductions = dict(payslip.deductions or {})
+
+                # Store rates used for display
+                deductions['absences_daily_rate_used'] = daily_rate
+                deductions['late_minute_rate_used'] = minute_rate
+                deductions['work_hours_per_day_used'] = emp_work_hours
+
+                # Recalculate absence deduction
+                if payslip.days_absent and payslip.days_absent > 0:
+                    payslip.absent_deduction = Decimal(str(round(daily_rate * payslip.days_absent, 2)))
+                    deductions['absences_amount'] = float(payslip.absent_deduction)
+                    deductions['absences_days'] = payslip.days_absent
+                else:
+                    payslip.absent_deduction = Decimal('0')
+                    deductions['absences_amount'] = 0
+                    deductions['absences_days'] = 0
+
+                # Recalculate late deduction
+                total_late_minutes = payslip.total_late_minutes or 0
+                if total_late_minutes > 0:
+                    payslip.late_deduction = Decimal(str(round(minute_rate * total_late_minutes, 2)))
+                    deductions['late_amount'] = float(payslip.late_deduction)
+                    deductions['late_minutes'] = total_late_minutes
+                else:
+                    payslip.late_deduction = Decimal('0')
+                    deductions['late_amount'] = 0
+                    deductions['late_minutes'] = 0
+
+                # Assign deductions and flag as modified
+                payslip.deductions = deductions
+                flag_modified(payslip, 'deductions')
+
+                # Recalculate total deductions
+                amount_fields = ['absences_amount', 'late_amount', 'sss', 'philhealth', 'pagibig', 'tax', 'loans', 'undertime_amount']
+                total = Decimal('0')
+                for f in amount_fields:
+                    v = deductions.get(f, 0)
+                    if v is not None:
+                        try:
+                            total += Decimal(str(v))
+                        except:
+                            pass
+                payslip.total_deductions = total
+                payslip.net_pay = (payslip.total_earnings or Decimal('0')) - payslip.total_deductions
+
+    # Auto-save settings as employee's defaults for future payrolls
+    # This is the "preset" feature - when you edit an employee's settings,
+    # it automatically becomes their default for all future payroll runs
+    employee = db.query(Employee).filter(Employee.id == payslip.employee_id).first()
+    preset_saved = False
+    preset_fields = []
+
+    if employee:
+        if 'days_worked' in attendance:
+            employee.default_days_per_cutoff = Decimal(str(attendance['days_worked']))
+            preset_saved = True
+            preset_fields.append(f"days per cutoff: {attendance['days_worked']}")
+
+        if 'work_hours_per_day' in attendance:
+            employee.work_hours_per_day = Decimal(str(attendance['work_hours_per_day']))
+            preset_saved = True
+            preset_fields.append(f"work hours: {attendance['work_hours_per_day']}")
+
+        if 'call_time' in attendance:
+            employee.call_time = attendance['call_time']
+            preset_saved = True
+            preset_fields.append(f"call time: {attendance['call_time']}")
+
+        if 'buffer_minutes' in attendance:
+            employee.buffer_minutes = int(attendance['buffer_minutes'])
+            preset_saved = True
+            preset_fields.append(f"buffer: {attendance['buffer_minutes']} mins")
+
+        if 'is_flexible' in attendance:
+            employee.is_flexible = bool(attendance['is_flexible'])
+            preset_saved = True
+            preset_fields.append(f"flexible: {'Yes' if attendance['is_flexible'] else 'No'}")
+
+    db.commit()
+
+    response = {
+        "message": "Attendance updated",
+        "days_worked": payslip.days_worked,
+        "days_absent": payslip.days_absent,
+        "late_count": payslip.late_count,
+        "total_late_minutes": payslip.total_late_minutes,
+        "overtime_hours": float(payslip.overtime_hours) if payslip.overtime_hours else 0,
+        "total_deductions": float(payslip.total_deductions or 0),
+        "net_pay": float(payslip.net_pay or 0)
+    }
+
+    if preset_saved:
+        response["preset_saved"] = True
+        response["preset_message"] = f"Defaults saved for future payrolls: {', '.join(preset_fields)}"
+
+    return response
 
 
 @router.delete("/payslips/{payslip_id}")
@@ -1020,6 +1355,87 @@ async def update_payroll_settings(
     db.commit()
     db.refresh(settings)
     return PayrollSettingsResponse.model_validate(settings)
+
+
+@router.post("/settings/apply-to-all")
+async def apply_settings_to_all_employees(
+    confirmation_code: str = Query(..., description="Must be 'WeCanInICAN!' to confirm"),
+    apply_basic_salary: bool = Query(False),
+    apply_sss: bool = Query(False),
+    apply_philhealth: bool = Query(False),
+    apply_pagibig: bool = Query(False),
+    apply_tax: bool = Query(False),
+    current_admin: User = Depends(get_current_admin),
+    db: Session = Depends(get_db)
+):
+    """
+    Apply payroll settings to ALL employees.
+    Requires confirmation code 'WeCanInICAN!' to prevent accidental changes.
+    """
+    # Verify confirmation code
+    if confirmation_code != "WeCanInICAN!":
+        raise HTTPException(status_code=400, detail="Invalid confirmation code. Type 'WeCanInICAN!' to confirm.")
+
+    # Get current settings
+    settings = db.query(PayrollSettings).first()
+    if not settings:
+        raise HTTPException(status_code=404, detail="Payroll settings not found")
+
+    # Get all active employees
+    employees = db.query(Employee).filter(Employee.is_active == True).all()
+
+    updated_fields = []
+    updated_count = 0
+
+    for emp in employees:
+        changed = False
+
+        if apply_basic_salary and settings.default_basic_salary:
+            emp.basic_salary = settings.default_basic_salary
+            # Also calculate daily and hourly rates
+            daily_rate = float(settings.default_basic_salary) * 12 / 261
+            emp.daily_rate = daily_rate
+            emp.hourly_rate = daily_rate / 8
+            changed = True
+
+        if apply_sss and settings.default_sss is not None:
+            emp.sss_contribution = settings.default_sss
+            changed = True
+
+        if apply_philhealth and settings.default_philhealth is not None:
+            emp.philhealth_contribution = settings.default_philhealth
+            changed = True
+
+        if apply_pagibig and settings.default_pagibig is not None:
+            emp.pagibig_contribution = settings.default_pagibig
+            changed = True
+
+        if apply_tax and settings.default_tax is not None:
+            emp.tax_amount = settings.default_tax
+            changed = True
+
+        if changed:
+            updated_count += 1
+
+    if apply_basic_salary:
+        updated_fields.append(f"Basic Salary: ₱{float(settings.default_basic_salary or 0):,.2f}")
+    if apply_sss:
+        updated_fields.append(f"SSS: ₱{float(settings.default_sss or 0):,.2f}")
+    if apply_philhealth:
+        updated_fields.append(f"PhilHealth: ₱{float(settings.default_philhealth or 0):,.2f}")
+    if apply_pagibig:
+        updated_fields.append(f"Pag-IBIG: ₱{float(settings.default_pagibig or 0):,.2f}")
+    if apply_tax:
+        updated_fields.append(f"Tax: ₱{float(settings.default_tax or 0):,.2f}")
+
+    db.commit()
+
+    return {
+        "success": True,
+        "message": f"Updated {updated_count} employees",
+        "updated_count": updated_count,
+        "fields_applied": updated_fields
+    }
 
 
 # === 13th Month Pay ===
@@ -1439,10 +1855,8 @@ async def download_payslip_pdf(
     # Generate PDF
     pdf_bytes = generate_payslip_pdf(payslip, company_name)
 
-    # Create filename
-    employee_name = payslip.employee.full_name.replace(' ', '_') if payslip.employee else 'unknown'
-    period = f"{payslip.payroll_run.period_start.strftime('%Y%m%d')}" if payslip.payroll_run else 'unknown'
-    filename = f"payslip_{employee_name}_{period}.pdf"
+    # Create coded filename
+    filename = generate_coded_filename(payslip, "pdf")
 
     return StreamingResponse(
         io.BytesIO(pdf_bytes),
@@ -1749,8 +2163,8 @@ async def download_payslip_png(
 
     png_bytes = generate_payslip_png(payslip, company_name)
 
-    employee_name = payslip.employee.full_name.replace(' ', '_') if payslip.employee else 'unknown'
-    filename = f"payslip_{employee_name}.png"
+    # Create coded filename
+    filename = generate_coded_filename(payslip, "png")
 
     return StreamingResponse(
         io.BytesIO(png_bytes),
@@ -1791,8 +2205,8 @@ async def download_payslips_sheet(
 
     png_bytes = generate_payslips_sheet(payslips, company_name)
 
-    period = payroll_run.period_start.strftime('%Y%m%d')
-    filename = f"payslips_{period}_page{page}.png"
+    # Create coded filename
+    filename = generate_coded_sheet_filename(payroll_run, page)
 
     return StreamingResponse(
         io.BytesIO(png_bytes),
@@ -2074,8 +2488,17 @@ async def download_thirteenth_month_pdf(
     doc.build(elements)
     buffer.seek(0)
 
-    employee_name = record.employee.full_name.replace(' ', '_') if record.employee else 'unknown'
-    filename = f"13th_month_{employee_name}_{record.year}.pdf"
+    # Create coded filename for 13th month
+    if record.employee:
+        names = record.employee.full_name.split()
+        initials = ''.join(n[0].upper() for n in names if n)[:3]
+        emp_no = record.employee.employee_no or "00"
+        emp_short = ''.join(filter(str.isdigit, emp_no))[-2:] or "00"
+    else:
+        initials = "XX"
+        emp_short = "00"
+    year_short = str(record.year)[-2:]
+    filename = f"BONUS-{initials}{emp_short}-{year_short}.pdf"
 
     return StreamingResponse(
         io.BytesIO(buffer.getvalue()),

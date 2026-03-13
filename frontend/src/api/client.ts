@@ -277,6 +277,17 @@ export const payrollApi = {
     return response.data;
   },
 
+  recalculateRun: async (runId: number): Promise<{
+    message: string;
+    updated_count: number;
+    total_gross: number;
+    total_deductions: number;
+    total_net: number;
+  }> => {
+    const response = await api.post(`/payroll/runs/${runId}/recalculate`);
+    return response.data;
+  },
+
   // Payslips
   listPayslips: async (params?: {
     page?: number;
@@ -342,6 +353,11 @@ export const payrollApi = {
     return response.data;
   },
 
+  updatePayslipAttendance: async (id: number, attendance: { days_worked?: number; days_absent?: number; late_count?: number; total_late_minutes?: number; overtime_hours?: number; recalculate_deductions?: boolean }): Promise<{ message: string; days_worked: number; days_absent: number; total_deductions: number; net_pay: number; preset_saved?: boolean; preset_message?: string }> => {
+    const response = await api.patch(`/payroll/payslips/${id}/attendance`, attendance);
+    return response.data;
+  },
+
   // Deduction configs
   listDeductions: async (): Promise<{ id: number; code: string; name: string; is_enabled: boolean }[]> => {
     const response = await api.get('/payroll/deductions');
@@ -372,6 +388,7 @@ export const payrollApi = {
   },
 
   updateSettings: async (data: Partial<{
+    default_basic_salary: number;
     absent_rate_per_day: number;
     late_rate_per_minute: number;
     late_rate_per_incident: number;
@@ -389,6 +406,30 @@ export const payrollApi = {
     work_days_per_month: number;
   }>): Promise<{ message: string }> => {
     const response = await api.patch('/payroll/settings', data);
+    return response.data;
+  },
+
+  applySettingsToAll: async (
+    confirmationCode: string,
+    options: {
+      apply_basic_salary?: boolean;
+      apply_sss?: boolean;
+      apply_philhealth?: boolean;
+      apply_pagibig?: boolean;
+      apply_tax?: boolean;
+    }
+  ): Promise<{
+    success: boolean;
+    message: string;
+    updated_count: number;
+    fields_applied: string[];
+  }> => {
+    const response = await api.post('/payroll/settings/apply-to-all', null, {
+      params: {
+        confirmation_code: confirmationCode,
+        ...options,
+      },
+    });
     return response.data;
   },
 
@@ -436,15 +477,20 @@ export const payrollApi = {
     return response.data;
   },
 
-  // PDF Downloads
+  // PDF Downloads - uses coded filenames from server
   downloadPayslipPdf: async (payslipId: number): Promise<void> => {
     const response = await api.get(`/payroll/payslips/${payslipId}/pdf`, {
       responseType: 'blob',
     });
+    // Extract filename from Content-Disposition header
+    const contentDisposition = response.headers['content-disposition'];
+    const filenameMatch = contentDisposition?.match(/filename=(.+)/);
+    const filename = filenameMatch ? filenameMatch[1] : `REC-${payslipId}.pdf`;
+
     const url = window.URL.createObjectURL(new Blob([response.data]));
     const link = document.createElement('a');
     link.href = url;
-    link.setAttribute('download', `payslip_${payslipId}.pdf`);
+    link.setAttribute('download', filename);
     document.body.appendChild(link);
     link.click();
     link.remove();
@@ -455,10 +501,15 @@ export const payrollApi = {
     const response = await api.get(`/payroll/payslips/${payslipId}/png`, {
       responseType: 'blob',
     });
+    // Extract filename from Content-Disposition header
+    const contentDisposition = response.headers['content-disposition'];
+    const filenameMatch = contentDisposition?.match(/filename=(.+)/);
+    const filename = filenameMatch ? filenameMatch[1] : `REC-${payslipId}.png`;
+
     const url = window.URL.createObjectURL(new Blob([response.data]));
     const link = document.createElement('a');
     link.href = url;
-    link.setAttribute('download', `payslip_${payslipId}.png`);
+    link.setAttribute('download', filename);
     document.body.appendChild(link);
     link.click();
     link.remove();
@@ -475,10 +526,15 @@ export const payrollApi = {
       params: { page },
       responseType: 'blob',
     });
+    // Extract filename from Content-Disposition header
+    const contentDisposition = response.headers['content-disposition'];
+    const filenameMatch = contentDisposition?.match(/filename=(.+)/);
+    const filename = filenameMatch ? filenameMatch[1] : `BATCH-P${page}.png`;
+
     const url = window.URL.createObjectURL(new Blob([response.data]));
     const link = document.createElement('a');
     link.href = url;
-    link.setAttribute('download', `payslips_sheet_page${page}.png`);
+    link.setAttribute('download', filename);
     document.body.appendChild(link);
     link.click();
     link.remove();
@@ -489,10 +545,15 @@ export const payrollApi = {
     const response = await api.get(`/payroll/13th-month/${recordId}/pdf`, {
       responseType: 'blob',
     });
+    // Extract filename from Content-Disposition header
+    const contentDisposition = response.headers['content-disposition'];
+    const filenameMatch = contentDisposition?.match(/filename=(.+)/);
+    const filename = filenameMatch ? filenameMatch[1] : `BONUS-${recordId}.pdf`;
+
     const url = window.URL.createObjectURL(new Blob([response.data]));
     const link = document.createElement('a');
     link.href = url;
-    link.setAttribute('download', `13th_month_${recordId}.pdf`);
+    link.setAttribute('download', filename);
     document.body.appendChild(link);
     link.click();
     link.remove();

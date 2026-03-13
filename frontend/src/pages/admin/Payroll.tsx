@@ -5,6 +5,7 @@ import dayjs from 'dayjs';
 
 interface PayrollSettings {
   id: number;
+  default_basic_salary?: number;
   absent_rate_per_day: number;
   late_rate_per_minute: number;
   late_rate_per_incident: number;
@@ -30,28 +31,10 @@ interface PayslipData {
   employee_no: string;
   period_start: string;
   period_end: string;
-  earnings: {
-    basic_semi: number;
-    allowance_semi: number;
-    productivity_incentive_semi: number;
-    language_incentive_semi: number;
-    regular_holiday: number;
-    regular_holiday_ot: number;
-    snwh: number;
-    snwh_ot: number;
-    overtime: number;
-    absent_deduction: number;
-    late_deduction: number;
-    [key: string]: number;
-  };
-  deductions: {
-    sss: number;
-    philhealth: number;
-    pagibig: number;
-    tax: number;
-    loans: number;
-    [key: string]: number;
-  };
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  earnings: Record<string, any>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  deductions: Record<string, any>;
   total_earnings: number;
   total_deductions: number;
   net_pay: number;
@@ -134,13 +117,6 @@ export function PayrollPage() {
   const [showEditModal, setShowEditModal] = useState(false);
   const [showConfirmModal, setShowConfirmModal] = useState<{ type: 'edit' | 'delete'; run: PayrollRun } | null>(null);
   const [confirmReason, setConfirmReason] = useState('');
-  const [reasonValidation, setReasonValidation] = useState<{
-    is_valid: boolean;
-    valid_words: number;
-    invalid_words: number;
-    invalid_word_list: string[];
-  } | null>(null);
-  const [validatingReason, setValidatingReason] = useState(false);
   const [editingRunId, setEditingRunId] = useState<number | null>(null);
 
   // Trash state
@@ -153,6 +129,7 @@ export function PayrollPage() {
   const [newPeriod, setNewPeriod] = useState({ start: '', end: '', cutoff: 1 });
   const [creating, setCreating] = useState(false);
   const [processing, setProcessing] = useState<number | null>(null);
+  const [recalculating, setRecalculating] = useState<number | null>(null);
 
   // Search, sort, filter for payroll runs
   const [runSearch, setRunSearch] = useState('');
@@ -175,6 +152,7 @@ export function PayrollPage() {
   const [editMode, setEditMode] = useState(false);
   const [editEarnings, setEditEarnings] = useState<Record<string, number>>({});
   const [editDeductions, setEditDeductions] = useState<Record<string, number>>({});
+  const [editAttendance, setEditAttendance] = useState<{ days_worked?: number; days_absent?: number; late_count?: number; total_late_minutes?: number; overtime_hours?: number; work_hours_per_day?: number; call_time?: string; buffer_minutes?: number; is_flexible?: boolean; recalculate_deductions?: boolean }>({});
   const [saving, setSaving] = useState(false);
 
   // Payroll Settings
@@ -182,6 +160,18 @@ export function PayrollPage() {
   const [loadingSettings, setLoadingSettings] = useState(false);
   const [savingSettings, setSavingSettings] = useState(false);
   const [editSettings, setEditSettings] = useState<Partial<PayrollSettings>>({});
+
+  // Apply to All modal
+  const [showApplyToAllModal, setShowApplyToAllModal] = useState(false);
+  const [applyToAllConfirmation, setApplyToAllConfirmation] = useState('');
+  const [applyToAllOptions, setApplyToAllOptions] = useState({
+    apply_basic_salary: true,
+    apply_sss: false,
+    apply_philhealth: false,
+    apply_pagibig: false,
+    apply_tax: false,
+  });
+  const [applyingToAll, setApplyingToAll] = useState(false);
 
   useEffect(() => {
     loadPayrollRuns();
@@ -265,37 +255,6 @@ export function PayrollPage() {
       setPermanentlyDeletingId(null);
     }
   };
-
-  const validateReasonText = async (text: string) => {
-    if (!text || text.length < 100) {
-      setReasonValidation(null);
-      return;
-    }
-    setValidatingReason(true);
-    try {
-      const result = await payrollRunsApi.validateReason(text);
-      setReasonValidation({
-        is_valid: result.is_valid,
-        valid_words: result.stats.valid_words,
-        invalid_words: result.stats.invalid_words,
-        invalid_word_list: result.stats.invalid_word_list || [],
-      });
-    } catch (error) {
-      console.error('Failed to validate reason:', error);
-    } finally {
-      setValidatingReason(false);
-    }
-  };
-
-  // Debounce reason validation
-  useEffect(() => {
-    if (showConfirmModal?.type === 'delete' && confirmReason) {
-      const timer = setTimeout(() => {
-        validateReasonText(confirmReason);
-      }, 500);
-      return () => clearTimeout(timer);
-    }
-  }, [confirmReason, showConfirmModal]);
 
   const load13thMonth = async () => {
     setLoading13thMonth(true);
@@ -474,6 +433,25 @@ export function PayrollPage() {
     }
   };
 
+  const handleApplyToAll = async () => {
+    if (applyToAllConfirmation !== 'WeCanInICAN!') {
+      alert('Please type "WeCanInICAN!" to confirm');
+      return;
+    }
+
+    setApplyingToAll(true);
+    try {
+      const result = await payrollApi.applySettingsToAll(applyToAllConfirmation, applyToAllOptions);
+      alert(`Success! ${result.message}\n\nFields updated:\n${result.fields_applied.join('\n')}`);
+      setShowApplyToAllModal(false);
+      setApplyToAllConfirmation('');
+    } catch (error: any) {
+      alert(error.response?.data?.detail || 'Failed to apply settings to all employees');
+    } finally {
+      setApplyingToAll(false);
+    }
+  };
+
   const loadPayslips = async (runId: number) => {
     setLoadingPayslips(true);
     try {
@@ -521,6 +499,25 @@ export function PayrollPage() {
       alert(error.response?.data?.detail || 'Failed to process payroll');
     } finally {
       setProcessing(null);
+    }
+  };
+
+  const handleRecalculate = async (runId: number) => {
+    if (!confirm('Recalculate all payslips using current employee salaries? This will update all earnings and deductions.')) {
+      return;
+    }
+    setRecalculating(runId);
+    try {
+      const result = await payrollApi.recalculateRun(runId);
+      alert(`Payroll recalculated! ${result.updated_count} payslips updated.`);
+      loadPayrollRuns();
+      if (selectedRun?.id === runId) {
+        loadPayslips(runId);
+      }
+    } catch (error: any) {
+      alert(error.response?.data?.detail || 'Failed to recalculate payroll');
+    } finally {
+      setRecalculating(null);
     }
   };
 
@@ -592,22 +589,20 @@ export function PayrollPage() {
   };
 
   const handleDeleteRun = async (run: PayrollRun) => {
-    // All deletions now require 100-word reason and go through the confirmation modal
+    // Show confirmation modal for deletion
     setShowConfirmModal({ type: 'delete', run });
     setConfirmReason('');
-    setReasonValidation(null);
   };
 
   const handleConfirmDelete = async () => {
     if (!showConfirmModal || showConfirmModal.type !== 'delete') return;
-    if (!reasonValidation?.is_valid) {
-      alert('Please provide a valid deletion reason (minimum 100 English words).');
+    if (!confirmReason.trim()) {
+      alert('Please provide a deletion reason.');
       return;
     }
     await executeDeleteRun(showConfirmModal.run.id, true, confirmReason);
     setShowConfirmModal(null);
     setConfirmReason('');
-    setReasonValidation(null);
   };
 
   const executeDeleteRun = async (runId: number, force: boolean, reason: string) => {
@@ -660,8 +655,21 @@ export function PayrollPage() {
 
   const handleEditPayslip = () => {
     if (!selectedPayslip) return;
+    const empSettings = (selectedPayslip as any).employee_settings || {};
     setEditEarnings({ ...selectedPayslip.earnings });
     setEditDeductions({ ...selectedPayslip.deductions });
+    setEditAttendance({
+      days_worked: selectedPayslip.days_worked,
+      days_absent: selectedPayslip.days_absent,
+      late_count: selectedPayslip.late_count,
+      total_late_minutes: selectedPayslip.total_late_minutes,
+      overtime_hours: selectedPayslip.overtime_hours,
+      work_hours_per_day: empSettings.work_hours_per_day || selectedPayslip.deductions?.work_hours_per_day_used || 8,
+      call_time: empSettings.call_time || "08:00",
+      buffer_minutes: empSettings.buffer_minutes ?? 10,
+      is_flexible: empSettings.is_flexible || false,
+      recalculate_deductions: false,
+    });
     setEditMode(true);
   };
 
@@ -669,21 +677,72 @@ export function PayrollPage() {
     if (!selectedPayslip) return;
     setSaving(true);
     try {
+      // Update attendance first (may recalculate deductions)
+      const hasAttendanceChanges =
+        editAttendance.days_worked !== selectedPayslip.days_worked ||
+        editAttendance.days_absent !== selectedPayslip.days_absent ||
+        editAttendance.late_count !== selectedPayslip.late_count ||
+        editAttendance.total_late_minutes !== selectedPayslip.total_late_minutes ||
+        editAttendance.overtime_hours !== selectedPayslip.overtime_hours ||
+        editAttendance.work_hours_per_day !== (selectedPayslip.deductions?.work_hours_per_day_used || 8);
+
+      let updatedPayslip = { ...selectedPayslip };
+      let presetMessage = '';
+
+      // Always recalculate deductions when days_absent, late_minutes, or work_hours change
+      const shouldRecalculate =
+        editAttendance.days_absent !== selectedPayslip.days_absent ||
+        editAttendance.total_late_minutes !== selectedPayslip.total_late_minutes ||
+        editAttendance.work_hours_per_day !== (selectedPayslip.deductions?.work_hours_per_day_used || 8);
+
+      if (hasAttendanceChanges) {
+        const attendanceData = {
+          ...editAttendance,
+          recalculate_deductions: shouldRecalculate
+        };
+
+        const attendanceResult = await payrollApi.updatePayslipAttendance(selectedPayslip.id, attendanceData) as any;
+        updatedPayslip.days_worked = attendanceResult.days_worked;
+        updatedPayslip.days_absent = attendanceResult.days_absent;
+        updatedPayslip.total_late_minutes = attendanceResult.total_late_minutes;
+        if (shouldRecalculate) {
+          updatedPayslip.total_deductions = attendanceResult.total_deductions;
+          updatedPayslip.net_pay = attendanceResult.net_pay;
+        }
+        // Check if preset was saved
+        if (attendanceResult.preset_saved) {
+          presetMessage = attendanceResult.preset_message || `Default days saved as ${editAttendance.days_worked} for future payrolls`;
+        }
+      }
+
       // Update earnings
-      const earningsResult = await payrollApi.updatePayslipEarnings(selectedPayslip.id, editEarnings);
+      await payrollApi.updatePayslipEarnings(selectedPayslip.id, editEarnings);
 
-      // Update deductions
-      const deductionsResult = await payrollApi.updatePayslipDeductions(selectedPayslip.id, editDeductions);
+      // Update all deductions (government + attendance-based)
+      // Calculate amounts from rates × days/minutes
+      const daysAbsent = editAttendance.days_absent ?? selectedPayslip.days_absent ?? 0;
+      const lateMinutes = editAttendance.total_late_minutes ?? selectedPayslip.total_late_minutes ?? 0;
+      const dailyRate = editDeductions.absences_daily_rate_used ?? selectedPayslip.deductions?.absences_daily_rate_used ?? 0;
+      const minuteRate = editDeductions.late_minute_rate_used ?? selectedPayslip.deductions?.late_minute_rate_used ?? 0;
 
-      // Update local state
-      setSelectedPayslip({
-        ...selectedPayslip,
-        earnings: editEarnings as any,
-        deductions: editDeductions as any,
-        total_earnings: earningsResult.total_earnings,
-        total_deductions: deductionsResult.total_deductions,
-        net_pay: deductionsResult.net_pay,
-      });
+      const allDeductions = {
+        sss: editDeductions.sss ?? 0,
+        philhealth: editDeductions.philhealth ?? 0,
+        pagibig: editDeductions.pagibig ?? 0,
+        tax: editDeductions.tax ?? 0,
+        loans: editDeductions.loans ?? 0,
+        absences_daily_rate_used: dailyRate,
+        late_minute_rate_used: minuteRate,
+        absences_amount: daysAbsent * dailyRate,
+        late_amount: lateMinutes * minuteRate,
+      };
+      await payrollApi.updatePayslipDeductions(selectedPayslip.id, allDeductions);
+
+      // Reload the payslip to get fresh data from server
+      const freshPayslip = await payrollApi.getPayslip(selectedPayslip.id) as PayslipData;
+
+      // Update local state with fresh data
+      setSelectedPayslip(freshPayslip);
 
       // Reload payslips list
       if (selectedRun) {
@@ -691,7 +750,11 @@ export function PayrollPage() {
       }
 
       setEditMode(false);
-      alert('Payslip updated successfully!');
+      if (presetMessage) {
+        alert(`Payslip updated!\n\n${presetMessage}`);
+      } else {
+        alert('Payslip updated successfully!');
+      }
     } catch (error: any) {
       alert(error.response?.data?.detail || 'Failed to update payslip');
     } finally {
@@ -703,6 +766,7 @@ export function PayrollPage() {
     setEditMode(false);
     setEditEarnings({});
     setEditDeductions({});
+    setEditAttendance({});
   };
 
   const formatCurrency = (amount: number) => {
@@ -916,27 +980,165 @@ export function PayrollPage() {
           </div>
 
           {/* Attendance Summary */}
-          <div className="grid grid-cols-5 gap-4 mb-6">
-            <div className="text-center p-3 bg-gray-50 rounded">
-              <p className="text-2xl font-bold text-blue-600">{selectedPayslip.days_worked}</p>
-              <p className="text-xs text-gray-500">Days Worked</p>
+          <div className="mb-6">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="font-semibold text-gray-900 flex items-center gap-2">
+                <span className="w-3 h-3 bg-blue-500 rounded-full"></span>
+                Attendance
+              </h3>
+              {editMode && (
+                <span className="text-xs text-blue-600 bg-blue-50 px-2 py-1 rounded">
+                  Tip: Adjust days for partial schedules
+                </span>
+              )}
             </div>
-            <div className="text-center p-3 bg-gray-50 rounded">
-              <p className="text-2xl font-bold text-red-600">{selectedPayslip.days_absent}</p>
-              <p className="text-xs text-gray-500">Days Absent</p>
+            <div className="grid grid-cols-6 gap-3">
+              <div className="text-center p-3 bg-gray-50 rounded">
+                {editMode ? (
+                  <>
+                    <input
+                      type="number"
+                      step="1"
+                      min="0"
+                      value={editAttendance.days_worked ?? selectedPayslip.days_worked}
+                      onChange={(e) => setEditAttendance({ ...editAttendance, days_worked: parseInt(e.target.value) || 0 })}
+                      className="w-full h-10 text-center text-lg font-bold text-blue-600 bg-white border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    />
+                    <p className="text-xs text-gray-500 mt-1">Days Worked</p>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-2xl font-bold text-blue-600">{selectedPayslip.days_worked}</p>
+                    <p className="text-xs text-gray-500">Days Worked</p>
+                  </>
+                )}
+              </div>
+              <div className="text-center p-3 bg-gray-50 rounded">
+                {editMode ? (
+                  <>
+                    <input
+                      type="number"
+                      step="1"
+                      min="1"
+                      max="12"
+                      value={editAttendance.work_hours_per_day ?? selectedPayslip.deductions?.work_hours_per_day_used ?? 8}
+                      onChange={(e) => setEditAttendance({ ...editAttendance, work_hours_per_day: parseFloat(e.target.value) || 8, recalculate_deductions: true })}
+                      className="w-full h-10 text-center text-lg font-bold text-purple-600 bg-white border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+                    />
+                    <p className="text-xs text-gray-500 mt-1">Work Hrs/Day</p>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-2xl font-bold text-purple-600">{selectedPayslip.deductions?.work_hours_per_day_used || 8}</p>
+                    <p className="text-xs text-gray-500">Work Hrs/Day</p>
+                  </>
+                )}
+              </div>
+              <div className="text-center p-3 bg-gray-50 rounded">
+                {editMode ? (
+                  <>
+                    <input
+                      type="number"
+                      step="1"
+                      min="0"
+                      value={editAttendance.days_absent ?? selectedPayslip.days_absent}
+                      onChange={(e) => setEditAttendance({ ...editAttendance, days_absent: parseInt(e.target.value) || 0, recalculate_deductions: true })}
+                      className="w-full h-12 text-center text-xl font-bold text-red-600 bg-white border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500"
+                    />
+                    <p className="text-xs text-gray-500 mt-1">Days Absent</p>
+                    {selectedPayslip.deductions?.absences_daily_rate_used > 0 && (
+                      <p className="text-xs text-red-600 font-medium mt-1">
+                        = {formatCurrency((editAttendance.days_absent ?? selectedPayslip.days_absent ?? 0) * selectedPayslip.deductions.absences_daily_rate_used)}
+                      </p>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <p className="text-2xl font-bold text-red-600">{selectedPayslip.days_absent}</p>
+                    <p className="text-xs text-gray-500">Days Absent</p>
+                  </>
+                )}
+              </div>
+              <div className="text-center p-3 bg-gray-50 rounded">
+                {editMode ? (
+                  <>
+                    <input
+                      type="number"
+                      step="1"
+                      min="0"
+                      value={editAttendance.late_count ?? selectedPayslip.late_count}
+                      onChange={(e) => setEditAttendance({ ...editAttendance, late_count: parseInt(e.target.value) || 0 })}
+                      className="w-full h-12 text-center text-xl font-bold text-orange-600 bg-white border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                    />
+                    <p className="text-xs text-gray-500 mt-1">Late Count</p>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-2xl font-bold text-orange-600">{selectedPayslip.late_count}</p>
+                    <p className="text-xs text-gray-500">Late Count</p>
+                  </>
+                )}
+              </div>
+              <div className="text-center p-3 bg-gray-50 rounded">
+                {editMode ? (
+                  <>
+                    <input
+                      type="number"
+                      step="1"
+                      min="0"
+                      value={editAttendance.total_late_minutes ?? selectedPayslip.total_late_minutes}
+                      onChange={(e) => setEditAttendance({ ...editAttendance, total_late_minutes: parseInt(e.target.value) || 0, recalculate_deductions: true })}
+                      className="w-full h-12 text-center text-xl font-bold text-orange-600 bg-white border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+                    />
+                    <p className="text-xs text-gray-500 mt-1">Late Mins</p>
+                    {selectedPayslip.deductions?.late_minute_rate_used > 0 && (
+                      <p className="text-xs text-red-600 font-medium mt-1">
+                        = {formatCurrency((editAttendance.total_late_minutes ?? selectedPayslip.total_late_minutes ?? 0) * selectedPayslip.deductions.late_minute_rate_used)}
+                      </p>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <p className="text-2xl font-bold text-orange-600">{selectedPayslip.total_late_minutes}</p>
+                    <p className="text-xs text-gray-500">Late Mins</p>
+                  </>
+                )}
+              </div>
+              <div className="text-center p-3 bg-gray-50 rounded">
+                {editMode ? (
+                  <>
+                    <input
+                      type="number"
+                      step="0.5"
+                      min="0"
+                      value={editAttendance.overtime_hours ?? selectedPayslip.overtime_hours}
+                      onChange={(e) => setEditAttendance({ ...editAttendance, overtime_hours: parseFloat(e.target.value) || 0 })}
+                      className="w-full h-12 text-center text-xl font-bold text-green-600 bg-white border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500"
+                    />
+                    <p className="text-xs text-gray-500 mt-1">OT Hours</p>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-2xl font-bold text-green-600">{selectedPayslip.overtime_hours}</p>
+                    <p className="text-xs text-gray-500">OT Hours</p>
+                  </>
+                )}
+              </div>
             </div>
-            <div className="text-center p-3 bg-gray-50 rounded">
-              <p className="text-2xl font-bold text-orange-600">{selectedPayslip.late_count}</p>
-              <p className="text-xs text-gray-500">Late Count</p>
-            </div>
-            <div className="text-center p-3 bg-gray-50 rounded">
-              <p className="text-2xl font-bold text-orange-600">{selectedPayslip.total_late_minutes}</p>
-              <p className="text-xs text-gray-500">Late Mins</p>
-            </div>
-            <div className="text-center p-3 bg-gray-50 rounded">
-              <p className="text-2xl font-bold text-green-600">{selectedPayslip.overtime_hours}</p>
-              <p className="text-xs text-gray-500">OT Hours</p>
-            </div>
+            {/* ICAN Formula Reference */}
+            {editMode && selectedPayslip.deductions?.absences_daily_rate_used > 0 && (
+              <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                <p className="text-xs font-semibold text-blue-800 mb-2">ICAN Deduction Formula</p>
+                <div className="text-xs text-blue-700 space-y-1">
+                  <p>
+                    <span className="font-medium">Daily Rate:</span> {formatCurrency(selectedPayslip.earnings?._calculation_info?.monthly_basic || 0)} × 12 ÷ 261 = <span className="font-bold">{formatCurrency(selectedPayslip.deductions.absences_daily_rate_used)}</span>
+                  </p>
+                  <p>
+                    <span className="font-medium">Minute Rate:</span> {formatCurrency(selectedPayslip.deductions.absences_daily_rate_used)} ÷ {selectedPayslip.earnings?._calculation_info?.work_hours_per_day || 8}hrs ÷ 60 = <span className="font-bold">{formatCurrency(selectedPayslip.deductions.late_minute_rate_used || 0)}</span>
+                  </p>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Earnings & Deductions */}
@@ -950,115 +1152,124 @@ export function PayrollPage() {
               <div className="space-y-2">
                 {editMode ? (
                   <>
-                    <div className="flex justify-between items-center">
-                      <span className="text-gray-600">Basic (Semi)</span>
-                      <input
-                        type="number"
-                        step="0.01"
-                        value={editEarnings.basic_semi || 0}
-                        onChange={(e) => setEditEarnings({ ...editEarnings, basic_semi: parseFloat(e.target.value) || 0 })}
-                        className="w-32 form-input text-right"
-                      />
+                    {/* Regular Earnings - Compact Grid */}
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="flex justify-between items-center">
+                        <span className="text-gray-600 text-sm">Basic</span>
+                        <input type="number" step="0.01" value={editEarnings.basic_semi || 0}
+                          onChange={(e) => {
+                            const newBasicSemi = parseFloat(e.target.value) || 0;
+                            const monthlyBasic = newBasicSemi * 2;
+                            const dailyRate = (monthlyBasic * 12) / 261;
+                            const workHours = editAttendance.work_hours_per_day || 8;
+                            const minuteRate = dailyRate / workHours / 60;
+                            setEditEarnings({ ...editEarnings, basic_semi: newBasicSemi });
+                            setEditDeductions({ ...editDeductions, absences_daily_rate_used: Math.round(dailyRate * 100) / 100, late_minute_rate_used: Math.round(minuteRate * 100) / 100 });
+                          }}
+                          className="w-24 px-2 py-1 border border-gray-300 rounded text-right text-sm" />
+                      </div>
+                      <div className="flex justify-between items-center">
+                        <span className="text-gray-600 text-sm">Allowance</span>
+                        <input type="number" step="0.01" value={editEarnings.allowance_semi || 0}
+                          onChange={(e) => setEditEarnings({ ...editEarnings, allowance_semi: parseFloat(e.target.value) || 0 })}
+                          className="w-24 px-2 py-1 border border-gray-300 rounded text-right text-sm" />
+                      </div>
+                      <div className="flex justify-between items-center">
+                        <span className="text-gray-600 text-sm">Productivity</span>
+                        <input type="number" step="0.01" value={editEarnings.productivity_incentive_semi || 0}
+                          onChange={(e) => setEditEarnings({ ...editEarnings, productivity_incentive_semi: parseFloat(e.target.value) || 0 })}
+                          className="w-24 px-2 py-1 border border-gray-300 rounded text-right text-sm" />
+                      </div>
+                      <div className="flex justify-between items-center">
+                        <span className="text-gray-600 text-sm">Language</span>
+                        <input type="number" step="0.01" value={editEarnings.language_incentive_semi || 0}
+                          onChange={(e) => setEditEarnings({ ...editEarnings, language_incentive_semi: parseFloat(e.target.value) || 0 })}
+                          className="w-24 px-2 py-1 border border-gray-300 rounded text-right text-sm" />
+                      </div>
                     </div>
-                    <div className="flex justify-between items-center">
-                      <span className="text-gray-600">Allowance (Semi)</span>
-                      <input
-                        type="number"
-                        step="0.01"
-                        value={editEarnings.allowance_semi || 0}
-                        onChange={(e) => setEditEarnings({ ...editEarnings, allowance_semi: parseFloat(e.target.value) || 0 })}
-                        className="w-32 form-input text-right"
-                      />
-                    </div>
-                    <div className="flex justify-between items-center">
-                      <span className="text-gray-600">Productivity (Semi)</span>
-                      <input
-                        type="number"
-                        step="0.01"
-                        value={editEarnings.productivity_incentive_semi || 0}
-                        onChange={(e) => setEditEarnings({ ...editEarnings, productivity_incentive_semi: parseFloat(e.target.value) || 0 })}
-                        className="w-32 form-input text-right"
-                      />
-                    </div>
-                    <div className="flex justify-between items-center">
-                      <span className="text-gray-600">Language (Semi)</span>
-                      <input
-                        type="number"
-                        step="0.01"
-                        value={editEarnings.language_incentive_semi || 0}
-                        onChange={(e) => setEditEarnings({ ...editEarnings, language_incentive_semi: parseFloat(e.target.value) || 0 })}
-                        className="w-32 form-input text-right"
-                      />
-                    </div>
-                    <div className="flex justify-between items-center">
-                      <span className="text-gray-600">Regular Holiday</span>
-                      <input
-                        type="number"
-                        step="0.01"
-                        value={editEarnings.regular_holiday || 0}
-                        onChange={(e) => setEditEarnings({ ...editEarnings, regular_holiday: parseFloat(e.target.value) || 0 })}
-                        className="w-32 form-input text-right"
-                      />
-                    </div>
-                    <div className="flex justify-between items-center">
-                      <span className="text-gray-600">Regular Holiday OT</span>
-                      <input
-                        type="number"
-                        step="0.01"
-                        value={editEarnings.regular_holiday_ot || 0}
-                        onChange={(e) => setEditEarnings({ ...editEarnings, regular_holiday_ot: parseFloat(e.target.value) || 0 })}
-                        className="w-32 form-input text-right"
-                      />
-                    </div>
-                    <div className="flex justify-between items-center">
-                      <span className="text-gray-600">SNWH</span>
-                      <input
-                        type="number"
-                        step="0.01"
-                        value={editEarnings.snwh || 0}
-                        onChange={(e) => setEditEarnings({ ...editEarnings, snwh: parseFloat(e.target.value) || 0 })}
-                        className="w-32 form-input text-right"
-                      />
-                    </div>
-                    <div className="flex justify-between items-center">
-                      <span className="text-gray-600">SNWH OT</span>
-                      <input
-                        type="number"
-                        step="0.01"
-                        value={editEarnings.snwh_ot || 0}
-                        onChange={(e) => setEditEarnings({ ...editEarnings, snwh_ot: parseFloat(e.target.value) || 0 })}
-                        className="w-32 form-input text-right"
-                      />
-                    </div>
-                    <div className="flex justify-between items-center">
-                      <span className="text-gray-600">Overtime</span>
-                      <input
-                        type="number"
-                        step="0.01"
-                        value={editEarnings.overtime || 0}
-                        onChange={(e) => setEditEarnings({ ...editEarnings, overtime: parseFloat(e.target.value) || 0 })}
-                        className="w-32 form-input text-right"
-                      />
-                    </div>
-                    <div className="flex justify-between items-center text-red-600">
-                      <span>Absent Deduction</span>
-                      <input
-                        type="number"
-                        step="0.01"
-                        value={editEarnings.absent_deduction || 0}
-                        onChange={(e) => setEditEarnings({ ...editEarnings, absent_deduction: parseFloat(e.target.value) || 0 })}
-                        className="w-32 form-input text-right"
-                      />
-                    </div>
-                    <div className="flex justify-between items-center text-red-600">
-                      <span>Late Deduction</span>
-                      <input
-                        type="number"
-                        step="0.01"
-                        value={editEarnings.late_deduction || 0}
-                        onChange={(e) => setEditEarnings({ ...editEarnings, late_deduction: parseFloat(e.target.value) || 0 })}
-                        className="w-32 form-input text-right"
-                      />
+
+                    {/* Holiday & OT - Collapsible */}
+                    <details className="bg-gray-50 rounded border">
+                      <summary className="px-3 py-2 cursor-pointer text-sm font-medium text-gray-700 hover:bg-gray-100">
+                        Holiday & Overtime Pay
+                      </summary>
+                      <div className="px-3 pb-3 grid grid-cols-2 gap-2">
+                        <div className="flex justify-between items-center">
+                          <span className="text-gray-600 text-xs">Reg Holiday</span>
+                          <input type="number" step="0.01" value={editEarnings.regular_holiday || 0}
+                            onChange={(e) => setEditEarnings({ ...editEarnings, regular_holiday: parseFloat(e.target.value) || 0 })}
+                            className="w-20 px-2 py-1 border border-gray-300 rounded text-right text-xs" />
+                        </div>
+                        <div className="flex justify-between items-center">
+                          <span className="text-gray-600 text-xs">Reg Hol OT</span>
+                          <input type="number" step="0.01" value={editEarnings.regular_holiday_ot || 0}
+                            onChange={(e) => setEditEarnings({ ...editEarnings, regular_holiday_ot: parseFloat(e.target.value) || 0 })}
+                            className="w-20 px-2 py-1 border border-gray-300 rounded text-right text-xs" />
+                        </div>
+                        <div className="flex justify-between items-center">
+                          <span className="text-gray-600 text-xs">SNWH</span>
+                          <input type="number" step="0.01" value={editEarnings.snwh || 0}
+                            onChange={(e) => setEditEarnings({ ...editEarnings, snwh: parseFloat(e.target.value) || 0 })}
+                            className="w-20 px-2 py-1 border border-gray-300 rounded text-right text-xs" />
+                        </div>
+                        <div className="flex justify-between items-center">
+                          <span className="text-gray-600 text-xs">SNWH OT</span>
+                          <input type="number" step="0.01" value={editEarnings.snwh_ot || 0}
+                            onChange={(e) => setEditEarnings({ ...editEarnings, snwh_ot: parseFloat(e.target.value) || 0 })}
+                            className="w-20 px-2 py-1 border border-gray-300 rounded text-right text-xs" />
+                        </div>
+                        <div className="col-span-2 flex justify-between items-center pt-1 border-t">
+                          <span className="text-gray-700 text-sm font-medium">Overtime Pay</span>
+                          <input type="number" step="0.01" value={editEarnings.overtime || 0}
+                            onChange={(e) => setEditEarnings({ ...editEarnings, overtime: parseFloat(e.target.value) || 0 })}
+                            className="w-24 px-2 py-1 border border-gray-300 rounded text-right text-sm" />
+                        </div>
+                      </div>
+                    </details>
+
+                    {/* Attendance Deductions */}
+                    <div className="bg-red-50 p-3 rounded border border-red-200">
+                      <p className="text-xs font-semibold text-red-800 mb-3">Attendance Deductions</p>
+                      <div className="space-y-3">
+                        {/* Absent */}
+                        <div className="flex items-center justify-between flex-wrap gap-2">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-red-700 font-medium">Absent:</span>
+                            <span className="bg-white px-2 py-1 rounded border text-sm font-medium">{editAttendance.days_absent ?? selectedPayslip.days_absent ?? 0} days</span>
+                            <span className="text-gray-500">×</span>
+                            <div className="flex items-center bg-white rounded border border-red-300 overflow-hidden">
+                              <span className="text-gray-500 pl-2 text-sm">₱</span>
+                              <input type="number" step="0.01" min="0"
+                                value={editDeductions.absences_daily_rate_used ?? selectedPayslip.deductions?.absences_daily_rate_used ?? 0}
+                                onChange={(e) => setEditDeductions({ ...editDeductions, absences_daily_rate_used: parseFloat(e.target.value) || 0 })}
+                                className="w-20 px-1 py-1.5 border-0 text-right text-sm focus:ring-0 focus:outline-none" />
+                              <span className="text-xs text-white bg-red-400 py-1.5 px-2 font-medium">/day</span>
+                            </div>
+                          </div>
+                          <span className="text-red-700 font-bold text-lg">
+                            = -{formatCurrency((editAttendance.days_absent ?? selectedPayslip.days_absent ?? 0) * (editDeductions.absences_daily_rate_used ?? selectedPayslip.deductions?.absences_daily_rate_used ?? 0))}
+                          </span>
+                        </div>
+                        {/* Late */}
+                        <div className="flex items-center justify-between flex-wrap gap-2">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-orange-700 font-medium">Late:</span>
+                            <span className="bg-white px-2 py-1 rounded border text-sm font-medium">{editAttendance.total_late_minutes ?? selectedPayslip.total_late_minutes ?? 0} mins</span>
+                            <span className="text-gray-500">×</span>
+                            <div className="flex items-center bg-white rounded border border-orange-300 overflow-hidden">
+                              <span className="text-gray-500 pl-2 text-sm">₱</span>
+                              <input type="number" step="0.01" min="0"
+                                value={editDeductions.late_minute_rate_used ?? selectedPayslip.deductions?.late_minute_rate_used ?? 0}
+                                onChange={(e) => setEditDeductions({ ...editDeductions, late_minute_rate_used: parseFloat(e.target.value) || 0 })}
+                                className="w-20 px-1 py-1.5 border-0 text-right text-sm focus:ring-0 focus:outline-none" />
+                              <span className="text-xs text-white bg-orange-400 py-1.5 px-2 font-medium">/min</span>
+                            </div>
+                          </div>
+                          <span className="text-orange-700 font-bold text-lg">
+                            = -{formatCurrency((editAttendance.total_late_minutes ?? selectedPayslip.total_late_minutes ?? 0) * (editDeductions.late_minute_rate_used ?? selectedPayslip.deductions?.late_minute_rate_used ?? 0))}
+                          </span>
+                        </div>
+                      </div>
                     </div>
                   </>
                 ) : (
@@ -1110,15 +1321,31 @@ export function PayrollPage() {
                       </div>
                     )}
                     {(selectedPayslip.earnings.absent_deduction || 0) > 0 && (
-                      <div className="flex justify-between text-red-600">
-                        <span>Absent Deduction</span>
-                        <span className="font-medium">-{formatCurrency(selectedPayslip.earnings.absent_deduction)}</span>
+                      <div className="text-red-600">
+                        <div className="flex justify-between">
+                          <span>Absent Deduction</span>
+                          <span className="font-medium">-{formatCurrency(selectedPayslip.earnings.absent_deduction)}</span>
+                        </div>
+                        {(selectedPayslip.deductions?.absences_daily_rate_used || 0) > 0 && (
+                          <div className="text-xs text-gray-500 text-right mt-1 space-y-0.5">
+                            <p>Daily Rate: {formatCurrency(selectedPayslip.earnings?._calculation_info?.monthly_basic || 0)} × 12 ÷ 261 = {formatCurrency(selectedPayslip.deductions.absences_daily_rate_used || 0)}</p>
+                            <p>{selectedPayslip.days_absent || 0} days × {formatCurrency(selectedPayslip.deductions.absences_daily_rate_used || 0)} = {formatCurrency((selectedPayslip.days_absent || 0) * (selectedPayslip.deductions.absences_daily_rate_used || 0))}</p>
+                          </div>
+                        )}
                       </div>
                     )}
                     {(selectedPayslip.earnings.late_deduction || 0) > 0 && (
-                      <div className="flex justify-between text-red-600">
-                        <span>Late Deduction</span>
-                        <span className="font-medium">-{formatCurrency(selectedPayslip.earnings.late_deduction)}</span>
+                      <div className="text-red-600">
+                        <div className="flex justify-between">
+                          <span>Late Deduction</span>
+                          <span className="font-medium">-{formatCurrency(selectedPayslip.earnings.late_deduction)}</span>
+                        </div>
+                        {(selectedPayslip.deductions?.late_minute_rate_used || 0) > 0 && (
+                          <div className="text-xs text-gray-500 text-right mt-1 space-y-0.5">
+                            <p>Minute Rate: {formatCurrency(selectedPayslip.deductions.absences_daily_rate_used || 0)} ÷ {selectedPayslip.earnings?._calculation_info?.work_hours_per_day || 8}hrs ÷ 60 = {formatCurrency(selectedPayslip.deductions.late_minute_rate_used || 0)}</p>
+                            <p>{selectedPayslip.total_late_minutes || 0} mins × {formatCurrency(selectedPayslip.deductions.late_minute_rate_used || 0)} = {formatCurrency((selectedPayslip.total_late_minutes || 0) * (selectedPayslip.deductions.late_minute_rate_used || 0))}</p>
+                          </div>
+                        )}
                       </div>
                     )}
                   </>
@@ -1149,7 +1376,7 @@ export function PayrollPage() {
                             step="0.01"
                             value={editDeductions.sss || 0}
                             onChange={(e) => setEditDeductions({ ...editDeductions, sss: parseFloat(e.target.value) || 0 })}
-                            className="w-32 form-input text-right"
+                            className="w-28 px-2 py-1.5 border border-gray-300 rounded text-right text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                           />
                         </div>
                         <div className="flex justify-between items-center">
@@ -1159,7 +1386,7 @@ export function PayrollPage() {
                             step="0.01"
                             value={editDeductions.philhealth || 0}
                             onChange={(e) => setEditDeductions({ ...editDeductions, philhealth: parseFloat(e.target.value) || 0 })}
-                            className="w-32 form-input text-right"
+                            className="w-28 px-2 py-1.5 border border-gray-300 rounded text-right text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                           />
                         </div>
                         <div className="flex justify-between items-center">
@@ -1169,7 +1396,7 @@ export function PayrollPage() {
                             step="0.01"
                             value={editDeductions.pagibig || 0}
                             onChange={(e) => setEditDeductions({ ...editDeductions, pagibig: parseFloat(e.target.value) || 0 })}
-                            className="w-32 form-input text-right"
+                            className="w-28 px-2 py-1.5 border border-gray-300 rounded text-right text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                           />
                         </div>
                       </>
@@ -1181,7 +1408,7 @@ export function PayrollPage() {
                         step="0.01"
                         value={editDeductions.tax || 0}
                         onChange={(e) => setEditDeductions({ ...editDeductions, tax: parseFloat(e.target.value) || 0 })}
-                        className="w-32 form-input text-right"
+                        className="w-28 px-2 py-1.5 border border-gray-300 rounded text-right text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                       />
                     </div>
                     <div className="flex justify-between items-center">
@@ -1191,7 +1418,7 @@ export function PayrollPage() {
                         step="0.01"
                         value={editDeductions.loans || 0}
                         onChange={(e) => setEditDeductions({ ...editDeductions, loans: parseFloat(e.target.value) || 0 })}
-                        className="w-32 form-input text-right"
+                        className="w-28 px-2 py-1.5 border border-gray-300 rounded text-right text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                       />
                     </div>
                   </>
@@ -1238,17 +1465,90 @@ export function PayrollPage() {
             </div>
           </div>
 
+          {/* Employee Settings - Only in Edit Mode */}
+          {editMode && (
+            <div className="mt-4 p-4 bg-blue-50 rounded-lg border border-blue-200">
+              <div className="flex items-center justify-between mb-3">
+                <h4 className="font-semibold text-blue-800">Employee Settings (Saved as Default)</h4>
+                <span className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded">Auto-saves to employee record</span>
+              </div>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                {/* Call Time */}
+                <div>
+                  <label className="block text-xs text-gray-600 mb-1">Call Time</label>
+                  <input
+                    type="time"
+                    value={editAttendance.call_time || "08:00"}
+                    onChange={(e) => setEditAttendance({ ...editAttendance, call_time: e.target.value })}
+                    className="w-full px-3 py-2 border border-blue-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                {/* Buffer */}
+                <div>
+                  <label className="block text-xs text-gray-600 mb-1">Buffer (mins before)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    max="60"
+                    value={editAttendance.buffer_minutes ?? 10}
+                    onChange={(e) => setEditAttendance({ ...editAttendance, buffer_minutes: parseInt(e.target.value) || 0 })}
+                    className="w-full px-3 py-2 border border-blue-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                {/* Flexible */}
+                <div className="flex items-end">
+                  <label className="flex items-center gap-2 cursor-pointer p-2 bg-white rounded-lg border border-blue-300 w-full">
+                    <input
+                      type="checkbox"
+                      checked={editAttendance.is_flexible || false}
+                      onChange={(e) => setEditAttendance({ ...editAttendance, is_flexible: e.target.checked })}
+                      className="w-4 h-4 text-blue-600 rounded"
+                    />
+                    <span className="text-sm text-gray-700">Flexible Schedule</span>
+                  </label>
+                </div>
+                {/* OT Rate Display */}
+                <div className="bg-green-100 p-2 rounded-lg border border-green-300">
+                  <p className="text-xs text-gray-600">OT Rate/Hour</p>
+                  <p className="text-lg font-bold text-green-700">
+                    {formatCurrency((() => {
+                      const basic = (selectedPayslip as any).employee_settings?.basic_salary || (editEarnings.basic_semi || 0) * 2;
+                      return (basic * 12 / 261 / 8) * 1.25;
+                    })())}
+                  </p>
+                </div>
+              </div>
+              {/* Time-in deadline info */}
+              <p className="text-xs text-gray-600 mt-3 bg-white p-2 rounded">
+                {editAttendance.is_flexible
+                  ? "Flexible schedule - no late deductions will be applied"
+                  : `Time-in deadline: ${(() => {
+                      const [h, m] = (editAttendance.call_time || "08:00").split(":").map(Number);
+                      const buffer = editAttendance.buffer_minutes ?? 10;
+                      const totalMins = h * 60 + m - buffer;
+                      const newH = Math.floor(totalMins / 60);
+                      const newM = totalMins % 60;
+                      return `${String(newH).padStart(2, '0')}:${String(newM).padStart(2, '0')}`;
+                    })()} (must be in ${editAttendance.buffer_minutes ?? 10} mins before ${editAttendance.call_time || "08:00"} call time)`
+                }
+              </p>
+            </div>
+          )}
+
           {/* Net Pay */}
-          <div className="mt-6 p-4 bg-primary-50 rounded-lg">
+          <div className="mt-4 p-4 bg-primary-50 rounded-lg">
             <div className="flex justify-between items-center">
               <span className="text-lg font-semibold text-gray-900">Net Pay</span>
               <span className="text-2xl font-bold text-primary-600">{formatCurrency(selectedPayslip.net_pay)}</span>
             </div>
+            <p className="text-xs text-gray-600 text-right mt-2">
+              = {formatCurrency(selectedPayslip.total_earnings)} (Earnings) - {formatCurrency(selectedPayslip.total_deductions)} (Deductions)
+            </p>
           </div>
 
           {/* Edit Mode Buttons */}
           {editMode && (
-            <div className="mt-6 flex gap-2 justify-end">
+            <div className="mt-4 flex gap-2 justify-end">
               <button onClick={handleCancelEdit} className="btn-secondary" disabled={saving}>
                 Cancel
               </button>
@@ -1288,6 +1588,16 @@ export function PayrollPage() {
             </div>
           </div>
           <div className="flex gap-2">
+            {selectedRun.status !== 'draft' && payslips.length > 0 && (
+              <button
+                onClick={() => handleRecalculate(selectedRun.id)}
+                className="btn-secondary"
+                disabled={recalculating === selectedRun.id}
+                title="Recalculate all payslips using current employee salaries"
+              >
+                {recalculating === selectedRun.id ? 'Recalculating...' : 'Recalculate'}
+              </button>
+            )}
             {selectedRun.status === 'review' && (
               <>
                 <button
@@ -1943,6 +2253,47 @@ export function PayrollPage() {
             </div>
           ) : (
             <div className="space-y-6">
+              {/* Default Basic Salary */}
+              <div className="bg-blue-50 p-4 rounded-lg border border-blue-200">
+                <div className="flex justify-between items-center mb-3">
+                  <h3 className="font-medium text-blue-900">Default Basic Salary</h3>
+                  <button
+                    onClick={() => setShowApplyToAllModal(true)}
+                    className="px-3 py-1.5 bg-orange-500 text-white text-sm font-medium rounded hover:bg-orange-600 transition-colors"
+                  >
+                    Apply to All Employees
+                  </button>
+                </div>
+                <div className="grid md:grid-cols-3 gap-4 items-end">
+                  <div>
+                    <label className="form-label">Monthly Basic Salary (PHP)</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={editSettings.default_basic_salary || 0}
+                      onChange={(e) => setEditSettings({ ...editSettings, default_basic_salary: parseFloat(e.target.value) || 0 })}
+                      className="form-input text-lg font-semibold"
+                      placeholder="e.g., 20000"
+                    />
+                  </div>
+                  <div className="bg-white p-3 rounded border">
+                    <p className="text-xs text-gray-500">Daily Rate (ICAN Formula)</p>
+                    <p className="text-lg font-bold text-green-600">
+                      ₱{((editSettings.default_basic_salary || 0) * 12 / 261).toFixed(2)}
+                    </p>
+                    <p className="text-xs text-gray-400">= Basic × 12 ÷ 261</p>
+                  </div>
+                  <div className="bg-white p-3 rounded border">
+                    <p className="text-xs text-gray-500">Minute Rate</p>
+                    <p className="text-lg font-bold text-orange-600">
+                      ₱{((editSettings.default_basic_salary || 0) * 12 / 261 / (editSettings.work_hours_per_day || 8) / 60).toFixed(2)}
+                    </p>
+                    <p className="text-xs text-gray-400">= Daily ÷ {editSettings.work_hours_per_day || 8}hrs ÷ 60</p>
+                  </div>
+                </div>
+                <p className="text-xs text-blue-700 mt-2">This is used as the default for new employees. Each employee can have their own basic salary set in their profile.</p>
+              </div>
+
               {/* Attendance-Based Deductions */}
               <div>
                 <h3 className="font-medium text-gray-900 mb-3 border-b pb-2">Attendance-Based Deductions</h3>
@@ -1958,16 +2309,6 @@ export function PayrollPage() {
                       placeholder="e.g., 200"
                     />
                     <p className="text-xs text-gray-500 mt-1">Amount deducted per day of absence</p>
-                  </div>
-                  <div>
-                    <label className="form-label">Late Grace Period (minutes)</label>
-                    <input
-                      type="number"
-                      value={editSettings.late_grace_minutes || 15}
-                      onChange={(e) => setEditSettings({ ...editSettings, late_grace_minutes: parseInt(e.target.value) || 0 })}
-                      className="form-input"
-                    />
-                    <p className="text-xs text-gray-500 mt-1">Minutes before late deduction applies</p>
                   </div>
                   <div>
                     <label className="form-label">Late Rate per Minute (PHP)</label>
@@ -2578,73 +2919,31 @@ export function PayrollPage() {
               </p>
             </div>
 
-            {/* Word count requirements */}
-            <div className="bg-blue-50 border border-blue-200 rounded-md p-3 mb-4">
-              <p className="text-blue-800 text-sm font-medium mb-2">Deletion Reason Requirements:</p>
-              <ul className="text-blue-700 text-sm list-disc list-inside space-y-1">
-                <li>Minimum <strong>100 valid English words</strong></li>
-                <li>Words must be <strong>4 or more letters</strong></li>
-                <li>Words must be <strong>recognizable English words</strong></li>
-              </ul>
-            </div>
-
             <div className="mb-4">
               <label className="form-label">Reason for Deletion *</label>
               <textarea
                 value={confirmReason}
                 onChange={(e) => setConfirmReason(e.target.value)}
                 className="form-input"
-                rows={8}
-                placeholder="Please provide a detailed explanation (minimum 100 words) explaining why this payroll run needs to be deleted. Include information such as:&#10;&#10;- What error occurred&#10;- Why it cannot be corrected&#10;- What impact this has&#10;- What corrective action will be taken&#10;&#10;Example: This payroll run was created in error during the testing phase of the new payroll system..."
+                rows={3}
+                placeholder="Enter reason for deletion..."
               />
-
-              {/* Word count display */}
-              <div className="mt-2 flex items-center justify-between text-sm">
-                <div>
-                  {validatingReason ? (
-                    <span className="text-gray-500">Validating...</span>
-                  ) : reasonValidation ? (
-                    <span className={reasonValidation.is_valid ? 'text-green-600' : 'text-red-600'}>
-                      {reasonValidation.is_valid ? '✓' : '✗'} {reasonValidation.valid_words}/100 valid words
-                      {reasonValidation.invalid_words > 0 && (
-                        <span className="text-gray-500 ml-2">
-                          ({reasonValidation.invalid_words} unrecognized)
-                        </span>
-                      )}
-                    </span>
-                  ) : (
-                    <span className="text-gray-500">Type at least 100 characters to validate...</span>
-                  )}
-                </div>
-                <span className="text-gray-400">{confirmReason.length} characters</span>
-              </div>
-
-              {/* Invalid words display */}
-              {reasonValidation && reasonValidation.invalid_word_list.length > 0 && (
-                <div className="mt-2 p-2 bg-yellow-50 border border-yellow-200 rounded text-xs">
-                  <span className="text-yellow-700">Unrecognized words: </span>
-                  <span className="text-yellow-600 italic">
-                    {reasonValidation.invalid_word_list.slice(0, 10).join(', ')}
-                    {reasonValidation.invalid_word_list.length > 10 && ` and ${reasonValidation.invalid_word_list.length - 10} more...`}
-                  </span>
-                </div>
-              )}
             </div>
 
             <div className="flex gap-2 justify-end">
               <button
                 type="button"
-                onClick={() => { setShowConfirmModal(null); setConfirmReason(''); setReasonValidation(null); }}
+                onClick={() => { setShowConfirmModal(null); setConfirmReason(''); }}
                 className="btn-secondary"
               >
                 Cancel
               </button>
               <button
                 onClick={handleConfirmDelete}
-                disabled={!reasonValidation?.is_valid || validatingReason}
+                disabled={!confirmReason.trim()}
                 className="bg-red-600 text-white px-4 py-2 rounded-md hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {validatingReason ? 'Validating...' : 'Move to Trash'}
+                Move to Trash
               </button>
             </div>
           </div>
@@ -2680,6 +2979,113 @@ export function PayrollPage() {
                 className="bg-yellow-600 text-white px-4 py-2 rounded-md hover:bg-yellow-700"
               >
                 Continue to Edit
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Apply to All Employees Modal */}
+      {showApplyToAllModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-xl max-w-lg w-full mx-4 overflow-hidden">
+            <div className="bg-red-600 px-6 py-4">
+              <h3 className="text-lg font-bold text-white">⚠️ Apply Settings to ALL Employees</h3>
+            </div>
+            <div className="p-6 space-y-4">
+              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                <p className="text-yellow-800 font-medium">Warning!</p>
+                <p className="text-yellow-700 text-sm mt-1">
+                  This will overwrite the individual settings for ALL active employees.
+                  Any custom values they have will be replaced with these default values.
+                </p>
+              </div>
+
+              <div className="space-y-3">
+                <p className="font-medium text-gray-900">Select what to apply:</p>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={applyToAllOptions.apply_basic_salary}
+                    onChange={(e) => setApplyToAllOptions({ ...applyToAllOptions, apply_basic_salary: e.target.checked })}
+                    className="w-4 h-4 text-blue-600 rounded"
+                  />
+                  <span>Basic Salary: <strong>₱{(editSettings.default_basic_salary || 0).toLocaleString()}</strong></span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={applyToAllOptions.apply_sss}
+                    onChange={(e) => setApplyToAllOptions({ ...applyToAllOptions, apply_sss: e.target.checked })}
+                    className="w-4 h-4 text-blue-600 rounded"
+                  />
+                  <span>SSS: <strong>₱{(editSettings.default_sss || 0).toLocaleString()}</strong></span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={applyToAllOptions.apply_philhealth}
+                    onChange={(e) => setApplyToAllOptions({ ...applyToAllOptions, apply_philhealth: e.target.checked })}
+                    className="w-4 h-4 text-blue-600 rounded"
+                  />
+                  <span>PhilHealth: <strong>₱{(editSettings.default_philhealth || 0).toLocaleString()}</strong></span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={applyToAllOptions.apply_pagibig}
+                    onChange={(e) => setApplyToAllOptions({ ...applyToAllOptions, apply_pagibig: e.target.checked })}
+                    className="w-4 h-4 text-blue-600 rounded"
+                  />
+                  <span>Pag-IBIG: <strong>₱{(editSettings.default_pagibig || 0).toLocaleString()}</strong></span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={applyToAllOptions.apply_tax}
+                    onChange={(e) => setApplyToAllOptions({ ...applyToAllOptions, apply_tax: e.target.checked })}
+                    className="w-4 h-4 text-blue-600 rounded"
+                  />
+                  <span>Tax: <strong>₱{(editSettings.default_tax || 0).toLocaleString()}</strong></span>
+                </label>
+              </div>
+
+              <div className="border-t pt-4">
+                <p className="text-sm text-gray-700 mb-2">
+                  To confirm, type <strong className="text-red-600">WeCanInICAN!</strong> below:
+                </p>
+                <input
+                  type="text"
+                  value={applyToAllConfirmation}
+                  onChange={(e) => setApplyToAllConfirmation(e.target.value)}
+                  placeholder="Type confirmation code here..."
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500"
+                />
+                {applyToAllConfirmation && applyToAllConfirmation !== 'WeCanInICAN!' && (
+                  <p className="text-red-500 text-xs mt-1">Confirmation code doesn't match</p>
+                )}
+                {applyToAllConfirmation === 'WeCanInICAN!' && (
+                  <p className="text-green-600 text-xs mt-1">✓ Confirmation code correct</p>
+                )}
+              </div>
+            </div>
+            <div className="bg-gray-50 px-6 py-4 flex justify-end gap-3">
+              <button
+                onClick={() => {
+                  setShowApplyToAllModal(false);
+                  setApplyToAllConfirmation('');
+                }}
+                className="px-4 py-2 text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50"
+                disabled={applyingToAll}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleApplyToAll}
+                disabled={applyToAllConfirmation !== 'WeCanInICAN!' || applyingToAll || (!applyToAllOptions.apply_basic_salary && !applyToAllOptions.apply_sss && !applyToAllOptions.apply_philhealth && !applyToAllOptions.apply_pagibig && !applyToAllOptions.apply_tax)}
+                className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {applyingToAll ? 'Applying...' : 'Apply to All Employees'}
               </button>
             </div>
           </div>

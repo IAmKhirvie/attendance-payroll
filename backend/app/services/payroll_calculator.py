@@ -317,7 +317,8 @@ def generate_payslip(
     # Get settings for deduction calculation
     use_ican_formula = getattr(settings, 'use_ican_formula', True)
     working_days_per_year = int(getattr(settings, 'working_days_per_year', 261) or 261)
-    work_hours_per_day = float(settings.work_hours_per_day or 8)
+    # Use employee's work hours if set, otherwise use settings default
+    work_hours_per_day = float(employee.work_hours_per_day or settings.work_hours_per_day or 8)
 
     # Get universal deduction rates from settings (fallback if not using ICAN formula)
     absent_rate_per_day = float(settings.absent_rate_per_day or 0)
@@ -417,15 +418,17 @@ def generate_payslip(
         'late_minutes': attendance['total_late_minutes'],
         'late_amount': late_amount,
         'late_minute_rate_used': effective_minute_rate,  # Rate used for late deduction
+        'work_hours_per_day_used': work_hours_per_day,  # Employee's work hours used in calculation
         'undertime_minutes': total_undertime,
         'undertime_amount': undertime_amount,
     }
 
     # Get employee-specific government contributions or use defaults/calculated values
-    emp_sss = float(employee.sss_contribution or 0) if hasattr(employee, 'sss_contribution') and employee.sss_contribution else None
-    emp_philhealth = float(employee.philhealth_contribution or 0) if hasattr(employee, 'philhealth_contribution') and employee.philhealth_contribution else None
-    emp_pagibig = float(employee.pagibig_contribution or 0) if hasattr(employee, 'pagibig_contribution') and employee.pagibig_contribution else None
-    emp_tax = float(employee.tax_amount or 0) if hasattr(employee, 'tax_amount') and employee.tax_amount else None
+    # Note: We check "is not None" to allow explicit 0 values
+    emp_sss = float(employee.sss_contribution) if hasattr(employee, 'sss_contribution') and employee.sss_contribution is not None else None
+    emp_philhealth = float(employee.philhealth_contribution) if hasattr(employee, 'philhealth_contribution') and employee.philhealth_contribution is not None else None
+    emp_pagibig = float(employee.pagibig_contribution) if hasattr(employee, 'pagibig_contribution') and employee.pagibig_contribution is not None else None
+    emp_tax = float(employee.tax_amount) if hasattr(employee, 'tax_amount') and employee.tax_amount is not None else None
 
     # Default contributions from settings
     default_sss = float(settings.default_sss or 0)
@@ -450,31 +453,32 @@ def generate_payslip(
         deductions['pagibig'] = 0
     else:
         # 2nd cutoff: SSS, PhilHealth, Pag-IBIG, tax
-        # Use employee-specific values if set, then defaults, then calculated
+        # Priority: 1) Employee-specific value, 2) Default from settings, 3) Auto-calculate
+        # Note: We check "is not None" to allow explicit 0 values (meaning no deduction)
         if emp_sss is not None:
             deductions['sss'] = emp_sss
-        elif default_sss > 0:
+        elif default_sss is not None:
             deductions['sss'] = default_sss
         else:
             deductions['sss'] = calculate_sss(monthly_basic)
 
         if emp_philhealth is not None:
             deductions['philhealth'] = emp_philhealth
-        elif default_philhealth > 0:
+        elif default_philhealth is not None:
             deductions['philhealth'] = default_philhealth
         else:
             deductions['philhealth'] = calculate_philhealth(monthly_basic)
 
         if emp_pagibig is not None:
             deductions['pagibig'] = emp_pagibig
-        elif default_pagibig > 0:
+        elif default_pagibig is not None:
             deductions['pagibig'] = default_pagibig
         else:
             deductions['pagibig'] = calculate_pagibig(monthly_basic)
 
         if emp_tax is not None:
             deductions['tax'] = round(emp_tax / 2, 2)
-        elif default_tax > 0:
+        elif default_tax is not None:
             deductions['tax'] = round(default_tax / 2, 2)
         else:
             deductions['tax'] = round(calculate_tax(monthly_basic) / 2, 2)
@@ -523,6 +527,7 @@ def process_payroll(db: Session, payroll_run: PayrollRun) -> Dict[str, Any]:
     Process payroll for all active employees.
     Uses PayrollSettings for universal deduction rates.
     Connects to attendance data (ProcessedAttendance or ImportRecord).
+    If employee has default_days_per_cutoff set, uses that instead of attendance-based calculation.
     Returns summary of the processing.
     """
     from datetime import datetime
@@ -556,6 +561,13 @@ def process_payroll(db: Session, payroll_run: PayrollRun) -> Dict[str, Any]:
             payroll_run.period_end,
             employee=employee
         )
+
+        # Check if employee has a default days_per_cutoff preset
+        # If set, override the attendance-based days_worked
+        if employee.default_days_per_cutoff is not None:
+            preset_days = float(employee.default_days_per_cutoff)
+            attendance['days_worked'] = preset_days
+            attendance['using_preset'] = True
 
         # Generate payslip with settings
         payslip = generate_payslip(db, employee, payroll_run, attendance, settings)

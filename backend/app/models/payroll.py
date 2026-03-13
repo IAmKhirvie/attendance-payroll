@@ -157,6 +157,9 @@ class PayrollSettings(Base):
     # Late grace period (minutes before late deduction applies)
     late_grace_minutes = Column(Integer, default=15)
 
+    # Default salary (used as base for new employees and rate calculations)
+    default_basic_salary = Column(Numeric(12, 2), default=0)  # Default monthly basic salary
+
     # Standard government contribution rates (used if employee doesn't have specific values)
     default_sss = Column(Numeric(10, 2), default=0)  # Standard SSS contribution
     default_philhealth = Column(Numeric(10, 2), default=0)  # Standard PhilHealth

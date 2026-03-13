@@ -416,12 +416,15 @@ async def preview_employees_from_file(
 async def import_attendance_file(
     file: UploadFile = File(...),
     create_employees: bool = False,
+    auto_generate_payroll: bool = True,
+    force_reimport: bool = False,
     current_admin: User = Depends(get_current_admin),
     db: Session = Depends(get_db)
 ):
     """
     Import attendance data from file (Admin only).
     Supports XLS, XLSX formats (NGTimereport format).
+    Set force_reimport=true to delete previous import and re-import.
     """
     import os
     import tempfile
@@ -439,10 +442,15 @@ async def import_attendance_file(
     # Check for duplicate import (same filename)
     existing_import = db.query(ImportBatch).filter(ImportBatch.filename == filename).first()
     if existing_import:
-        raise HTTPException(
-            status_code=400,
-            detail=f"This file has already been imported on {existing_import.created_at.strftime('%b %d, %Y at %I:%M %p')}. Delete the previous import from History if you want to re-import."
-        )
+        if force_reimport:
+            # Delete the old import batch (cascade will delete ImportRecord entries)
+            db.delete(existing_import)
+            db.commit()
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail=f"This file has already been imported on {existing_import.created_at.strftime('%b %d, %Y at %I:%M %p')}. Delete the previous import from History or enable 'Replace existing import' to re-import."
+            )
 
     # Save uploaded file temporarily
     with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp:
@@ -522,6 +530,61 @@ async def import_attendance_file(
         if auto_fixed > 0:
             message += f". Auto-fixed {auto_fixed} records with duplicate/misaligned entries."
 
+        # Auto-generate payroll if enabled
+        payroll_result = None
+        if auto_generate_payroll and date_from and date_to:
+            try:
+                from app.models.payroll import PayrollRun, PayrollStatus
+                from app.services.payroll_calculator import process_payroll
+                from datetime import datetime
+
+                # Determine cutoff (1st half = 1-15, 2nd half = 16-end)
+                cutoff = 1 if date_from.day <= 15 else 2
+
+                # Check if payroll run already exists for this period
+                existing_run = db.query(PayrollRun).filter(
+                    PayrollRun.period_start == date_from,
+                    PayrollRun.period_end == date_to,
+                    PayrollRun.is_deleted == False
+                ).first()
+
+                if existing_run:
+                    # Re-process existing payroll run
+                    payroll_run = existing_run
+                    payroll_run.status = PayrollStatus.DRAFT
+                    db.commit()
+                else:
+                    # Create new payroll run
+                    payroll_run = PayrollRun(
+                        period_start=date_from,
+                        period_end=date_to,
+                        cutoff=cutoff,
+                        description=f"Auto-generated from {filename}",
+                        run_by=current_admin.id,
+                        status=PayrollStatus.DRAFT
+                    )
+                    db.add(payroll_run)
+                    db.commit()
+                    db.refresh(payroll_run)
+
+                # Process payroll
+                payroll_summary = process_payroll(db, payroll_run)
+                payroll_result = {
+                    "payroll_run_id": payroll_run.id,
+                    "period_start": date_from.isoformat(),
+                    "period_end": date_to.isoformat(),
+                    "cutoff": cutoff,
+                    "employee_count": payroll_summary['employee_count'],
+                    "total_gross": payroll_summary['total_gross'],
+                    "total_deductions": payroll_summary['total_deductions'],
+                    "total_net": payroll_summary['total_net'],
+                    "status": payroll_run.status.value
+                }
+                message += f". Payroll auto-generated for {payroll_summary['employee_count']} employees."
+            except Exception as e:
+                # Don't fail the import if payroll generation fails
+                payroll_result = {"error": str(e)}
+
         return {
             "message": message,
             "filename": filename,
@@ -536,7 +599,8 @@ async def import_attendance_file(
                 "employees_created": result.get('employees_created', 0),
                 "employees_existing": result.get('employees_existing', 0)
             },
-            "records": formatted_records
+            "records": formatted_records,
+            "payroll": payroll_result
         }
     except Exception as e:
         raise HTTPException(
