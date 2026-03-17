@@ -7,11 +7,19 @@ Auto-fixes duplicate and misaligned time entries from machine errors.
 
 Known machine errors:
 1. Duplicate time_in - Employee presses time_in twice (forgot to press time_out)
-2. Misaligned rows - Time_out appears on a SEPARATE ROW with NO DATE
+
+2. Misaligned rows (Pattern A) - Time_out in OUT column with "Missing IN"
    Example:
      Row 158: MON, 01/12/2026, 07:37 AM, (empty), "Missing OUT"
      Row 159: (empty), (empty), (empty), 09:12 PM, "Missing IN"
-   The time_out in row 159 belongs to row 158.
+   The time_out in row 159 (OUT column) belongs to row 158.
+
+3. Misaligned rows (Pattern B) - Time_out in IN column with "Missing OUT"
+   Example:
+     Row 77: THU, 02/26/2026, 12:51 PM, (empty), "Missing OUT"
+     Row 78: (empty), (empty), 09:05 PM, (empty), "Missing OUT"
+   The time in row 78 (IN column) is actually the time_out for row 77.
+   This happens when employee presses IN button again instead of OUT.
 """
 
 import pandas as pd
@@ -163,7 +171,8 @@ class TimeReportParser:
 
                     records.append(record)
 
-            # Case 2: Row WITHOUT a date but WITH time_out (misaligned time_out)
+            # Case 2: Row WITHOUT a date but WITH time_out in OUT column (misaligned time_out)
+            # Pattern: time_out is in the OUT column with "Missing IN" note
             elif not day_name and (not date_str or date_str == 'nan') and time_out and 'Missing IN' in note:
                 # This time_out belongs to the pending record!
                 if pending_record:
@@ -190,6 +199,36 @@ class TimeReportParser:
                     records.append(pending_record)
                     pending_record = None
                 # else: orphan time_out row, skip it
+
+            # Case 3: Row WITHOUT a date but WITH time in IN column (misaligned time_out variant)
+            # Pattern: time_out appears in the IN column with "Missing OUT" note
+            # This happens when employee presses IN again instead of OUT
+            elif not day_name and (not date_str or date_str == 'nan') and time_in and not time_out and 'Missing OUT' in note:
+                # This time_in is actually the time_out for the pending record!
+                if pending_record:
+                    pending_record['time_out'] = time_in  # Use time_in as time_out
+                    pending_record['status'] = 'complete'
+                    pending_record['exceptions'] = []
+                    pending_record['has_exception'] = False
+                    pending_record['auto_fixed'] = ['merged_misaligned_timeout_from_in_column']
+                    pending_record['note'] = ''  # Clear note since it's fixed
+
+                    # Recalculate hours from time_in and time_out
+                    if pending_record['time_in'] and time_in:
+                        time_in_dt = datetime.combine(pending_record['date'], pending_record['time_in'])
+                        time_out_dt = datetime.combine(pending_record['date'], time_in)
+                        if time_out_dt < time_in_dt:
+                            time_out_dt += timedelta(days=1)
+                        diff = time_out_dt - time_in_dt
+                        pending_record['worked_minutes'] = int(diff.total_seconds() / 60)
+                        # Format as hours.minutes (not decimal hours)
+                        hours = pending_record['worked_minutes'] // 60
+                        mins = pending_record['worked_minutes'] % 60
+                        pending_record['daily_total_hours'] = float(f"{hours}.{mins:02d}")
+
+                    records.append(pending_record)
+                    pending_record = None
+                # else: orphan row, skip it
 
         # Don't forget the last pending record
         if pending_record:

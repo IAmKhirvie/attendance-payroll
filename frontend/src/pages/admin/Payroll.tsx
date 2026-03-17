@@ -716,6 +716,9 @@ export function PayrollPage() {
     if (!selectedPayslip) return;
     setSaving(true);
     try {
+      // Get current employee settings for comparison
+      const empSettings = (selectedPayslip as any).employee_settings || {};
+
       // Update attendance first (may recalculate deductions)
       const hasAttendanceChanges =
         editAttendance.days_worked !== selectedPayslip.days_worked ||
@@ -724,6 +727,13 @@ export function PayrollPage() {
         editAttendance.total_late_minutes !== selectedPayslip.total_late_minutes ||
         editAttendance.overtime_hours !== selectedPayslip.overtime_hours ||
         editAttendance.work_hours_per_day !== (selectedPayslip.deductions?.work_hours_per_day_used || 8);
+
+      // Check if employee settings changed (these need to be saved to employee record)
+      const hasEmployeeSettingsChanges =
+        editAttendance.is_flexible !== (empSettings.is_flexible || false) ||
+        editAttendance.call_time !== (empSettings.call_time || "08:00") ||
+        editAttendance.time_out !== (empSettings.time_out || "17:00") ||
+        editAttendance.buffer_minutes !== (empSettings.buffer_minutes ?? 10);
 
       let updatedPayslip = { ...selectedPayslip };
       let presetMessage = '';
@@ -734,7 +744,7 @@ export function PayrollPage() {
         editAttendance.total_late_minutes !== selectedPayslip.total_late_minutes ||
         editAttendance.work_hours_per_day !== (selectedPayslip.deductions?.work_hours_per_day_used || 8);
 
-      if (hasAttendanceChanges) {
+      if (hasAttendanceChanges || hasEmployeeSettingsChanges) {
         const attendanceData = {
           ...editAttendance,
           recalculate_deductions: shouldRecalculate
@@ -1005,6 +1015,25 @@ export function PayrollPage() {
               <div>
                 <h2 className="text-xl font-bold">{selectedPayslip.employee_name}</h2>
                 <p className="text-gray-500">{selectedPayslip.employee_no}</p>
+                {/* Schedule Info */}
+                {(() => {
+                  const empSettings = (selectedPayslip as any).employee_settings || {};
+                  const callTime = empSettings.call_time || "08:00";
+                  const timeOut = empSettings.time_out || "17:00";
+                  const isFlexible = empSettings.is_flexible || false;
+                  return (
+                    <p className="text-xs text-gray-400 mt-1">
+                      {isFlexible ? (
+                        <span className="inline-flex items-center gap-1">
+                          <span className="bg-green-100 text-green-700 px-1.5 py-0.5 rounded text-xs font-medium">Flexible</span>
+                          <span>Schedule</span>
+                        </span>
+                      ) : (
+                        <span>Schedule: {callTime} - {timeOut}</span>
+                      )}
+                    </p>
+                  );
+                })()}
               </div>
               <div className="text-right">
                 <p className="text-sm text-gray-500">Pay Period</p>
@@ -1774,7 +1803,16 @@ export function PayrollPage() {
                     <tr key={payslip.id} className="hover:bg-gray-50">
                       <td className="px-4 py-3">
                         <div className="font-medium text-gray-900">{payslip.employee_name}</div>
-                        <div className="text-sm text-gray-500">{payslip.employee_no}</div>
+                        <div className="text-sm text-gray-500">
+                          {payslip.employee_no}
+                          {(payslip as any).is_flexible ? (
+                            <span className="ml-2 bg-green-100 text-green-700 px-1.5 py-0.5 rounded text-xs font-medium">Flex</span>
+                          ) : (
+                            <span className="ml-2 text-xs text-gray-400">
+                              {(payslip as any).call_time || '08:00'}-{(payslip as any).time_out || '17:00'}
+                            </span>
+                          )}
+                        </div>
                       </td>
                       <td className="px-4 py-3 text-right">{payslip.days_worked}</td>
                       <td className="px-4 py-3 text-right font-medium">{formatCurrency(payslip.total_earnings)}</td>

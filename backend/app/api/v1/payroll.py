@@ -223,6 +223,66 @@ async def create_payroll_run(
     return PayrollRunResponse.model_validate(run)
 
 
+@router.get("/runs/trash")
+async def list_deleted_payroll_runs(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    current_admin: User = Depends(get_current_admin),
+    db: Session = Depends(get_db)
+):
+    """
+    List deleted (trashed) payroll runs (Admin only).
+
+    Returns payroll runs that have been soft deleted, including:
+    - Deletion reason
+    - Who deleted it
+    - When it was deleted
+    """
+    from app.models.user import User as UserModel
+
+    query = db.query(PayrollRun).filter(PayrollRun.is_deleted == True)
+
+    total = query.count()
+    runs = query.order_by(PayrollRun.deleted_at.desc()).offset(
+        (page - 1) * page_size
+    ).limit(page_size).all()
+
+    items = []
+    for run in runs:
+        # Get deleted by user info
+        deleted_by_user = None
+        if run.deleted_by:
+            user = db.query(UserModel).filter(UserModel.id == run.deleted_by).first()
+            if user:
+                deleted_by_user = {"id": user.id, "email": user.email}
+
+        items.append({
+            "id": run.id,
+            "period_start": run.period_start.isoformat(),
+            "period_end": run.period_end.isoformat(),
+            "pay_date": run.pay_date.isoformat() if run.pay_date else None,
+            "cutoff": run.cutoff,
+            "description": run.description,
+            "status": run.status.value,
+            "total_gross": float(run.total_gross) if run.total_gross else 0,
+            "total_deductions": float(run.total_deductions) if run.total_deductions else 0,
+            "total_net": float(run.total_net) if run.total_net else 0,
+            "employee_count": run.employee_count,
+            "created_at": run.created_at.isoformat() if run.created_at else None,
+            # Deletion info
+            "deleted_at": run.deleted_at.isoformat() if run.deleted_at else None,
+            "deleted_by": deleted_by_user,
+            "deletion_reason": run.deletion_reason
+        })
+
+    return {
+        "items": items,
+        "total": total,
+        "page": page,
+        "page_size": page_size
+    }
+
+
 @router.get("/runs/{run_id}", response_model=PayrollRunResponse)
 async def get_payroll_run(
     run_id: int,
@@ -363,66 +423,6 @@ async def delete_payroll_run(
     return {
         "message": "Payroll run moved to trash",
         "run_id": run_id
-    }
-
-
-@router.get("/runs/trash")
-async def list_deleted_payroll_runs(
-    page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
-    current_admin: User = Depends(get_current_admin),
-    db: Session = Depends(get_db)
-):
-    """
-    List deleted (trashed) payroll runs (Admin only).
-
-    Returns payroll runs that have been soft deleted, including:
-    - Deletion reason
-    - Who deleted it
-    - When it was deleted
-    """
-    from app.models.user import User as UserModel
-
-    query = db.query(PayrollRun).filter(PayrollRun.is_deleted == True)
-
-    total = query.count()
-    runs = query.order_by(PayrollRun.deleted_at.desc()).offset(
-        (page - 1) * page_size
-    ).limit(page_size).all()
-
-    items = []
-    for run in runs:
-        # Get deleted by user info
-        deleted_by_user = None
-        if run.deleted_by:
-            user = db.query(UserModel).filter(UserModel.id == run.deleted_by).first()
-            if user:
-                deleted_by_user = {"id": user.id, "email": user.email}
-
-        items.append({
-            "id": run.id,
-            "period_start": run.period_start.isoformat(),
-            "period_end": run.period_end.isoformat(),
-            "pay_date": run.pay_date.isoformat() if run.pay_date else None,
-            "cutoff": run.cutoff,
-            "description": run.description,
-            "status": run.status.value,
-            "total_gross": float(run.total_gross) if run.total_gross else 0,
-            "total_deductions": float(run.total_deductions) if run.total_deductions else 0,
-            "total_net": float(run.total_net) if run.total_net else 0,
-            "employee_count": run.employee_count,
-            "created_at": run.created_at.isoformat() if run.created_at else None,
-            # Deletion info
-            "deleted_at": run.deleted_at.isoformat() if run.deleted_at else None,
-            "deleted_by": deleted_by_user,
-            "deletion_reason": run.deletion_reason
-        })
-
-    return {
-        "items": items,
-        "total": total,
-        "page": page,
-        "page_size": page_size
     }
 
 
@@ -812,6 +812,12 @@ async def list_payslips(
 
     items = []
     for p in payslips:
+        # Get employee schedule info for display
+        emp = p.employee
+        is_flexible = emp.is_flexible if emp else False
+        call_time = emp.call_time if emp else "08:00"
+        time_out = emp.time_out if emp else "17:00"
+
         items.append({
             "id": p.id,
             "payroll_run_id": p.payroll_run_id,
@@ -831,7 +837,10 @@ async def list_payslips(
             "total_late_minutes": p.total_late_minutes,
             "overtime_hours": float(p.overtime_hours),
             "is_released": p.is_released,
-            "created_at": p.created_at.isoformat() if p.created_at else None
+            "created_at": p.created_at.isoformat() if p.created_at else None,
+            "is_flexible": is_flexible or False,
+            "call_time": call_time or "08:00",
+            "time_out": time_out or "17:00"
         })
 
     return {

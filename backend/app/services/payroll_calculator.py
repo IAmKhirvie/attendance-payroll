@@ -359,10 +359,17 @@ def generate_payslip(
 
     # Calculate late deductions (Tardiness)
     # Priority: ICAN minute rate > per-minute setting > per-incident > hourly rate fallback
+    # If employee is_flexible, skip late deductions entirely
     late_amount = 0
     total_late_minutes = attendance['total_late_minutes']
     late_count = attendance['late_count']
     effective_minute_rate = 0.0
+
+    # Flexible employees have no late deductions
+    is_flexible = getattr(employee, 'is_flexible', False) or False
+    if is_flexible:
+        total_late_minutes = 0
+        late_count = 0
 
     if use_ican_formula and ican_minute_rate > 0 and total_late_minutes > 0:
         # Use ICAN formula: Minute Rate = Daily Rate ÷ Hours per day ÷ 60
@@ -500,6 +507,7 @@ def generate_payslip(
     net_pay = total_earnings - total_deductions
 
     # Create payslip
+    # Note: For flexible employees, late_count and total_late_minutes are zeroed out above
     payslip = Payslip(
         payroll_run_id=payroll_run.id,
         employee_id=employee.id,
@@ -510,8 +518,8 @@ def generate_payslip(
         net_pay=round(net_pay, 2),
         days_worked=attendance['days_worked'],
         days_absent=attendance['days_absent'],
-        late_count=attendance['late_count'],
-        total_late_minutes=attendance['total_late_minutes'],
+        late_count=late_count,  # Use local variable (0 for flexible employees)
+        total_late_minutes=total_late_minutes,  # Use local variable (0 for flexible employees)
         overtime_hours=attendance['total_ot_hours'],
         undertime_minutes=total_undertime,
         absent_deduction=absent_amount,

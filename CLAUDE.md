@@ -4,8 +4,8 @@
 
 The NGTimereport XLS files from the biometric device have known machine errors that the import automatically fixes:
 
-### 1. Misaligned Rows (Time OUT on separate row)
-**Problem:** When employee forgets to press time_out, the device creates a separate row with no date.
+### 1. Misaligned Rows - Pattern A (Time OUT in OUT column)
+**Problem:** When employee forgets to press time_out, the device creates a separate row with no date. Time appears in the OUT column with "Missing IN" note.
 ```
 Row 158: MON, 01/12/2026, 07:37 AM, (empty), "Missing OUT"
 Row 159: (empty), (empty), (empty), 09:12 PM, "Missing IN"
@@ -13,7 +13,16 @@ Row 159: (empty), (empty), (empty), 09:12 PM, "Missing IN"
 
 **Fix:** The import detects this pattern and merges them into one complete record.
 
-### 2. Duplicate Time IN
+### 2. Misaligned Rows - Pattern B (Time OUT in IN column)
+**Problem:** Employee presses IN button again instead of OUT. The time_out appears in the IN column with "Missing OUT" note.
+```
+Row 77: THU, 02/26/2026, 12:51 PM, (empty), "Missing OUT"
+Row 78: (empty), (empty), 09:05 PM, (empty), "Missing OUT"
+```
+
+**Fix:** The import detects when a row has no date, has time in the IN column, and "Missing OUT" note - it treats this as the time_out for the previous record.
+
+### 3. Duplicate Time IN
 **Problem:** Employee presses time_in twice (forgot to press time_out first).
 ```
 Row: 08:00 AM, 08:00 AM (same time in both columns)
@@ -21,7 +30,7 @@ Row: 08:00 AM, 08:00 AM (same time in both columns)
 
 **Fix:** Keeps as time_in only, marks time_out as missing.
 
-### 3. Work Time Hours
+### 4. Work Time Hours
 The `work_time` field (e.g., 9.11 hours) includes lunch break. This is correct - employees are still "at work" during lunch.
 
 ## Payroll Structure (Philippine)
