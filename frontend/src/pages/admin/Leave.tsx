@@ -289,6 +289,21 @@ export default function LeavePage() {
   // Create request
   const handleCreateRequest = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    // Validate selections
+    if (newRequest.employee_id === 0) {
+      setError('Please select an employee');
+      return;
+    }
+    if (newRequest.leave_type_id === 0) {
+      setError('Please select a leave type');
+      return;
+    }
+    if (!newRequest.start_date || !newRequest.end_date) {
+      setError('Please select start and end dates');
+      return;
+    }
+
     try {
       setLoading(true);
       await leaveApi.createRequest(newRequest);
@@ -316,6 +331,17 @@ export default function LeavePage() {
   // Create balance
   const handleCreateBalance = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    // Validate selections
+    if (newBalance.employee_id === 0) {
+      setError('Please select an employee');
+      return;
+    }
+    if (newBalance.leave_type_id === 0) {
+      setError('Please select a leave type');
+      return;
+    }
+
     try {
       setLoading(true);
       await leaveApi.createBalance(newBalance);
