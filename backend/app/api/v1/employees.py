@@ -169,7 +169,7 @@ async def list_employees_without_users(
 @router.get("", response_model=EmployeeListResponse)
 async def list_employees(
     page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
+    page_size: int = Query(20, ge=1, le=1000),
     department_id: Optional[int] = None,
     is_active: Optional[bool] = True,
     status: Optional[str] = None,
