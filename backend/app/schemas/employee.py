@@ -75,6 +75,15 @@ class EmployeeCreate(EmployeeBase):
     work_hours_per_day: Optional[Decimal] = Decimal("8")
     buffer_minutes: Optional[int] = 10
     is_flexible: bool = False
+    adjusted_call_time: Optional[str] = None  # For flexible schedules
+    # Working days
+    work_monday: bool = True
+    work_tuesday: bool = True
+    work_wednesday: bool = True
+    work_thursday: bool = True
+    work_friday: bool = True
+    work_saturday: bool = False
+    work_sunday: bool = False
 
 
 class EmployeeUpdate(BaseModel):
@@ -110,6 +119,15 @@ class EmployeeUpdate(BaseModel):
     work_hours_per_day: Optional[Decimal] = None
     buffer_minutes: Optional[int] = None
     is_flexible: Optional[bool] = None
+    adjusted_call_time: Optional[str] = None
+    # Working days
+    work_monday: Optional[bool] = None
+    work_tuesday: Optional[bool] = None
+    work_wednesday: Optional[bool] = None
+    work_thursday: Optional[bool] = None
+    work_friday: Optional[bool] = None
+    work_saturday: Optional[bool] = None
+    work_sunday: Optional[bool] = None
 
 
 class EmployeeResponse(EmployeeBase):
@@ -139,6 +157,16 @@ class EmployeeResponse(EmployeeBase):
     work_hours_per_day: Optional[Decimal] = Decimal("8")
     buffer_minutes: Optional[int] = 10
     is_flexible: bool = False
+    adjusted_call_time: Optional[str] = None
+    # Working days
+    work_monday: bool = True
+    work_tuesday: bool = True
+    work_wednesday: bool = True
+    work_thursday: bool = True
+    work_friday: bool = True
+    work_saturday: bool = False
+    work_sunday: bool = False
+    working_days_per_week: int = 5
     status: Optional[str] = "active"  # pending, active, inactive
     is_active: bool
     full_name: str

@@ -80,8 +80,18 @@ class Employee(Base):
     # Call time / Schedule settings
     call_time = Column(String(5), nullable=True, default="08:00")  # Official call time (HH:MM format)
     time_out = Column(String(5), nullable=True, default="17:00")  # Official time out (HH:MM format)
-    buffer_minutes = Column(Integer, nullable=True, default=10)  # Minutes before call time to be in (e.g., 10 = should be in by 7:50 if call time is 8:00)
-    is_flexible = Column(Boolean, default=False)  # If true, no lates are calculated for this employee
+    buffer_minutes = Column(Integer, nullable=True, default=10)  # Grace period in minutes after call time
+    is_flexible = Column(Boolean, default=False)  # If true, use adjusted_call_time instead of call_time
+    adjusted_call_time = Column(String(5), nullable=True)  # For flexible employees, their actual expected time (set manually)
+
+    # Working days schedule (True = works on this day)
+    work_monday = Column(Boolean, default=True)
+    work_tuesday = Column(Boolean, default=True)
+    work_wednesday = Column(Boolean, default=True)
+    work_thursday = Column(Boolean, default=True)
+    work_friday = Column(Boolean, default=True)
+    work_saturday = Column(Boolean, default=False)  # Default off, but can be enabled for Saturday classes
+    work_sunday = Column(Boolean, default=False)  # Default off
 
     # Biometric
     biometric_id = Column(String(50), nullable=True, index=True)  # ID from biometric device
@@ -108,6 +118,38 @@ class Employee(Base):
         if self.middle_name:
             return f"{self.first_name} {self.middle_name} {self.last_name}"
         return f"{self.first_name} {self.last_name}"
+
+    @property
+    def working_days_per_week(self) -> int:
+        """Count how many days per week this employee works."""
+        count = 0
+        if self.work_monday: count += 1
+        if self.work_tuesday: count += 1
+        if self.work_wednesday: count += 1
+        if self.work_thursday: count += 1
+        if self.work_friday: count += 1
+        if self.work_saturday: count += 1
+        if self.work_sunday: count += 1
+        return count
+
+    def works_on_day(self, day_name: str) -> bool:
+        """Check if employee works on a specific day. Day name should be MON, TUE, WED, THU, FRI, SAT, SUN."""
+        day_map = {
+            'MON': self.work_monday,
+            'TUE': self.work_tuesday,
+            'WED': self.work_wednesday,
+            'THU': self.work_thursday,
+            'FRI': self.work_friday,
+            'SAT': self.work_saturday,
+            'SUN': self.work_sunday,
+        }
+        return day_map.get(day_name.upper(), False) or False
+
+    def get_effective_call_time(self) -> str:
+        """Get the effective call time for this employee (adjusted for flexible schedules)."""
+        if self.is_flexible and self.adjusted_call_time:
+            return self.adjusted_call_time
+        return self.call_time or "08:00"
 
     def __repr__(self):
         return f"<Employee {self.employee_no}: {self.full_name}>"

@@ -40,19 +40,20 @@ class AttendanceReport(BaseReportGenerator):
         """
         # Base query
         query = self.db.query(ProcessedAttendance).filter(
-            ProcessedAttendance.work_date >= start_date,
-            ProcessedAttendance.work_date <= end_date
+            ProcessedAttendance.date >= start_date,
+            ProcessedAttendance.date <= end_date
         )
 
         # Filters
         if employee_id:
             query = query.filter(ProcessedAttendance.employee_id == employee_id)
         if department:
-            query = query.join(Employee).filter(Employee.department == department)
+            from app.models.employee import Department
+            query = query.join(Employee).join(Department).filter(Department.name == department)
 
         records = query.order_by(
             ProcessedAttendance.employee_id,
-            ProcessedAttendance.work_date
+            ProcessedAttendance.date
         ).all()
 
         # Group by employee
@@ -66,7 +67,7 @@ class AttendanceReport(BaseReportGenerator):
                     "employee_id": emp_id,
                     "employee_no": emp.employee_no if emp else "",
                     "employee_name": f"{emp.first_name} {emp.last_name}" if emp else "Unknown",
-                    "department": emp.department if emp else "",
+                    "department": emp.department.name if emp and emp.department else "",
                     "total_days": 0,
                     "present_days": 0,
                     "absent_days": 0,
@@ -83,16 +84,18 @@ class AttendanceReport(BaseReportGenerator):
             data = employee_data[emp_id]
             data["total_days"] += 1
 
-            # Attendance status
+            # Attendance status (using AttendanceStatus enum values)
             status = rec.status.value if rec.status else "unknown"
-            if status in ["present", "late", "undertime"]:
+            if status in ["complete", "incomplete"]:
                 data["present_days"] += 1
             elif status == "absent":
                 data["absent_days"] += 1
             elif status == "holiday":
                 data["holiday_days"] += 1
-            elif status in ["on_leave", "leave"]:
+            elif status == "on_leave":
                 data["leave_days"] += 1
+            elif status == "rest_day":
+                pass  # Don't count rest days
 
             # Late
             late_mins = rec.late_minutes or 0
@@ -106,17 +109,22 @@ class AttendanceReport(BaseReportGenerator):
                 data["undertime_count"] += 1
                 data["total_undertime_minutes"] += undertime_mins
 
-            # Overtime
-            ot_hours = rec.overtime_hours or Decimal("0")
+            # Overtime (stored in minutes, convert to hours for display)
+            ot_minutes = rec.overtime_minutes or 0
+            ot_hours = Decimal(str(ot_minutes)) / Decimal("60")
             data["overtime_hours"] += ot_hours
+
+            # Worked time (stored in minutes, convert to hours for display)
+            worked_minutes = rec.worked_minutes or 0
+            worked_hours = worked_minutes / 60.0
 
             # Add record details
             data["records"].append({
-                "date": self.format_date(rec.work_date),
-                "day": rec.work_date.strftime("%a"),
+                "date": self.format_date(rec.date),
+                "day": rec.date.strftime("%a"),
                 "time_in": rec.time_in.strftime("%H:%M") if rec.time_in else "-",
                 "time_out": rec.time_out.strftime("%H:%M") if rec.time_out else "-",
-                "worked_hours": float(rec.worked_hours) if rec.worked_hours else 0,
+                "worked_hours": worked_hours,
                 "late_minutes": late_mins,
                 "undertime_minutes": undertime_mins,
                 "overtime_hours": float(ot_hours),

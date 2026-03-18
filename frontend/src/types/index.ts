@@ -75,6 +75,21 @@ export interface Employee {
   tax_amount?: string;
   status?: EmployeeStatus;
   is_active: boolean;
+  // Schedule settings
+  call_time?: string;
+  time_out?: string;
+  buffer_minutes?: number;
+  is_flexible?: boolean;
+  adjusted_call_time?: string | null;
+  // Working days
+  work_monday?: boolean;
+  work_tuesday?: boolean;
+  work_wednesday?: boolean;
+  work_thursday?: boolean;
+  work_friday?: boolean;
+  work_saturday?: boolean;
+  work_sunday?: boolean;
+  working_days_per_week?: number;
 }
 
 // Attendance types

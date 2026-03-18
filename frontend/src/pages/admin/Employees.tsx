@@ -33,6 +33,15 @@ interface EmployeeFormData {
   work_hours_per_day: string;
   buffer_minutes: string;
   is_flexible: boolean;
+  adjusted_call_time: string;
+  // Working days
+  work_monday: boolean;
+  work_tuesday: boolean;
+  work_wednesday: boolean;
+  work_thursday: boolean;
+  work_friday: boolean;
+  work_saturday: boolean;
+  work_sunday: boolean;
 }
 
 const emptyForm: EmployeeFormData = {
@@ -63,6 +72,15 @@ const emptyForm: EmployeeFormData = {
   work_hours_per_day: '8',
   buffer_minutes: '10',
   is_flexible: false,
+  adjusted_call_time: '',
+  // Working days
+  work_monday: true,
+  work_tuesday: true,
+  work_wednesday: true,
+  work_thursday: true,
+  work_friday: true,
+  work_saturday: false,
+  work_sunday: false,
 };
 
 // Props for EmployeeForm component
@@ -465,9 +483,51 @@ const EmployeeForm = memo(function EmployeeForm({
               onChange={(e) => setFormData(prev => ({ ...prev, is_flexible: e.target.checked }))}
               className="w-4 h-4 text-primary-600 border-gray-300 rounded focus:ring-primary-500"
             />
-            <span className="text-sm text-gray-700">Flexible Schedule (no late deductions)</span>
+            <span className="text-sm text-gray-700">Flexible Schedule</span>
           </label>
+          <p className="text-xs text-gray-400 mt-1">If flexible, use Adjusted Call Time instead of Call Time</p>
         </div>
+        {formData.is_flexible && (
+          <div className="mt-3">
+            <label className="form-label">Adjusted Call Time</label>
+            <input
+              type="time"
+              value={formData.adjusted_call_time}
+              onChange={(e) => setFormData(prev => ({ ...prev, adjusted_call_time: e.target.value }))}
+              className="form-input w-32"
+            />
+            <p className="text-xs text-gray-400 mt-1">Actual expected arrival for flexible employees</p>
+          </div>
+        )}
+      </div>
+
+      {/* Working Days */}
+      <div className="border-t pt-4">
+        <h3 className="font-medium text-gray-700 mb-3">Working Days</h3>
+        <div className="grid grid-cols-7 gap-2">
+          {[
+            { key: 'work_monday', label: 'Mon' },
+            { key: 'work_tuesday', label: 'Tue' },
+            { key: 'work_wednesday', label: 'Wed' },
+            { key: 'work_thursday', label: 'Thu' },
+            { key: 'work_friday', label: 'Fri' },
+            { key: 'work_saturday', label: 'Sat' },
+            { key: 'work_sunday', label: 'Sun' },
+          ].map(day => (
+            <label key={day.key} className="flex flex-col items-center gap-1 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={formData[day.key as keyof EmployeeFormData] as boolean}
+                onChange={(e) => setFormData(prev => ({ ...prev, [day.key]: e.target.checked }))}
+                className="w-5 h-5 text-primary-600 border-gray-300 rounded focus:ring-primary-500"
+              />
+              <span className="text-xs text-gray-600">{day.label}</span>
+            </label>
+          ))}
+        </div>
+        <p className="text-xs text-gray-400 mt-2">
+          Select the days this employee works. Absences will only count on working days.
+        </p>
       </div>
 
       <div className="flex gap-2 justify-end pt-4">
@@ -493,10 +553,18 @@ export function EmployeesPage() {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
 
-  // Pagination state
+  // Pagination state - load from localStorage or default to 50
   const [page, setPage] = useState(1);
-  const [pageSize] = useState(15);
+  const [pageSize, setPageSize] = useState(() => {
+    const saved = localStorage.getItem('employees_page_size');
+    return saved ? parseInt(saved, 10) : 50;
+  });
   const [total, setTotal] = useState(0);
+
+  // Save page size to localStorage when it changes
+  useEffect(() => {
+    localStorage.setItem('employees_page_size', pageSize.toString());
+  }, [pageSize]);
 
   // Sorting state
   const [sortBy, setSortBy] = useState<string>('name');
@@ -627,6 +695,15 @@ export function EmployeesPage() {
       work_hours_per_day: (emp as any).work_hours_per_day?.toString() || '8',
       buffer_minutes: (emp as any).buffer_minutes?.toString() || '10',
       is_flexible: (emp as any).is_flexible || false,
+      adjusted_call_time: (emp as any).adjusted_call_time || '',
+      // Working days
+      work_monday: (emp as any).work_monday ?? true,
+      work_tuesday: (emp as any).work_tuesday ?? true,
+      work_wednesday: (emp as any).work_wednesday ?? true,
+      work_thursday: (emp as any).work_thursday ?? true,
+      work_friday: (emp as any).work_friday ?? true,
+      work_saturday: (emp as any).work_saturday ?? false,
+      work_sunday: (emp as any).work_sunday ?? false,
     });
     setError('');
     setShowEditModal(true);
@@ -777,6 +854,15 @@ export function EmployeesPage() {
         work_hours_per_day: formData.work_hours_per_day ? parseFloat(formData.work_hours_per_day) : undefined,
         buffer_minutes: formData.buffer_minutes ? parseInt(formData.buffer_minutes) : undefined,
         is_flexible: formData.is_flexible,
+        adjusted_call_time: formData.adjusted_call_time || undefined,
+        // Working days
+        work_monday: formData.work_monday,
+        work_tuesday: formData.work_tuesday,
+        work_wednesday: formData.work_wednesday,
+        work_thursday: formData.work_thursday,
+        work_friday: formData.work_friday,
+        work_saturday: formData.work_saturday,
+        work_sunday: formData.work_sunday,
       } as any);
       setShowAddModal(false);
       loadEmployees();
@@ -823,6 +909,15 @@ export function EmployeesPage() {
         work_hours_per_day: formData.work_hours_per_day ? parseFloat(formData.work_hours_per_day) : undefined,
         buffer_minutes: formData.buffer_minutes ? parseInt(formData.buffer_minutes) : undefined,
         is_flexible: formData.is_flexible,
+        adjusted_call_time: formData.adjusted_call_time || undefined,
+        // Working days
+        work_monday: formData.work_monday,
+        work_tuesday: formData.work_tuesday,
+        work_wednesday: formData.work_wednesday,
+        work_thursday: formData.work_thursday,
+        work_friday: formData.work_friday,
+        work_saturday: formData.work_saturday,
+        work_sunday: formData.work_sunday,
       } as any);
       setShowEditModal(false);
       loadEmployees();
@@ -1141,68 +1236,84 @@ export function EmployeesPage() {
           </div>
 
           {/* Pagination */}
-          {totalPages > 1 && (
+          {total > 0 && (
             <div className="px-6 py-4 border-t border-gray-200 flex items-center justify-between">
-              <div className="text-sm text-gray-500">
-                Showing {((page - 1) * pageSize) + 1} to {Math.min(page * pageSize, total)} of {total} employees
+              <div className="text-sm text-gray-500 flex items-center gap-4">
+                <span>Showing {((page - 1) * pageSize) + 1} to {Math.min(page * pageSize, total)} of {total} employees</span>
+                <select
+                  value={pageSize}
+                  onChange={(e) => {
+                    setPageSize(Number(e.target.value));
+                    setPage(1);
+                  }}
+                  className="border border-gray-300 rounded px-2 py-1 text-sm"
+                >
+                  <option value={10}>10 per page</option>
+                  <option value={20}>20 per page</option>
+                  <option value={30}>30 per page</option>
+                  <option value={50}>50 per page</option>
+                  <option value={100}>100 per page</option>
+                </select>
               </div>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => setPage(1)}
-                  disabled={page === 1}
-                  className="px-3 py-1 text-sm border rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  First
-                </button>
-                <button
-                  onClick={() => setPage(page - 1)}
-                  disabled={page === 1}
-                  className="px-3 py-1 text-sm border rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  Prev
-                </button>
-                <div className="flex items-center gap-1">
-                  {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
-                    let pageNum;
-                    if (totalPages <= 5) {
-                      pageNum = i + 1;
-                    } else if (page <= 3) {
-                      pageNum = i + 1;
-                    } else if (page >= totalPages - 2) {
-                      pageNum = totalPages - 4 + i;
-                    } else {
-                      pageNum = page - 2 + i;
-                    }
-                    return (
-                      <button
-                        key={pageNum}
-                        onClick={() => setPage(pageNum)}
-                        className={`px-3 py-1 text-sm border rounded ${
-                          page === pageNum
-                            ? 'bg-primary-600 text-white border-primary-600'
-                            : 'hover:bg-gray-50'
-                        }`}
-                      >
-                        {pageNum}
-                      </button>
-                    );
-                  })}
+              {totalPages > 1 && (
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setPage(1)}
+                    disabled={page === 1}
+                    className="px-3 py-1 text-sm border rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    First
+                  </button>
+                  <button
+                    onClick={() => setPage(page - 1)}
+                    disabled={page === 1}
+                    className="px-3 py-1 text-sm border rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    Prev
+                  </button>
+                  <div className="flex items-center gap-1">
+                    {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                      let pageNum;
+                      if (totalPages <= 5) {
+                        pageNum = i + 1;
+                      } else if (page <= 3) {
+                        pageNum = i + 1;
+                      } else if (page >= totalPages - 2) {
+                        pageNum = totalPages - 4 + i;
+                      } else {
+                        pageNum = page - 2 + i;
+                      }
+                      return (
+                        <button
+                          key={pageNum}
+                          onClick={() => setPage(pageNum)}
+                          className={`px-3 py-1 text-sm border rounded ${
+                            page === pageNum
+                              ? 'bg-primary-600 text-white border-primary-600'
+                              : 'hover:bg-gray-50'
+                          }`}
+                        >
+                          {pageNum}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <button
+                    onClick={() => setPage(page + 1)}
+                    disabled={page === totalPages}
+                    className="px-3 py-1 text-sm border rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    Next
+                  </button>
+                  <button
+                    onClick={() => setPage(totalPages)}
+                    disabled={page === totalPages}
+                    className="px-3 py-1 text-sm border rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    Last
+                  </button>
                 </div>
-                <button
-                  onClick={() => setPage(page + 1)}
-                  disabled={page === totalPages}
-                  className="px-3 py-1 text-sm border rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  Next
-                </button>
-                <button
-                  onClick={() => setPage(totalPages)}
-                  disabled={page === totalPages}
-                  className="px-3 py-1 text-sm border rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  Last
-                </button>
-              </div>
+              )}
             </div>
           )}
           </>

@@ -54,28 +54,36 @@ class PhilHealthRF1Report(BaseReportGenerator):
                 "contributions": []
             }
 
-        # Get payslips with PhilHealth contributions
+        # Get all payslips for the period
         payslips = self.db.query(Payslip).filter(
-            Payslip.payroll_run_id.in_(run_ids),
-            Payslip.philhealth_ee > 0
+            Payslip.payroll_run_id.in_(run_ids)
         ).all()
 
         # Aggregate by employee
         employee_contributions = {}
 
         for ps in payslips:
+            # Extract PhilHealth contributions from deductions JSON
+            deductions_dict = ps.deductions or {}
+            philhealth_ee = Decimal(str(deductions_dict.get("philhealth", 0)))
+            philhealth_er = Decimal(str(deductions_dict.get("philhealth_employer", 0)))
+
+            # Skip if no PhilHealth contribution
+            if philhealth_ee == 0 and philhealth_er == 0:
+                continue
+
             emp_id = ps.employee_id
             emp = ps.employee
 
             if emp_id not in employee_contributions:
                 employee_contributions[emp_id] = {
                     "employee_id": emp_id,
-                    "philhealth_no": emp.philhealth_no if emp else "",
+                    "philhealth_no": getattr(emp, 'philhealth_no', "") if emp else "",
                     "employee_no": emp.employee_no if emp else "",
                     "last_name": emp.last_name if emp else "",
                     "first_name": emp.first_name if emp else "",
                     "middle_name": emp.middle_name if emp else "",
-                    "birthdate": self.format_date(emp.birth_date) if emp and emp.birth_date else "",
+                    "birthdate": self.format_date(getattr(emp, 'birth_date', None)) if emp and getattr(emp, 'birth_date', None) else "",
                     "monthly_basic_salary": Decimal("0"),
                     "ee_share": Decimal("0"),
                     "er_share": Decimal("0"),
@@ -83,12 +91,12 @@ class PhilHealthRF1Report(BaseReportGenerator):
                 }
 
             contrib = employee_contributions[emp_id]
-            contrib["ee_share"] += ps.philhealth_ee or Decimal("0")
-            contrib["er_share"] += ps.philhealth_er or Decimal("0")
-            if ps.gross_pay:
+            contrib["ee_share"] += philhealth_ee
+            contrib["er_share"] += philhealth_er
+            if ps.total_earnings:
                 contrib["monthly_basic_salary"] = max(
                     contrib["monthly_basic_salary"],
-                    ps.gross_pay
+                    ps.total_earnings
                 )
 
         # Calculate totals and format

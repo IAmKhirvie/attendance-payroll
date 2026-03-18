@@ -69,7 +69,7 @@ export function LoansPage() {
       </div>
 
       <Tab.Group selectedIndex={selectedTab} onChange={setSelectedTab}>
-        <Tab.List className="flex space-x-1 rounded-xl bg-primary-900/20 p-1">
+        <Tab.List className="flex space-x-1 rounded-xl bg-gray-100 p-1">
           {['Active Loans', 'All Loans', 'Loan Types'].map((tab) => (
             <Tab
               key={tab}
@@ -79,7 +79,7 @@ export function LoansPage() {
                   'ring-white ring-opacity-60 ring-offset-2 ring-offset-primary-400 focus:outline-none focus:ring-2',
                   selected
                     ? 'bg-white text-primary-700 shadow'
-                    : 'text-primary-100 hover:bg-white/[0.12] hover:text-white'
+                    : 'text-gray-600 hover:bg-white/[0.5] hover:text-gray-900'
                 )
               }
             >
@@ -140,7 +140,13 @@ function LoansTab({ showPaid }: { showPaid: boolean }) {
       ]);
       setLoans(loansData.items);
       setLoanTypes(typesData.items);
-      setEmployees(employeesData.items);
+      // Sort employees alphabetically by last name, then first name
+      const sortedEmployees = employeesData.items.sort((a: Employee, b: Employee) => {
+        const lastNameCompare = a.last_name.localeCompare(b.last_name);
+        if (lastNameCompare !== 0) return lastNameCompare;
+        return a.first_name.localeCompare(b.first_name);
+      });
+      setEmployees(sortedEmployees);
     } catch (error) {
       console.error('Failed to load loans:', error);
       setMessage({ type: 'error', text: 'Failed to load loans' });

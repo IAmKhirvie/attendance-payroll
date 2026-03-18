@@ -54,28 +54,36 @@ class SSSR3Report(BaseReportGenerator):
                 "contributions": []
             }
 
-        # Get payslips with SSS contributions
+        # Get all payslips for the period
         payslips = self.db.query(Payslip).filter(
-            Payslip.payroll_run_id.in_(run_ids),
-            Payslip.sss_ee > 0
+            Payslip.payroll_run_id.in_(run_ids)
         ).all()
 
         # Aggregate by employee (sum contributions if multiple payslips)
         employee_contributions = {}
 
         for ps in payslips:
+            # Extract SSS contributions from deductions JSON
+            deductions_dict = ps.deductions or {}
+            sss_ee = Decimal(str(deductions_dict.get("sss", 0)))
+            sss_er = Decimal(str(deductions_dict.get("sss_employer", 0)))
+
+            # Skip if no SSS contribution
+            if sss_ee == 0 and sss_er == 0:
+                continue
+
             emp_id = ps.employee_id
             emp = ps.employee
 
             if emp_id not in employee_contributions:
                 employee_contributions[emp_id] = {
                     "employee_id": emp_id,
-                    "sss_no": emp.sss_no if emp else "",
+                    "sss_no": getattr(emp, 'sss_no', "") if emp else "",
                     "employee_no": emp.employee_no if emp else "",
                     "last_name": emp.last_name if emp else "",
                     "first_name": emp.first_name if emp else "",
                     "middle_name": emp.middle_name if emp else "",
-                    "birthdate": self.format_date(emp.birth_date) if emp and emp.birth_date else "",
+                    "birthdate": self.format_date(getattr(emp, 'birth_date', None)) if emp and getattr(emp, 'birth_date', None) else "",
                     "monthly_salary_credit": Decimal("0"),
                     "ee_contribution": Decimal("0"),
                     "er_contribution": Decimal("0"),
@@ -83,13 +91,13 @@ class SSSR3Report(BaseReportGenerator):
                 }
 
             contrib = employee_contributions[emp_id]
-            contrib["ee_contribution"] += ps.sss_ee or Decimal("0")
-            contrib["er_contribution"] += ps.sss_er or Decimal("0")
+            contrib["ee_contribution"] += sss_ee
+            contrib["er_contribution"] += sss_er
             # MSC is typically the basis for contributions
-            if ps.gross_pay:
+            if ps.total_earnings:
                 contrib["monthly_salary_credit"] = max(
                     contrib["monthly_salary_credit"],
-                    ps.gross_pay
+                    ps.total_earnings
                 )
 
         # Calculate totals and format

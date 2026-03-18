@@ -65,8 +65,8 @@ export function AttendancePage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Department and search filters for records tab
-  const [departments, setDepartments] = useState<Department[]>([]);
-  const [selectedDepartment, setSelectedDepartment] = useState<string>('all');
+  const [_departments, setDepartments] = useState<Department[]>([]);
+  const [_selectedDepartment, _setSelectedDepartment] = useState<string>('all');
   const [recordsSearchTerm, setRecordsSearchTerm] = useState('');
   const [recordsStatusFilter, setRecordsStatusFilter] = useState<string>('all');
 

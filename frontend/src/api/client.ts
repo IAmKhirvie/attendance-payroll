@@ -1760,4 +1760,95 @@ export const reportsApi = {
   },
 };
 
+// Backups API
+export const backupsApi = {
+  getStatus: async (): Promise<{
+    backup_directory: string;
+    database_path: string;
+    total_backups: number;
+    total_size_mb: number;
+    latest_backup: {
+      filename: string;
+      size: number;
+      size_mb: number;
+      created_at: string;
+      compressed: boolean;
+    } | null;
+    retention_days: number;
+  }> => {
+    const response = await api.get('/backups/status');
+    return response.data;
+  },
+
+  list: async (): Promise<{
+    backups: Array<{
+      filename: string;
+      size: number;
+      size_mb: number;
+      created_at: string;
+      compressed: boolean;
+    }>;
+  }> => {
+    const response = await api.get('/backups/list');
+    return response.data;
+  },
+
+  create: async (compress: boolean = true): Promise<{
+    filename: string;
+    path: string;
+    size: number;
+    size_mb: number;
+    created_at: string;
+    compressed: boolean;
+  }> => {
+    const response = await api.post('/backups/create', null, {
+      params: { compress }
+    });
+    return response.data;
+  },
+
+  restore: async (backupName: string): Promise<{
+    restored_from: string;
+    restored_at: string;
+    pre_restore_backup: string;
+  }> => {
+    const response = await api.post(`/backups/restore/${backupName}`);
+    return response.data;
+  },
+
+  delete: async (backupName: string): Promise<{
+    deleted: string;
+    deleted_at: string;
+  }> => {
+    const response = await api.delete(`/backups/${backupName}`);
+    return response.data;
+  },
+
+  cleanup: async (retentionDays: number = 30): Promise<{
+    deleted_count: number;
+    deleted_files: string[];
+    retention_days: number;
+    cutoff_date: string;
+  }> => {
+    const response = await api.post('/backups/cleanup', null, {
+      params: { retention_days: retentionDays }
+    });
+    return response.data;
+  },
+
+  download: async (backupName: string): Promise<void> => {
+    const response = await api.get(`/backups/download/${backupName}`, {
+      responseType: 'blob',
+    });
+    const url = window.URL.createObjectURL(new Blob([response.data]));
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', backupName);
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.URL.revokeObjectURL(url);
+  },
+};
+
 export default api;

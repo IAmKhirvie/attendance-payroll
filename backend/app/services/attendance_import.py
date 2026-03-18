@@ -139,6 +139,16 @@ class TimeReportParser:
                     mins = worked_minutes % 60
                     calculated_hours = float(f"{hours}.{mins:02d}")
 
+                # Status determination - don't assume weekend is rest day
+                # The employee's working days schedule will determine this later
+                if time_in and time_out:
+                    initial_status = 'complete'
+                elif time_in or time_out:
+                    initial_status = 'incomplete'
+                else:
+                    # No attendance - will be determined as rest_day or absent based on employee schedule
+                    initial_status = 'no_attendance'
+
                 record = {
                     'employee_name': emp_name,
                     'employee_biometric_id': emp_id,
@@ -149,7 +159,7 @@ class TimeReportParser:
                     'worked_minutes': worked_minutes,
                     'daily_total_hours': calculated_hours,
                     'note': note,
-                    'status': 'complete' if time_in and time_out else ('incomplete' if time_in or time_out else ('rest_day' if day_name in ['SUN', 'SAT'] else 'absent')),
+                    'status': initial_status,
                     'exceptions': [],
                     'has_exception': False,
                     'auto_fixed': [],
@@ -488,13 +498,47 @@ def import_time_report(
         if record['time_out']:
             time_out_dt = datetime.combine(record['date'], record['time_out'])
 
+        # Determine status based on employee's working days schedule
+        record_status = record['status']
+
+        if record_status == 'no_attendance':
+            # Check if employee works on this day
+            day_name = record['day_name']  # MON, TUE, WED, THU, FRI, SAT, SUN
+            works_today = employee.works_on_day(day_name)
+
+            if works_today:
+                # Employee should have worked but didn't - absent
+                record_status = 'absent'
+            else:
+                # Employee doesn't work this day - rest day
+                record_status = 'rest_day'
+
         status_map = {
             'complete': AttendanceStatus.COMPLETE,
             'incomplete': AttendanceStatus.INCOMPLETE,
             'absent': AttendanceStatus.ABSENT,
             'rest_day': AttendanceStatus.REST_DAY
         }
-        status = status_map.get(record['status'], AttendanceStatus.INCOMPLETE)
+        status = status_map.get(record_status, AttendanceStatus.INCOMPLETE)
+
+        # Calculate late minutes based on employee's schedule
+        late_minutes = 0
+        if time_in_dt and record_status in ['complete', 'incomplete']:
+            # Get employee's effective call time (handles flexible schedules)
+            effective_call_time = employee.get_effective_call_time()
+            buffer_mins = employee.buffer_minutes or 10
+
+            try:
+                call_hour, call_min = map(int, effective_call_time.split(':'))
+                call_time_dt = datetime.combine(record['date'], time(call_hour, call_min))
+                # Add buffer to call time - employee should arrive by call_time + buffer
+                latest_arrival = call_time_dt + timedelta(minutes=buffer_mins)
+
+                if time_in_dt > latest_arrival:
+                    # Employee is late
+                    late_minutes = int((time_in_dt - latest_arrival).total_seconds() / 60)
+            except (ValueError, TypeError):
+                pass  # Invalid call time format, skip late calculation
 
         exceptions = record.get('exceptions', [])
         if record.get('auto_fixed'):
@@ -502,12 +546,17 @@ def import_time_report(
                 if fix not in exceptions:
                     exceptions.append(f'auto_fixed:{fix}')
 
+        # Add late exception if applicable
+        if late_minutes > 0 and 'late' not in exceptions:
+            exceptions.append('late')
+
         if existing:
             existing.time_in = time_in_dt
             existing.time_out = time_out_dt
             existing.worked_minutes = record['worked_minutes']
+            existing.late_minutes = late_minutes
             existing.status = status
-            existing.has_exception = record['has_exception']
+            existing.has_exception = record['has_exception'] or late_minutes > 0
             existing.exceptions = exceptions if exceptions else None
             updated += 1
         else:
@@ -517,8 +566,9 @@ def import_time_report(
                 time_in=time_in_dt,
                 time_out=time_out_dt,
                 worked_minutes=record['worked_minutes'],
+                late_minutes=late_minutes,
                 status=status,
-                has_exception=record['has_exception'],
+                has_exception=record['has_exception'] or late_minutes > 0,
                 exceptions=exceptions if exceptions else None
             )
             db.add(attendance)

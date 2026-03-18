@@ -1342,6 +1342,26 @@ export function PayrollPage() {
                   </>
                 ) : (
                   <>
+                    {/* Daily-based calculation breakdown */}
+                    {selectedPayslip.earnings.daily_rate > 0 && (
+                      <div className="bg-blue-50 p-3 rounded-lg mb-3 text-sm">
+                        <div className="font-medium text-blue-800 mb-2">Computation Breakdown</div>
+                        <div className="space-y-1 text-gray-700">
+                          <div className="flex justify-between">
+                            <span>Daily Rate:</span>
+                            <span className="font-medium">{formatCurrency(selectedPayslip.earnings.daily_rate)}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span>Days Worked:</span>
+                            <span className="font-medium">{selectedPayslip.earnings.days_worked || selectedPayslip.days_worked || 0} days</span>
+                          </div>
+                          <div className="flex justify-between border-t pt-1 mt-1">
+                            <span>Daily Rate × Days:</span>
+                            <span className="font-bold text-blue-700">{formatCurrency(selectedPayslip.earnings.daily_based_basic || 0)}</span>
+                          </div>
+                        </div>
+                      </div>
+                    )}
                     <div className="flex justify-between">
                       <span className="text-gray-600">Basic (Semi)</span>
                       <span className="font-medium">{formatCurrency(selectedPayslip.earnings.basic_semi || 0)}</span>

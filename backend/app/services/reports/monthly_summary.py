@@ -73,7 +73,8 @@ class MonthlyPayrollSummary(BaseReportGenerator):
 
         # Department filter
         if department:
-            query = query.join(Employee).filter(Employee.department == department)
+            from app.models.employee import Department
+            query = query.join(Employee).join(Department).filter(Department.name == department)
 
         payslips = query.all()
 
@@ -93,26 +94,35 @@ class MonthlyPayrollSummary(BaseReportGenerator):
         payslip_data = []
 
         for ps in payslips:
-            gross = ps.gross_pay or Decimal("0")
-            deductions = ps.total_deductions or Decimal("0")
+            gross = ps.total_earnings or Decimal("0")
+            deductions_total = ps.total_deductions or Decimal("0")
             net = ps.net_pay or Decimal("0")
 
             total_gross += gross
-            total_deductions += deductions
+            total_deductions += deductions_total
             total_net += net
 
-            # Government contributions
-            sss_ee += ps.sss_ee or Decimal("0")
-            sss_er += ps.sss_er or Decimal("0")
-            philhealth_ee += ps.philhealth_ee or Decimal("0")
-            philhealth_er += ps.philhealth_er or Decimal("0")
-            pagibig_ee += ps.pagibig_ee or Decimal("0")
-            pagibig_er += ps.pagibig_er or Decimal("0")
-            tax += ps.withholding_tax or Decimal("0")
+            # Extract government contributions from deductions JSON
+            deductions_dict = ps.deductions or {}
+            ps_sss_ee = Decimal(str(deductions_dict.get("sss", 0)))
+            ps_sss_er = Decimal(str(deductions_dict.get("sss_employer", 0)))
+            ps_philhealth_ee = Decimal(str(deductions_dict.get("philhealth", 0)))
+            ps_philhealth_er = Decimal(str(deductions_dict.get("philhealth_employer", 0)))
+            ps_pagibig_ee = Decimal(str(deductions_dict.get("pagibig", 0)))
+            ps_pagibig_er = Decimal(str(deductions_dict.get("pagibig_employer", 0)))
+            ps_tax = Decimal(str(deductions_dict.get("withholding_tax", 0)))
+
+            sss_ee += ps_sss_ee
+            sss_er += ps_sss_er
+            philhealth_ee += ps_philhealth_ee
+            philhealth_er += ps_philhealth_er
+            pagibig_ee += ps_pagibig_ee
+            pagibig_er += ps_pagibig_er
+            tax += ps_tax
 
             # Group by department
             emp = ps.employee
-            dept = emp.department if emp else "Unknown"
+            dept = emp.department.name if emp and emp.department else "Unknown"
             if dept not in department_data:
                 department_data[dept] = {
                     "department": dept,
@@ -123,7 +133,7 @@ class MonthlyPayrollSummary(BaseReportGenerator):
                 }
             department_data[dept]["employee_count"] += 1
             department_data[dept]["gross_pay"] += gross
-            department_data[dept]["total_deductions"] += deductions
+            department_data[dept]["total_deductions"] += deductions_total
             department_data[dept]["net_pay"] += net
 
             # Individual payslip data
@@ -132,12 +142,12 @@ class MonthlyPayrollSummary(BaseReportGenerator):
                 "employee_name": f"{emp.first_name} {emp.last_name}" if emp else "Unknown",
                 "department": dept,
                 "gross_pay": float(gross),
-                "total_deductions": float(deductions),
+                "total_deductions": float(deductions_total),
                 "net_pay": float(net),
-                "sss": float(ps.sss_ee or 0),
-                "philhealth": float(ps.philhealth_ee or 0),
-                "pagibig": float(ps.pagibig_ee or 0),
-                "tax": float(ps.withholding_tax or 0),
+                "sss": float(ps_sss_ee),
+                "philhealth": float(ps_philhealth_ee),
+                "pagibig": float(ps_pagibig_ee),
+                "tax": float(ps_tax),
             })
 
         # Convert department data to list

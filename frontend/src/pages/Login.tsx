@@ -79,20 +79,39 @@ export function LoginPage() {
     }
   };
 
+  // Glass card style
+  const glassCardStyle = {
+    background: 'rgba(255, 255, 255, 0.85)',
+    backdropFilter: 'blur(20px)',
+    WebkitBackdropFilter: 'blur(20px)',
+    border: '1px solid rgba(255, 255, 255, 0.5)',
+    boxShadow: '0 8px 32px rgba(31, 38, 135, 0.2)',
+  };
+
   if (showRegister) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 via-white to-indigo-50 py-12 px-4 sm:px-6 lg:px-8">
-        <div className="max-w-md w-full">
-          <div className="card shadow-xl border-0 bg-white/80 backdrop-blur-sm">
+      <div className="min-h-screen flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
+        <div className="max-w-md w-full animate-fade-in">
+          <div className="rounded-2xl p-8" style={glassCardStyle}>
             <div className="text-center mb-8">
               <div className="flex justify-center mb-4">
-                <img
-                  src="/logo.png"
-                  alt="ICAN Logo"
-                  className="h-16 w-16 object-contain drop-shadow-md"
-                />
+                <div
+                  className="h-20 w-20 rounded-2xl flex items-center justify-center"
+                  style={{
+                    background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                    boxShadow: '0 8px 32px rgba(102, 126, 234, 0.4)',
+                  }}
+                >
+                  <img
+                    src="/logo.png"
+                    alt="ICAN Logo"
+                    className="h-14 w-14 object-contain"
+                  />
+                </div>
               </div>
-              <h2 className="text-2xl font-bold text-gray-900">Create Account</h2>
+              <h2 className="text-2xl font-bold bg-gradient-to-r from-purple-700 to-indigo-600 bg-clip-text text-transparent">
+                Create Account
+              </h2>
               <p className="mt-2 text-sm text-gray-600">
                 Register for an account. Your registration will need HR approval.
               </p>
@@ -100,7 +119,13 @@ export function LoginPage() {
 
             {registerSuccess ? (
               <div className="text-center">
-                <div className="mb-4 p-4 bg-green-50 text-green-700 rounded-md">
+                <div
+                  className="mb-4 p-4 rounded-xl text-green-700"
+                  style={{
+                    background: 'rgba(34, 197, 94, 0.15)',
+                    border: '1px solid rgba(34, 197, 94, 0.3)',
+                  }}
+                >
                   Registration successful! Your account is pending approval from HR.
                 </div>
                 <button
@@ -116,7 +141,13 @@ export function LoginPage() {
             ) : (
               <form onSubmit={handleRegister} className="space-y-4">
                 {registerError && (
-                  <div className="p-3 bg-red-50 text-red-700 rounded-md text-sm">
+                  <div
+                    className="p-3 rounded-xl text-red-700 text-sm"
+                    style={{
+                      background: 'rgba(239, 68, 68, 0.15)',
+                      border: '1px solid rgba(239, 68, 68, 0.3)',
+                    }}
+                  >
                     {registerError}
                   </div>
                 )}
@@ -201,7 +232,7 @@ export function LoginPage() {
                   <button
                     type="button"
                     onClick={() => setShowRegister(false)}
-                    className="text-primary-600 hover:text-primary-500"
+                    className="text-purple-600 hover:text-purple-500 font-medium"
                   >
                     Sign in
                   </button>
@@ -215,18 +246,26 @@ export function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 via-white to-indigo-50 py-12 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-md w-full">
-        <div className="card shadow-xl border-0 bg-white/80 backdrop-blur-sm">
+    <div className="min-h-screen flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
+      <div className="max-w-md w-full animate-fade-in">
+        <div className="rounded-2xl p-8" style={glassCardStyle}>
           <div className="text-center mb-8">
             <div className="flex justify-center mb-4">
-              <img
-                src="/logo.png"
-                alt="ICAN Logo"
-                className="h-20 w-20 object-contain drop-shadow-md"
-              />
+              <div
+                className="h-24 w-24 rounded-2xl flex items-center justify-center animate-pulse-glow"
+                style={{
+                  background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                  boxShadow: '0 8px 32px rgba(102, 126, 234, 0.4)',
+                }}
+              >
+                <img
+                  src="/logo.png"
+                  alt="ICAN Logo"
+                  className="h-16 w-16 object-contain"
+                />
+              </div>
             </div>
-            <h2 className="text-2xl font-bold text-gray-900">
+            <h2 className="text-2xl font-bold bg-gradient-to-r from-purple-700 to-indigo-600 bg-clip-text text-transparent">
               ICAN Attendance & Payroll
             </h2>
             <p className="mt-2 text-sm text-gray-600">
@@ -236,7 +275,13 @@ export function LoginPage() {
 
           <form onSubmit={handleLogin} className="space-y-6">
             {error && (
-              <div className="p-3 bg-red-50 text-red-700 rounded-md text-sm">
+              <div
+                className="p-3 rounded-xl text-red-700 text-sm"
+                style={{
+                  background: 'rgba(239, 68, 68, 0.15)',
+                  border: '1px solid rgba(239, 68, 68, 0.3)',
+                }}
+              >
                 {error}
               </div>
             )}
@@ -277,7 +322,14 @@ export function LoginPage() {
               disabled={isLoading}
               className="btn-primary w-full"
             >
-              {isLoading ? 'Signing in...' : 'Sign in'}
+              {isLoading ? (
+                <span className="flex items-center justify-center gap-2">
+                  <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></div>
+                  Signing in...
+                </span>
+              ) : (
+                'Sign in'
+              )}
             </button>
 
             <p className="text-center text-sm text-gray-600">
@@ -285,7 +337,7 @@ export function LoginPage() {
               <button
                 type="button"
                 onClick={() => setShowRegister(true)}
-                className="text-primary-600 hover:text-primary-500"
+                className="text-purple-600 hover:text-purple-500 font-medium"
               >
                 Register
               </button>
@@ -293,7 +345,7 @@ export function LoginPage() {
           </form>
         </div>
 
-        <p className="mt-6 text-center text-xs text-gray-500">
+        <p className="mt-6 text-center text-xs text-white/70">
           ICAN Language Center - Internal Use Only
         </p>
       </div>

@@ -65,6 +65,7 @@ import { HolidaysPage } from './pages/admin/Holidays';
 import { LoansPage } from './pages/admin/Loans';
 import LeavePage from './pages/admin/Leave';
 import ReportsPage from './pages/admin/Reports';
+import SchedulingPage from './pages/admin/Scheduling';
 
 // Employee Pages
 import { EmployeeDashboard } from './pages/employee/Dashboard';
@@ -116,6 +117,7 @@ function App() {
           <Route path="loans" element={<LoansPage />} />
           <Route path="leave" element={<LeavePage />} />
           <Route path="reports" element={<ReportsPage />} />
+          <Route path="scheduling" element={<SchedulingPage />} />
         </Route>
 
         {/* Employee routes */}

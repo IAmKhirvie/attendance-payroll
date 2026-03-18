@@ -54,28 +54,36 @@ class PagIBIGMCRReport(BaseReportGenerator):
                 "contributions": []
             }
 
-        # Get payslips with Pag-IBIG contributions
+        # Get all payslips for the period
         payslips = self.db.query(Payslip).filter(
-            Payslip.payroll_run_id.in_(run_ids),
-            Payslip.pagibig_ee > 0
+            Payslip.payroll_run_id.in_(run_ids)
         ).all()
 
         # Aggregate by employee
         employee_contributions = {}
 
         for ps in payslips:
+            # Extract Pag-IBIG contributions from deductions JSON
+            deductions_dict = ps.deductions or {}
+            pagibig_ee = Decimal(str(deductions_dict.get("pagibig", 0)))
+            pagibig_er = Decimal(str(deductions_dict.get("pagibig_employer", 0)))
+
+            # Skip if no Pag-IBIG contribution
+            if pagibig_ee == 0 and pagibig_er == 0:
+                continue
+
             emp_id = ps.employee_id
             emp = ps.employee
 
             if emp_id not in employee_contributions:
                 employee_contributions[emp_id] = {
                     "employee_id": emp_id,
-                    "pagibig_no": emp.pagibig_no if emp else "",
+                    "pagibig_no": getattr(emp, 'pagibig_no', "") if emp else "",
                     "employee_no": emp.employee_no if emp else "",
                     "last_name": emp.last_name if emp else "",
                     "first_name": emp.first_name if emp else "",
                     "middle_name": emp.middle_name if emp else "",
-                    "birthdate": self.format_date(emp.birth_date) if emp and emp.birth_date else "",
+                    "birthdate": self.format_date(getattr(emp, 'birth_date', None)) if emp and getattr(emp, 'birth_date', None) else "",
                     "monthly_compensation": Decimal("0"),
                     "ee_share": Decimal("0"),
                     "er_share": Decimal("0"),
@@ -83,12 +91,12 @@ class PagIBIGMCRReport(BaseReportGenerator):
                 }
 
             contrib = employee_contributions[emp_id]
-            contrib["ee_share"] += ps.pagibig_ee or Decimal("0")
-            contrib["er_share"] += ps.pagibig_er or Decimal("0")
-            if ps.gross_pay:
+            contrib["ee_share"] += pagibig_ee
+            contrib["er_share"] += pagibig_er
+            if ps.total_earnings:
                 contrib["monthly_compensation"] = max(
                     contrib["monthly_compensation"],
-                    ps.gross_pay
+                    ps.total_earnings
                 )
 
         # Calculate totals and format

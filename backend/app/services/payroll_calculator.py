@@ -410,7 +410,26 @@ def get_attendance_summary(
     """
     Get attendance summary for the payroll period.
     First checks ProcessedAttendance, then falls back to ImportRecord data.
+    Uses employee's working days schedule to determine absences.
     """
+    # Helper to check if employee works on a specific weekday
+    def employee_works_on_weekday(weekday: int) -> bool:
+        """Check if employee works on a weekday (0=Mon, 6=Sun)."""
+        if not employee:
+            # Default to Mon-Fri if no employee object
+            return weekday < 5
+
+        day_map = {
+            0: getattr(employee, 'work_monday', True),
+            1: getattr(employee, 'work_tuesday', True),
+            2: getattr(employee, 'work_wednesday', True),
+            3: getattr(employee, 'work_thursday', True),
+            4: getattr(employee, 'work_friday', True),
+            5: getattr(employee, 'work_saturday', False),
+            6: getattr(employee, 'work_sunday', False),
+        }
+        return day_map.get(weekday, False) or False
+
     # Try ProcessedAttendance first
     records = db.query(ProcessedAttendance).filter(
         ProcessedAttendance.employee_id == employee_id,
@@ -434,8 +453,10 @@ def get_attendance_summary(
                 days_worked += 1
             elif record.status == AttendanceStatus.ABSENT:
                 days_absent += 1
-            elif record.date.weekday() < 5:  # Weekday with no work
+            elif employee_works_on_weekday(record.date.weekday()):
+                # Employee should have worked this day but didn't
                 days_absent += 1
+            # Note: If employee doesn't work this day, it's not counted as absent
 
             if hasattr(record, 'late_minutes') and record.late_minutes and record.late_minutes > 0:
                 total_late_minutes += record.late_minutes
@@ -584,16 +605,28 @@ def generate_payslip(
     elif undertime_rate_per_minute > 0 and total_undertime > 0:
         undertime_amount = round(undertime_rate_per_minute * total_undertime, 2)
 
+    # Calculate basic pay based on days worked (for manual/seasonal employees)
+    days_worked = attendance['days_worked']
+    daily_rate_for_calc = ican_daily_rate if use_ican_formula and ican_daily_rate > 0 else daily_rate
+    daily_based_basic = round(daily_rate_for_calc * days_worked, 2)
+
     # Build earnings (all adjustable by HR)
     earnings = {
+        # Semi-monthly breakdown (default calculation)
         'basic_semi': basic_semi,
         'allowance_semi': allowance_semi,
         'productivity_incentive_semi': productivity_semi,
         'language_incentive_semi': language_semi,
-        'regular_holiday': 0,  # HR will fill
-        'regular_holiday_ot': 0,  # HR will fill
-        'snwh': 0,  # Special Non-Working Holiday - HR will fill
-        'snwh_ot': 0,  # SNWH Overtime - HR will fill
+        # Daily-based calculation (for seasonal/part-time employees)
+        'daily_rate': daily_rate_for_calc,
+        'days_worked': days_worked,
+        'daily_based_basic': daily_based_basic,  # Daily rate × Days worked
+        # Holiday pay (HR will fill)
+        'regular_holiday': 0,
+        'regular_holiday_ot': 0,
+        'snwh': 0,  # Special Non-Working Holiday
+        'snwh_ot': 0,  # SNWH Overtime
+        'overtime_pay': 0,  # HR will fill
         # Calculation reference (for transparency)
         '_calculation_info': {
             'monthly_basic': monthly_basic,
@@ -602,6 +635,7 @@ def generate_payslip(
             'work_hours_per_day': work_hours_per_day,
             'ican_daily_rate': ican_daily_rate,  # Monthly × 12 ÷ 261
             'ican_minute_rate': ican_minute_rate,  # Daily Rate ÷ Hours ÷ 60
+            'employee_working_days_per_week': getattr(employee, 'working_days_per_week', 5),
         }
     }
 

@@ -70,6 +70,20 @@ const ReportsIcon = () => (
   </svg>
 );
 
+const ScheduleIcon = () => (
+  <svg className="h-5 w-5 mr-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 12v4m0 0l-2-2m2 2l2-2" />
+  </svg>
+);
+
+const SettingsIcon = () => (
+  <svg className="h-5 w-5 mr-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+  </svg>
+);
+
 interface NavItem {
   name: string;
   href: string;
@@ -81,10 +95,12 @@ const adminNavItems: NavItem[] = [
   { name: 'Attendance', href: '/admin/attendance', icon: ClockIcon },
   { name: 'Payroll', href: '/admin/payroll', icon: CurrencyIcon },
   { name: 'Employees', href: '/admin/employees', icon: UsersIcon },
+  { name: 'Scheduling', href: '/admin/scheduling', icon: ScheduleIcon },
   { name: 'Leave', href: '/admin/leave', icon: LeaveIcon },
   { name: 'Loans', href: '/admin/loans', icon: BanknotesIcon },
   { name: 'Holidays', href: '/admin/holidays', icon: CalendarIcon },
   { name: 'Reports', href: '/admin/reports', icon: ReportsIcon },
+  { name: 'Settings', href: '/admin/settings', icon: SettingsIcon },
 ];
 
 const employeeNavItems: NavItem[] = [
@@ -109,41 +125,54 @@ export function Layout() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-100">
+    <div className="min-h-screen">
       {/* Mobile sidebar backdrop */}
       {sidebarOpen && (
         <div
-          className="fixed inset-0 bg-gray-600 bg-opacity-75 z-20 lg:hidden"
+          className="fixed inset-0 bg-black/40 backdrop-blur-sm z-20 lg:hidden"
           onClick={() => setSidebarOpen(false)}
         />
       )}
 
-      {/* Sidebar - Fixed on desktop */}
+      {/* Sidebar - Fixed on desktop - Glassmorphism */}
       <aside
-        className={`fixed inset-y-0 left-0 z-30 w-64 bg-white shadow-lg transform transition-transform duration-300 ease-in-out lg:translate-x-0 ${
+        className={`fixed inset-y-0 left-0 z-30 w-64 transform transition-all duration-300 ease-in-out lg:translate-x-0 ${
           sidebarOpen ? 'translate-x-0' : '-translate-x-full'
         }`}
+        style={{
+          background: 'rgba(255, 255, 255, 0.9)',
+          backdropFilter: 'blur(20px)',
+          WebkitBackdropFilter: 'blur(20px)',
+          borderRight: '1px solid rgba(255, 255, 255, 0.3)',
+          boxShadow: '0 8px 32px rgba(31, 38, 135, 0.2)',
+        }}
       >
         <div className="flex flex-col h-screen overflow-hidden">
-          {/* Logo/Brand */}
-          <div className="flex items-center justify-between h-16 px-4 border-b bg-gradient-to-r from-blue-50 to-indigo-50">
+          {/* Logo/Brand - Glass gradient */}
+          <div
+            className="flex items-center justify-between h-16 px-4"
+            style={{
+              background: 'linear-gradient(135deg, rgba(139, 92, 246, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%)',
+              borderBottom: '1px solid rgba(139, 92, 246, 0.2)',
+            }}
+          >
             <div className="flex items-center gap-2">
-              <img src="/logo.png" alt="ICAN" className="h-10 w-10 object-contain" />
+              <img src="/logo.png" alt="ICAN" className="h-10 w-10 object-contain drop-shadow-md" />
               <div>
-                <span className="text-lg font-bold text-primary-600">ICAN</span>
+                <span className="text-lg font-bold bg-gradient-to-r from-purple-600 to-indigo-600 bg-clip-text text-transparent">ICAN</span>
                 <p className="text-[10px] text-gray-500 -mt-1">Attendance & Payroll</p>
               </div>
             </div>
             <button
               onClick={() => setSidebarOpen(false)}
-              className="lg:hidden p-2 rounded-md hover:bg-gray-100"
+              className="lg:hidden p-2 rounded-lg hover:bg-purple-100/50 transition-colors"
             >
               <XIcon />
             </button>
           </div>
 
           {/* Navigation */}
-          <nav className="flex-1 px-2 py-4 space-y-1 overflow-y-auto">
+          <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
             {navItems.map((item) => {
               const isActive = location.pathname === item.href;
               const Icon = item.icon;
@@ -162,10 +191,16 @@ export function Layout() {
           </nav>
 
           {/* User info and logout */}
-          <div className="border-t p-4">
+          <div className="p-4" style={{ borderTop: '1px solid rgba(139, 92, 246, 0.2)' }}>
             <div className="flex items-center mb-3">
-              <div className="w-10 h-10 bg-primary-100 rounded-full flex items-center justify-center">
-                <span className="text-primary-600 font-medium">
+              <div
+                className="w-10 h-10 rounded-full flex items-center justify-center"
+                style={{
+                  background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                  boxShadow: '0 4px 15px rgba(102, 126, 234, 0.4)',
+                }}
+              >
+                <span className="text-white font-medium">
                   {user?.first_name?.charAt(0)}{user?.last_name?.charAt(0)}
                 </span>
               </div>
@@ -173,12 +208,12 @@ export function Layout() {
                 <p className="text-sm font-medium text-gray-700">
                   {user?.first_name} {user?.last_name}
                 </p>
-                <p className="text-xs text-gray-500 capitalize">{user?.role}</p>
+                <p className="text-xs text-purple-500 capitalize">{user?.role}</p>
               </div>
             </div>
             <button
               onClick={handleLogout}
-              className="sidebar-link w-full text-red-600 hover:bg-red-50"
+              className="sidebar-link w-full text-red-500 hover:bg-red-50/50"
             >
               <LogoutIcon />
               Logout
@@ -189,16 +224,25 @@ export function Layout() {
 
       {/* Main content - offset for fixed sidebar on desktop */}
       <div className="flex-1 flex flex-col min-h-screen lg:ml-64">
-        {/* Top bar - sticky */}
-        <header className="bg-white shadow-sm h-16 flex items-center justify-between px-4 lg:px-8 sticky top-0 z-10">
+        {/* Top bar - sticky - Glassmorphism */}
+        <header
+          className="h-16 flex items-center justify-between px-4 lg:px-8 sticky top-0 z-10"
+          style={{
+            background: 'rgba(255, 255, 255, 0.8)',
+            backdropFilter: 'blur(20px)',
+            WebkitBackdropFilter: 'blur(20px)',
+            borderBottom: '1px solid rgba(255, 255, 255, 0.3)',
+            boxShadow: '0 4px 30px rgba(0, 0, 0, 0.1)',
+          }}
+        >
           <div className="flex items-center">
             <button
               onClick={() => setSidebarOpen(true)}
-              className="lg:hidden p-2 rounded-md hover:bg-gray-100"
+              className="lg:hidden p-2 rounded-lg hover:bg-purple-100/50 transition-colors"
             >
               <MenuIcon />
             </button>
-            <h1 className="ml-2 lg:ml-0 text-lg font-semibold text-gray-800">
+            <h1 className="ml-2 lg:ml-0 text-lg font-semibold bg-gradient-to-r from-purple-700 to-indigo-600 bg-clip-text text-transparent">
               {navItems.find((item) => item.href === location.pathname)?.name || 'Dashboard'}
             </h1>
           </div>
@@ -207,9 +251,14 @@ export function Layout() {
           {isUploading && (
             <Link
               to="/admin/attendance"
-              className="flex items-center gap-2 px-3 py-1.5 bg-blue-50 text-blue-700 rounded-full text-sm hover:bg-blue-100 transition-colors"
+              className="flex items-center gap-2 px-4 py-1.5 rounded-full text-sm transition-all hover:scale-105"
+              style={{
+                background: 'linear-gradient(135deg, rgba(139, 92, 246, 0.2) 0%, rgba(118, 75, 162, 0.2) 100%)',
+                border: '1px solid rgba(139, 92, 246, 0.3)',
+                color: '#7c3aed',
+              }}
             >
-              <div className="animate-spin rounded-full h-4 w-4 border-2 border-blue-600 border-t-transparent"></div>
+              <div className="animate-spin rounded-full h-4 w-4 border-2 border-purple-600 border-t-transparent"></div>
               <span>{uploadProgress || 'Importing...'}</span>
             </Link>
           )}
@@ -218,7 +267,12 @@ export function Layout() {
           {!isUploading && importResult && location.pathname !== '/admin/attendance' && (
             <Link
               to="/admin/attendance"
-              className="flex items-center gap-2 px-3 py-1.5 bg-green-50 text-green-700 rounded-full text-sm hover:bg-green-100 transition-colors"
+              className="flex items-center gap-2 px-4 py-1.5 rounded-full text-sm transition-all hover:scale-105"
+              style={{
+                background: 'linear-gradient(135deg, rgba(34, 197, 94, 0.2) 0%, rgba(22, 163, 74, 0.2) 100%)',
+                border: '1px solid rgba(34, 197, 94, 0.3)',
+                color: '#16a34a',
+              }}
             >
               <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />

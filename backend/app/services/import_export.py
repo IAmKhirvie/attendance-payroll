@@ -206,7 +206,8 @@ class ImportExportService:
         query = self.db.query(Employee)
 
         if department:
-            query = query.filter(Employee.department == department)
+            from app.models.employee import Department
+            query = query.join(Department).filter(Department.name == department)
         if status:
             query = query.filter(Employee.status == status)
 
@@ -248,21 +249,21 @@ class ImportExportService:
                 emp.last_name,
                 emp.email or "",
                 emp.phone or "",
-                emp.birth_date.strftime("%Y-%m-%d") if emp.birth_date else "",
-                emp.gender or "",
-                emp.civil_status or "",
-                emp.address or "",
-                emp.department or "",
+                getattr(emp, 'birth_date', None).strftime("%Y-%m-%d") if getattr(emp, 'birth_date', None) else "",
+                getattr(emp, 'gender', "") or "",
+                getattr(emp, 'civil_status', "") or "",
+                getattr(emp, 'address', "") or "",
+                emp.department.name if emp.department else "",
                 emp.position or "",
-                emp.date_hired.strftime("%Y-%m-%d") if emp.date_hired else "",
+                emp.hire_date.strftime("%Y-%m-%d") if emp.hire_date else "",
                 emp.employment_type or "",
-                str(emp.monthly_salary) if emp.monthly_salary else "",
+                str(emp.basic_salary) if emp.basic_salary else "",
                 str(emp.daily_rate) if emp.daily_rate else "",
-                emp.sss_no or "",
-                emp.philhealth_no or "",
-                emp.pagibig_no or "",
-                emp.tin_no or "",
-                emp.status.value if emp.status else "",
+                getattr(emp, 'sss_no', "") or "",
+                getattr(emp, 'philhealth_no', "") or "",
+                getattr(emp, 'pagibig_no', "") or "",
+                getattr(emp, 'tin_no', "") or "",
+                emp.status or "",
             ])
 
         output.seek(0)
@@ -313,7 +314,7 @@ class ImportExportService:
             writer.writerow([
                 emp.employee_no if emp else "",
                 f"{emp.first_name} {emp.last_name}" if emp else "",
-                emp.department if emp else "",
+                emp.department.name if emp and emp.department else "",
                 str(ps.basic_pay or 0),
                 str(ps.allowances or 0),
                 str(ps.overtime_pay or 0),

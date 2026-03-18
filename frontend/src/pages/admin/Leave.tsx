@@ -163,7 +163,13 @@ export default function LeavePage() {
   const fetchEmployees = useCallback(async () => {
     try {
       const data = await employeesApi.list({ page_size: 1000, status: 'active' });
-      setEmployees(data.items);
+      // Sort employees alphabetically by last name, then first name
+      const sortedEmployees = data.items.sort((a, b) => {
+        const lastNameCompare = a.last_name.localeCompare(b.last_name);
+        if (lastNameCompare !== 0) return lastNameCompare;
+        return a.first_name.localeCompare(b.first_name);
+      });
+      setEmployees(sortedEmployees);
     } catch (err) {
       console.error('Failed to fetch employees:', err);
     }
@@ -386,11 +392,18 @@ export default function LeavePage() {
     e.preventDefault();
     try {
       setLoading(true);
+      // Convert null to undefined for API compatibility
+      const typeData = {
+        ...newType,
+        max_consecutive_days: newType.max_consecutive_days ?? undefined,
+        accrual_rate_per_month: newType.accrual_rate_per_month ?? undefined,
+        max_carry_over_days: newType.max_carry_over_days ?? undefined,
+      };
       if (editingType) {
-        await leaveApi.updateType(editingType.id, newType);
+        await leaveApi.updateType(editingType.id, typeData);
         setSuccess('Leave type updated');
       } else {
-        await leaveApi.createType(newType);
+        await leaveApi.createType(typeData);
         setSuccess('Leave type created');
       }
       setShowTypeModal(false);

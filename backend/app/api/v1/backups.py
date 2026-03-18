@@ -94,3 +94,26 @@ async def cleanup_old_backups(
 
     result = backup_service.cleanup_old_backups(retention_days)
     return result
+
+
+@router.get("/download/{backup_name}")
+async def download_backup(
+    backup_name: str,
+    current_admin: User = Depends(get_current_admin)
+):
+    """
+    Download a backup file (Admin only).
+
+    Use this to save backups to external media for the 3-2-1 strategy.
+    """
+    from fastapi.responses import FileResponse
+    backup_path = backup_service.backup_dir / backup_name
+
+    if not backup_path.exists():
+        raise HTTPException(status_code=404, detail=f"Backup file not found: {backup_name}")
+
+    return FileResponse(
+        path=backup_path,
+        filename=backup_name,
+        media_type='application/octet-stream'
+    )

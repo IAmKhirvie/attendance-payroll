@@ -51,7 +51,7 @@ export function ManagementPage() {
       <h1 className="text-2xl font-bold text-gray-900">System Management</h1>
 
       <Tab.Group selectedIndex={selectedTab} onChange={setSelectedTab}>
-        <Tab.List className="flex space-x-1 rounded-xl bg-primary-900/20 p-1">
+        <Tab.List className="flex space-x-1 rounded-xl bg-gray-100 p-1">
           {['Departments', 'Shifts', 'Deductions'].map((tab) => (
             <Tab
               key={tab}
@@ -61,7 +61,7 @@ export function ManagementPage() {
                   'ring-white ring-opacity-60 ring-offset-2 ring-offset-primary-400 focus:outline-none focus:ring-2',
                   selected
                     ? 'bg-white text-primary-700 shadow'
-                    : 'text-primary-100 hover:bg-white/[0.12] hover:text-white'
+                    : 'text-gray-600 hover:bg-white/[0.5] hover:text-gray-900'
                 )
               }
             >
