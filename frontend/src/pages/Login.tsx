@@ -79,53 +79,39 @@ export function LoginPage() {
     }
   };
 
-  // Glass card style
-  const glassCardStyle = {
-    background: 'rgba(255, 255, 255, 0.85)',
-    backdropFilter: 'blur(20px)',
-    WebkitBackdropFilter: 'blur(20px)',
-    border: '1px solid rgba(255, 255, 255, 0.5)',
-    boxShadow: '0 8px 32px rgba(31, 38, 135, 0.2)',
-  };
-
   if (showRegister) {
     return (
       <div className="min-h-screen flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
         <div className="max-w-md w-full animate-fade-in">
-          <div className="rounded-2xl p-8" style={glassCardStyle}>
+          <div className="card">
+            {/* Header */}
             <div className="text-center mb-8">
               <div className="flex justify-center mb-4">
                 <div
-                  className="h-20 w-20 rounded-2xl flex items-center justify-center"
+                  className="h-16 w-16 rounded-xl flex items-center justify-center"
                   style={{
-                    background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-                    boxShadow: '0 8px 32px rgba(102, 126, 234, 0.4)',
+                    background: 'linear-gradient(135deg, #1e3a5f 0%, #0f2744 100%)',
+                    boxShadow: '0 4px 12px rgba(30, 58, 95, 0.4)',
                   }}
                 >
                   <img
                     src="/logo.png"
                     alt="ICAN Logo"
-                    className="h-14 w-14 object-contain"
+                    className="h-10 w-10 object-contain"
                   />
                 </div>
               </div>
-              <h2 className="text-2xl font-bold bg-gradient-to-r from-purple-700 to-indigo-600 bg-clip-text text-transparent">
+              <h2 className="text-2xl font-bold text-slate-800">
                 Create Account
               </h2>
-              <p className="mt-2 text-sm text-gray-600">
+              <p className="mt-2 text-sm text-slate-500">
                 Register for an account. Your registration will need HR approval.
               </p>
             </div>
 
             {registerSuccess ? (
               <div className="text-center">
-                <div
-                  className="mb-4 p-4 rounded-xl text-green-700"
-                  style={{
-                    background: 'rgba(34, 197, 94, 0.15)',
-                    border: '1px solid rgba(34, 197, 94, 0.3)',
-                  }}
-                >
+                <div className="mb-4 p-4 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-700">
                   Registration successful! Your account is pending approval from HR.
                 </div>
                 <button
@@ -141,13 +127,7 @@ export function LoginPage() {
             ) : (
               <form onSubmit={handleRegister} className="space-y-4">
                 {registerError && (
-                  <div
-                    className="p-3 rounded-xl text-red-700 text-sm"
-                    style={{
-                      background: 'rgba(239, 68, 68, 0.15)',
-                      border: '1px solid rgba(239, 68, 68, 0.3)',
-                    }}
-                  >
+                  <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm">
                     {registerError}
                   </div>
                 )}
@@ -227,12 +207,12 @@ export function LoginPage() {
                   Register
                 </button>
 
-                <p className="text-center text-sm text-gray-600">
+                <p className="text-center text-sm text-slate-500">
                   Already have an account?{' '}
                   <button
                     type="button"
                     onClick={() => setShowRegister(false)}
-                    className="text-purple-600 hover:text-purple-500 font-medium"
+                    className="text-blue-600 hover:text-blue-700 font-medium"
                   >
                     Sign in
                   </button>
@@ -248,40 +228,35 @@ export function LoginPage() {
   return (
     <div className="min-h-screen flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
       <div className="max-w-md w-full animate-fade-in">
-        <div className="rounded-2xl p-8" style={glassCardStyle}>
+        <div className="card">
+          {/* Header */}
           <div className="text-center mb-8">
             <div className="flex justify-center mb-4">
               <div
-                className="h-24 w-24 rounded-2xl flex items-center justify-center animate-pulse-glow"
+                className="h-20 w-20 rounded-xl flex items-center justify-center"
                 style={{
-                  background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-                  boxShadow: '0 8px 32px rgba(102, 126, 234, 0.4)',
+                  background: 'linear-gradient(135deg, #1e3a5f 0%, #0f2744 100%)',
+                  boxShadow: '0 4px 12px rgba(30, 58, 95, 0.4)',
                 }}
               >
                 <img
                   src="/logo.png"
                   alt="ICAN Logo"
-                  className="h-16 w-16 object-contain"
+                  className="h-12 w-12 object-contain"
                 />
               </div>
             </div>
-            <h2 className="text-2xl font-bold bg-gradient-to-r from-purple-700 to-indigo-600 bg-clip-text text-transparent">
+            <h2 className="text-2xl font-bold text-slate-800">
               ICAN Attendance & Payroll
             </h2>
-            <p className="mt-2 text-sm text-gray-600">
+            <p className="mt-2 text-sm text-slate-500">
               Sign in to manage attendance and payroll
             </p>
           </div>
 
-          <form onSubmit={handleLogin} className="space-y-6">
+          <form onSubmit={handleLogin} className="space-y-5">
             {error && (
-              <div
-                className="p-3 rounded-xl text-red-700 text-sm"
-                style={{
-                  background: 'rgba(239, 68, 68, 0.15)',
-                  border: '1px solid rgba(239, 68, 68, 0.3)',
-                }}
-              >
+              <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm">
                 {error}
               </div>
             )}
@@ -332,12 +307,12 @@ export function LoginPage() {
               )}
             </button>
 
-            <p className="text-center text-sm text-gray-600">
+            <p className="text-center text-sm text-slate-500">
               Don't have an account?{' '}
               <button
                 type="button"
                 onClick={() => setShowRegister(true)}
-                className="text-purple-600 hover:text-purple-500 font-medium"
+                className="text-blue-600 hover:text-blue-700 font-medium"
               >
                 Register
               </button>
@@ -345,7 +320,7 @@ export function LoginPage() {
           </form>
         </div>
 
-        <p className="mt-6 text-center text-xs text-white/70">
+        <p className="mt-6 text-center text-xs text-slate-500">
           ICAN Language Center - Internal Use Only
         </p>
       </div>

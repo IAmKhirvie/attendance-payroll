@@ -129,43 +129,39 @@ export function Layout() {
       {/* Mobile sidebar backdrop */}
       {sidebarOpen && (
         <div
-          className="fixed inset-0 bg-black/40 backdrop-blur-sm z-20 lg:hidden"
+          className="fixed inset-0 bg-slate-900/50 z-20 lg:hidden"
           onClick={() => setSidebarOpen(false)}
         />
       )}
 
-      {/* Sidebar - Fixed on desktop - Glassmorphism */}
+      {/* Sidebar - Elegant style */}
       <aside
-        className={`fixed inset-y-0 left-0 z-30 w-64 transform transition-all duration-300 ease-in-out lg:translate-x-0 ${
+        className={`fixed inset-y-0 left-0 z-30 w-64 transform transition-all duration-300 ease-in-out lg:translate-x-0 bg-white border-r border-slate-200 ${
           sidebarOpen ? 'translate-x-0' : '-translate-x-full'
         }`}
-        style={{
-          background: 'rgba(255, 255, 255, 0.9)',
-          backdropFilter: 'blur(20px)',
-          WebkitBackdropFilter: 'blur(20px)',
-          borderRight: '1px solid rgba(255, 255, 255, 0.3)',
-          boxShadow: '0 8px 32px rgba(31, 38, 135, 0.2)',
-        }}
+        style={{ boxShadow: '2px 0 8px rgba(0, 0, 0, 0.05)' }}
       >
         <div className="flex flex-col h-screen overflow-hidden">
-          {/* Logo/Brand - Glass gradient */}
-          <div
-            className="flex items-center justify-between h-16 px-4"
-            style={{
-              background: 'linear-gradient(135deg, rgba(139, 92, 246, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%)',
-              borderBottom: '1px solid rgba(139, 92, 246, 0.2)',
-            }}
-          >
-            <div className="flex items-center gap-2">
-              <img src="/logo.png" alt="ICAN" className="h-10 w-10 object-contain drop-shadow-md" />
+          {/* Logo/Brand */}
+          <div className="flex items-center justify-between h-16 px-4 border-b border-slate-200">
+            <div className="flex items-center gap-3">
+              <div
+                className="h-10 w-10 rounded-lg flex items-center justify-center"
+                style={{
+                  background: 'linear-gradient(135deg, #1e3a5f 0%, #0f2744 100%)',
+                  boxShadow: '0 2px 8px rgba(30, 58, 95, 0.3)',
+                }}
+              >
+                <img src="/logo.png" alt="ICAN" className="h-7 w-7 object-contain" />
+              </div>
               <div>
-                <span className="text-lg font-bold bg-gradient-to-r from-purple-600 to-indigo-600 bg-clip-text text-transparent">ICAN</span>
-                <p className="text-[10px] text-gray-500 -mt-1">Attendance & Payroll</p>
+                <span className="text-lg font-bold text-slate-800">ICAN</span>
+                <p className="text-xs text-slate-500 -mt-0.5">Attendance & Payroll</p>
               </div>
             </div>
             <button
               onClick={() => setSidebarOpen(false)}
-              className="lg:hidden p-2 rounded-lg hover:bg-purple-100/50 transition-colors"
+              className="lg:hidden p-2 rounded-lg text-slate-500 hover:bg-slate-100 transition-colors"
             >
               <XIcon />
             </button>
@@ -191,29 +187,28 @@ export function Layout() {
           </nav>
 
           {/* User info and logout */}
-          <div className="p-4" style={{ borderTop: '1px solid rgba(139, 92, 246, 0.2)' }}>
+          <div className="p-4 border-t border-slate-200 bg-slate-50">
             <div className="flex items-center mb-3">
               <div
-                className="w-10 h-10 rounded-full flex items-center justify-center"
+                className="w-10 h-10 rounded-lg flex items-center justify-center"
                 style={{
-                  background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-                  boxShadow: '0 4px 15px rgba(102, 126, 234, 0.4)',
+                  background: 'linear-gradient(135deg, #1e3a5f 0%, #0f2744 100%)',
                 }}
               >
-                <span className="text-white font-medium">
+                <span className="text-white font-semibold text-sm">
                   {user?.first_name?.charAt(0)}{user?.last_name?.charAt(0)}
                 </span>
               </div>
               <div className="ml-3">
-                <p className="text-sm font-medium text-gray-700">
+                <p className="text-sm font-semibold text-slate-800">
                   {user?.first_name} {user?.last_name}
                 </p>
-                <p className="text-xs text-purple-500 capitalize">{user?.role}</p>
+                <p className="text-xs text-slate-500 capitalize">{user?.role}</p>
               </div>
             </div>
             <button
               onClick={handleLogout}
-              className="sidebar-link w-full text-red-500 hover:bg-red-50/50"
+              className="sidebar-link w-full text-red-600 hover:bg-red-50"
             >
               <LogoutIcon />
               Logout
@@ -224,25 +219,19 @@ export function Layout() {
 
       {/* Main content - offset for fixed sidebar on desktop */}
       <div className="flex-1 flex flex-col min-h-screen lg:ml-64">
-        {/* Top bar - sticky - Glassmorphism */}
+        {/* Top bar */}
         <header
-          className="h-16 flex items-center justify-between px-4 lg:px-8 sticky top-0 z-10"
-          style={{
-            background: 'rgba(255, 255, 255, 0.8)',
-            backdropFilter: 'blur(20px)',
-            WebkitBackdropFilter: 'blur(20px)',
-            borderBottom: '1px solid rgba(255, 255, 255, 0.3)',
-            boxShadow: '0 4px 30px rgba(0, 0, 0, 0.1)',
-          }}
+          className="h-16 flex items-center justify-between px-4 lg:px-8 sticky top-0 z-10 bg-white border-b border-slate-200"
+          style={{ boxShadow: '0 1px 3px rgba(0, 0, 0, 0.05)' }}
         >
           <div className="flex items-center">
             <button
               onClick={() => setSidebarOpen(true)}
-              className="lg:hidden p-2 rounded-lg hover:bg-purple-100/50 transition-colors"
+              className="lg:hidden p-2 rounded-lg text-slate-600 hover:bg-slate-100 transition-colors"
             >
               <MenuIcon />
             </button>
-            <h1 className="ml-2 lg:ml-0 text-lg font-semibold bg-gradient-to-r from-purple-700 to-indigo-600 bg-clip-text text-transparent">
+            <h1 className="ml-2 lg:ml-0 text-lg font-semibold text-slate-800">
               {navItems.find((item) => item.href === location.pathname)?.name || 'Dashboard'}
             </h1>
           </div>
@@ -251,14 +240,13 @@ export function Layout() {
           {isUploading && (
             <Link
               to="/admin/attendance"
-              className="flex items-center gap-2 px-4 py-1.5 rounded-full text-sm transition-all hover:scale-105"
+              className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-white transition-all"
               style={{
-                background: 'linear-gradient(135deg, rgba(139, 92, 246, 0.2) 0%, rgba(118, 75, 162, 0.2) 100%)',
-                border: '1px solid rgba(139, 92, 246, 0.3)',
-                color: '#7c3aed',
+                background: 'linear-gradient(135deg, #1e3a5f 0%, #0f2744 100%)',
+                boxShadow: '0 2px 8px rgba(30, 58, 95, 0.3)',
               }}
             >
-              <div className="animate-spin rounded-full h-4 w-4 border-2 border-purple-600 border-t-transparent"></div>
+              <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></div>
               <span>{uploadProgress || 'Importing...'}</span>
             </Link>
           )}
@@ -267,11 +255,10 @@ export function Layout() {
           {!isUploading && importResult && location.pathname !== '/admin/attendance' && (
             <Link
               to="/admin/attendance"
-              className="flex items-center gap-2 px-4 py-1.5 rounded-full text-sm transition-all hover:scale-105"
+              className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-white transition-all"
               style={{
-                background: 'linear-gradient(135deg, rgba(34, 197, 94, 0.2) 0%, rgba(22, 163, 74, 0.2) 100%)',
-                border: '1px solid rgba(34, 197, 94, 0.3)',
-                color: '#16a34a',
+                background: 'linear-gradient(135deg, #059669 0%, #047857 100%)',
+                boxShadow: '0 2px 8px rgba(5, 150, 105, 0.3)',
               }}
             >
               <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
