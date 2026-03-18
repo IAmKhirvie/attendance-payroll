@@ -48,21 +48,18 @@ export function AdminDashboard() {
 
   const loadDashboardData = async () => {
     try {
-      const [employeesData, payrollData, importData] = await Promise.all([
-        employeesApi.list({ page: 1, page_size: 1 }),
+      // Get counts by status using separate API calls with status filter
+      const [activeData, pendingData, payrollData, importData] = await Promise.all([
+        employeesApi.list({ page: 1, page_size: 1, status: 'active' }),
+        employeesApi.list({ page: 1, page_size: 1, status: 'pending' }),
         api.get('/payroll/runs', { params: { page: 1, page_size: 1 } }).catch(() => ({ data: { items: [] } })),
         api.get('/attendance/imports', { params: { page: 1, page_size: 1 } }).catch(() => ({ data: { items: [] } })),
       ]);
 
-      // Get employee counts by status
-      const allEmployees = await employeesApi.list({ page: 1, page_size: 500 });
-      const activeCount = allEmployees.items.filter((e: any) => e.status === 'active').length;
-      const pendingCount = allEmployees.items.filter((e: any) => e.status === 'pending').length;
-
       setStats({
-        totalEmployees: employeesData.total,
-        activeEmployees: activeCount,
-        pendingEmployees: pendingCount,
+        totalEmployees: activeData.total + pendingData.total,
+        activeEmployees: activeData.total,
+        pendingEmployees: pendingData.total,
       });
 
       if (payrollData.data.items.length > 0) {
