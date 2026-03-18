@@ -69,6 +69,12 @@ class EmployeeCreate(EmployeeBase):
     philhealth_contribution: Optional[Decimal] = None
     pagibig_contribution: Optional[Decimal] = None
     tax_amount: Optional[Decimal] = None
+    # Schedule settings
+    call_time: Optional[str] = "08:00"
+    time_out: Optional[str] = "17:00"
+    work_hours_per_day: Optional[Decimal] = Decimal("8")
+    buffer_minutes: Optional[int] = 10
+    is_flexible: bool = False
 
 
 class EmployeeUpdate(BaseModel):
@@ -98,6 +104,12 @@ class EmployeeUpdate(BaseModel):
     philhealth_contribution: Optional[Decimal] = None
     pagibig_contribution: Optional[Decimal] = None
     tax_amount: Optional[Decimal] = None
+    # Schedule settings
+    call_time: Optional[str] = None
+    time_out: Optional[str] = None
+    work_hours_per_day: Optional[Decimal] = None
+    buffer_minutes: Optional[int] = None
+    is_flexible: Optional[bool] = None
 
 
 class EmployeeResponse(EmployeeBase):
@@ -121,6 +133,12 @@ class EmployeeResponse(EmployeeBase):
     philhealth_contribution: Optional[Decimal] = None
     pagibig_contribution: Optional[Decimal] = None
     tax_amount: Optional[Decimal] = None
+    # Schedule settings
+    call_time: Optional[str] = "08:00"
+    time_out: Optional[str] = "17:00"
+    work_hours_per_day: Optional[Decimal] = Decimal("8")
+    buffer_minutes: Optional[int] = 10
+    is_flexible: bool = False
     status: Optional[str] = "active"  # pending, active, inactive
     is_active: bool
     full_name: str

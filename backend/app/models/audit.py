@@ -17,17 +17,21 @@ class AuditAction(str, enum.Enum):
     LOGOUT = "logout"
     LOGIN_FAILED = "login_failed"
     PASSWORD_CHANGE = "password_change"
+    PASSWORD_RESET_REQUEST = "password_reset_request"
+    PASSWORD_RESET_COMPLETE = "password_reset_complete"
 
     # User management
     USER_CREATE = "user_create"
     USER_UPDATE = "user_update"
     USER_APPROVE = "user_approve"
     USER_DEACTIVATE = "user_deactivate"
+    USER_ROLE_CHANGE = "user_role_change"
 
     # Employee
     EMPLOYEE_CREATE = "employee_create"
     EMPLOYEE_UPDATE = "employee_update"
     EMPLOYEE_DELETE = "employee_delete"
+    EMPLOYEE_STATUS_CHANGE = "employee_status_change"
 
     # Attendance
     ATTENDANCE_IMPORT = "attendance_import"
@@ -50,17 +54,47 @@ class AuditAction(str, enum.Enum):
     PAYROLL_LOCK = "payroll_lock"
     PAYROLL_EXPORT = "payroll_export"
     PAYSLIP_VIEW = "payslip_view"
+    PAYSLIP_RELEASE = "payslip_release"
+    PAYSLIP_BULK_RELEASE = "payslip_bulk_release"
 
     # Deductions
     DEDUCTION_CONFIG_CREATE = "deduction_config_create"
     DEDUCTION_CONFIG_UPDATE = "deduction_config_update"
 
+    # Leave
+    LEAVE_REQUEST = "leave_request"
+    LEAVE_APPROVE = "leave_approve"
+    LEAVE_REJECT = "leave_reject"
+    LEAVE_CANCEL = "leave_cancel"
+    LEAVE_BALANCE_UPDATE = "leave_balance_update"
+
+    # Loans
+    LOAN_CREATE = "loan_create"
+    LOAN_UPDATE = "loan_update"
+    LOAN_CANCEL = "loan_cancel"
+    LOAN_PAYMENT = "loan_payment"
+
+    # Holidays
+    HOLIDAY_CREATE = "holiday_create"
+    HOLIDAY_UPDATE = "holiday_update"
+    HOLIDAY_DELETE = "holiday_delete"
+
+    # Contribution Tables
+    CONTRIBUTION_CREATE = "contribution_create"
+    CONTRIBUTION_UPDATE = "contribution_update"
+
     # Settings
     SETTINGS_UPDATE = "settings_update"
 
-    # Data export
+    # Data operations
     DATA_EXPORT = "data_export"
+    DATA_IMPORT = "data_import"
     REPORT_GENERATE = "report_generate"
+
+    # Backups
+    BACKUP_CREATE = "backup_create"
+    BACKUP_RESTORE = "backup_restore"
+    BACKUP_DELETE = "backup_delete"
 
 
 class AuditLog(Base):

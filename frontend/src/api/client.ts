@@ -630,6 +630,96 @@ export const payrollApi = {
     });
     return response.data;
   },
+
+  // Contribution Tables (Government Rates)
+  listContributionTables: async (params?: {
+    contribution_type?: string;
+    year?: number;
+    include_inactive?: boolean;
+  }): Promise<{
+    items: Array<{
+      id: number;
+      contribution_type: string;
+      effective_year: number;
+      name: string;
+      description: string | null;
+      brackets: Record<string, unknown>;
+      is_active: boolean;
+      created_at: string;
+      updated_at: string | null;
+    }>;
+    total: number;
+  }> => {
+    const response = await api.get('/payroll/contributions', { params });
+    return response.data;
+  },
+
+  getContributionTable: async (tableId: number): Promise<{
+    id: number;
+    contribution_type: string;
+    effective_year: number;
+    name: string;
+    description: string | null;
+    brackets: Record<string, unknown>;
+    is_active: boolean;
+    created_at: string;
+    updated_at: string | null;
+  }> => {
+    const response = await api.get(`/payroll/contributions/${tableId}`);
+    return response.data;
+  },
+
+  createContributionTable: async (data: {
+    contribution_type: string;
+    effective_year: number;
+    name: string;
+    description?: string;
+    brackets: Record<string, unknown>;
+    is_active?: boolean;
+  }): Promise<{
+    id: number;
+    contribution_type: string;
+    effective_year: number;
+    name: string;
+    description: string | null;
+    brackets: Record<string, unknown>;
+    is_active: boolean;
+    created_at: string;
+    updated_at: string | null;
+  }> => {
+    const response = await api.post('/payroll/contributions', data);
+    return response.data;
+  },
+
+  updateContributionTable: async (tableId: number, data: {
+    name?: string;
+    description?: string;
+    brackets?: Record<string, unknown>;
+    is_active?: boolean;
+  }): Promise<{
+    id: number;
+    contribution_type: string;
+    effective_year: number;
+    name: string;
+    description: string | null;
+    brackets: Record<string, unknown>;
+    is_active: boolean;
+    created_at: string;
+    updated_at: string | null;
+  }> => {
+    const response = await api.patch(`/payroll/contributions/${tableId}`, data);
+    return response.data;
+  },
+
+  deleteContributionTable: async (tableId: number): Promise<{ message: string }> => {
+    const response = await api.delete(`/payroll/contributions/${tableId}`);
+    return response.data;
+  },
+
+  seedContributionTables: async (): Promise<{ message: string }> => {
+    const response = await api.post('/payroll/contributions/seed');
+    return response.data;
+  },
 };
 
 // Departments API
@@ -931,6 +1021,741 @@ export const settingsApi = {
 
   updateCompany: async (data: Partial<SystemSettings>): Promise<{ message: string }> => {
     const response = await api.patch('/settings/company', data);
+    return response.data;
+  },
+};
+
+// Holidays API (Admin)
+export const holidaysApi = {
+  list: async (params?: {
+    year?: number;
+    holiday_type?: string;
+    include_inactive?: boolean;
+  }): Promise<{
+    items: Array<{
+      id: number;
+      date: string;
+      name: string;
+      holiday_type: string;
+      description: string | null;
+      year: number;
+      is_recurring: boolean;
+      is_active: boolean;
+      created_at: string;
+      updated_at: string | null;
+    }>;
+    total: number;
+  }> => {
+    const response = await api.get('/holidays', { params });
+    return response.data;
+  },
+
+  getById: async (id: number): Promise<{
+    id: number;
+    date: string;
+    name: string;
+    holiday_type: string;
+    description: string | null;
+    year: number;
+    is_recurring: boolean;
+    is_active: boolean;
+    created_at: string;
+    updated_at: string | null;
+  }> => {
+    const response = await api.get(`/holidays/${id}`);
+    return response.data;
+  },
+
+  create: async (data: {
+    date: string;
+    name: string;
+    holiday_type?: string;
+    description?: string;
+    is_recurring?: boolean;
+    is_active?: boolean;
+  }): Promise<{
+    id: number;
+    date: string;
+    name: string;
+    holiday_type: string;
+    description: string | null;
+    year: number;
+    is_recurring: boolean;
+    is_active: boolean;
+    created_at: string;
+    updated_at: string | null;
+  }> => {
+    const response = await api.post('/holidays', data);
+    return response.data;
+  },
+
+  update: async (id: number, data: {
+    date?: string;
+    name?: string;
+    holiday_type?: string;
+    description?: string;
+    is_recurring?: boolean;
+    is_active?: boolean;
+  }): Promise<{
+    id: number;
+    date: string;
+    name: string;
+    holiday_type: string;
+    description: string | null;
+    year: number;
+    is_recurring: boolean;
+    is_active: boolean;
+    created_at: string;
+    updated_at: string | null;
+  }> => {
+    const response = await api.patch(`/holidays/${id}`, data);
+    return response.data;
+  },
+
+  delete: async (id: number, permanent: boolean = false): Promise<{ message: string }> => {
+    const response = await api.delete(`/holidays/${id}`, { params: { permanent } });
+    return response.data;
+  },
+
+  seed: async (year: number = 2025): Promise<{
+    message: string;
+    seeded: number;
+    year: number;
+  }> => {
+    const response = await api.post('/holidays/seed', null, { params: { year } });
+    return response.data;
+  },
+
+  checkDate: async (date: string): Promise<{
+    is_holiday: boolean;
+    date?: string;
+    holiday?: {
+      id: number;
+      date: string;
+      name: string;
+      holiday_type: string;
+      description: string | null;
+      year: number;
+      is_recurring: boolean;
+      is_active: boolean;
+      created_at: string;
+      updated_at: string | null;
+    };
+  }> => {
+    const response = await api.get(`/holidays/check/${date}`);
+    return response.data;
+  },
+};
+
+// Loans API (Admin)
+export const loansApi = {
+  // Loan Types
+  listTypes: async (params?: {
+    include_inactive?: boolean;
+  }): Promise<{
+    items: Array<{
+      id: number;
+      code: string;
+      name: string;
+      description: string | null;
+      default_interest_rate: number;
+      is_active: boolean;
+      created_at: string;
+      updated_at: string | null;
+    }>;
+    total: number;
+  }> => {
+    const response = await api.get('/loans/types', { params });
+    return response.data;
+  },
+
+  createType: async (data: {
+    code: string;
+    name: string;
+    description?: string;
+    default_interest_rate?: number;
+    is_active?: boolean;
+  }) => {
+    const response = await api.post('/loans/types', data);
+    return response.data;
+  },
+
+  updateType: async (typeId: number, data: {
+    code?: string;
+    name?: string;
+    description?: string;
+    default_interest_rate?: number;
+    is_active?: boolean;
+  }) => {
+    const response = await api.patch(`/loans/types/${typeId}`, data);
+    return response.data;
+  },
+
+  deleteType: async (typeId: number): Promise<{ message: string }> => {
+    const response = await api.delete(`/loans/types/${typeId}`);
+    return response.data;
+  },
+
+  seedTypes: async (): Promise<{ message: string; seeded: number }> => {
+    const response = await api.post('/loans/types/seed');
+    return response.data;
+  },
+
+  // Loans
+  list: async (params?: {
+    employee_id?: number;
+    loan_type_id?: number;
+    status?: string;
+    include_paid?: boolean;
+  }): Promise<{
+    items: Array<{
+      id: number;
+      employee_id: number;
+      employee_name: string | null;
+      employee_no: string | null;
+      loan_type_id: number;
+      loan_type_code: string | null;
+      loan_type_name: string | null;
+      reference_no: string | null;
+      principal_amount: number;
+      interest_rate: number;
+      total_amount: number;
+      term_months: number;
+      monthly_deduction: number;
+      start_date: string;
+      end_date: string | null;
+      actual_end_date: string | null;
+      remaining_balance: number;
+      total_paid: number;
+      status: string;
+      notes: string | null;
+      created_at: string;
+      updated_at: string | null;
+      created_by: number | null;
+    }>;
+    total: number;
+  }> => {
+    const response = await api.get('/loans', { params });
+    return response.data;
+  },
+
+  getById: async (loanId: number) => {
+    const response = await api.get(`/loans/${loanId}`);
+    return response.data;
+  },
+
+  create: async (data: {
+    employee_id: number;
+    loan_type_id: number;
+    reference_no?: string;
+    principal_amount: number;
+    interest_rate?: number;
+    term_months: number;
+    monthly_deduction: number;
+    start_date: string;
+    end_date?: string;
+    notes?: string;
+  }) => {
+    const response = await api.post('/loans', data);
+    return response.data;
+  },
+
+  update: async (loanId: number, data: {
+    reference_no?: string;
+    interest_rate?: number;
+    term_months?: number;
+    monthly_deduction?: number;
+    start_date?: string;
+    end_date?: string;
+    status?: string;
+    notes?: string;
+  }) => {
+    const response = await api.patch(`/loans/${loanId}`, data);
+    return response.data;
+  },
+
+  delete: async (loanId: number, permanent: boolean = false): Promise<{ message: string }> => {
+    const response = await api.delete(`/loans/${loanId}`, { params: { permanent } });
+    return response.data;
+  },
+
+  getEmployeeSummary: async (employeeId: number): Promise<{
+    employee_id: number;
+    total_loans: number;
+    active_loans: number;
+    total_principal: number;
+    total_remaining: number;
+    total_paid: number;
+    monthly_deductions: number;
+  }> => {
+    const response = await api.get(`/loans/employee/${employeeId}/summary`);
+    return response.data;
+  },
+
+  getAmortization: async (loanId: number): Promise<{
+    loan_id: number;
+    principal: number;
+    interest_rate: number;
+    total_amount: number;
+    monthly_payment: number;
+    term_months: number;
+    schedule: Array<{
+      month: number;
+      date: string;
+      payment: number;
+      principal: number;
+      interest: number;
+      balance: number;
+    }>;
+  }> => {
+    const response = await api.get(`/loans/${loanId}/amortization`);
+    return response.data;
+  },
+
+  // Loan Deductions
+  listDeductions: async (loanId: number): Promise<{
+    items: Array<{
+      id: number;
+      loan_id: number;
+      payslip_id: number | null;
+      amount: number;
+      balance_before: number;
+      balance_after: number;
+      deduction_date: string;
+      notes: string | null;
+      created_at: string;
+    }>;
+    total: number;
+  }> => {
+    const response = await api.get(`/loans/${loanId}/deductions`);
+    return response.data;
+  },
+
+  createDeduction: async (loanId: number, data: {
+    amount: number;
+    deduction_date: string;
+    payslip_id?: number;
+    notes?: string;
+  }) => {
+    const response = await api.post(`/loans/${loanId}/deductions`, { ...data, loan_id: loanId });
+    return response.data;
+  },
+
+  deleteDeduction: async (loanId: number, deductionId: number): Promise<{ message: string }> => {
+    const response = await api.delete(`/loans/${loanId}/deductions/${deductionId}`);
+    return response.data;
+  },
+
+  getEmployeeActiveDeductions: async (employeeId: number): Promise<{
+    employee_id: number;
+    total_monthly_deductions: number;
+    deductions: Array<{
+      loan_id: number;
+      loan_type: string;
+      loan_type_name: string;
+      monthly_deduction: number;
+      remaining_balance: number;
+      reference_no: string | null;
+    }>;
+  }> => {
+    const response = await api.get(`/loans/employee/${employeeId}/active-deductions`);
+    return response.data;
+  },
+};
+
+// Leave API
+export const leaveApi = {
+  // Leave Types
+  listTypes: async (params?: {
+    include_inactive?: boolean;
+  }): Promise<{
+    items: Array<{
+      id: number;
+      code: string;
+      name: string;
+      description: string | null;
+      default_days_per_year: number;
+      is_paid: boolean;
+      requires_document: boolean;
+      max_consecutive_days: number | null;
+      min_notice_days: number;
+      is_accrued: boolean;
+      accrual_rate_per_month: number | null;
+      can_carry_over: boolean;
+      max_carry_over_days: number | null;
+      is_active: boolean;
+      created_at: string;
+      updated_at: string | null;
+    }>;
+    total: number;
+  }> => {
+    const response = await api.get('/leave/types', { params });
+    return response.data;
+  },
+
+  createType: async (data: {
+    code: string;
+    name: string;
+    description?: string;
+    default_days_per_year?: number;
+    is_paid?: boolean;
+    requires_document?: boolean;
+    max_consecutive_days?: number;
+    min_notice_days?: number;
+    is_accrued?: boolean;
+    accrual_rate_per_month?: number;
+    can_carry_over?: boolean;
+    max_carry_over_days?: number;
+    is_active?: boolean;
+  }) => {
+    const response = await api.post('/leave/types', data);
+    return response.data;
+  },
+
+  updateType: async (typeId: number, data: {
+    code?: string;
+    name?: string;
+    description?: string;
+    default_days_per_year?: number;
+    is_paid?: boolean;
+    requires_document?: boolean;
+    max_consecutive_days?: number;
+    min_notice_days?: number;
+    is_accrued?: boolean;
+    accrual_rate_per_month?: number;
+    can_carry_over?: boolean;
+    max_carry_over_days?: number;
+    is_active?: boolean;
+  }) => {
+    const response = await api.patch(`/leave/types/${typeId}`, data);
+    return response.data;
+  },
+
+  deleteType: async (typeId: number): Promise<{ message: string }> => {
+    const response = await api.delete(`/leave/types/${typeId}`);
+    return response.data;
+  },
+
+  seedTypes: async (): Promise<{ message: string; seeded: number }> => {
+    const response = await api.post('/leave/types/seed');
+    return response.data;
+  },
+
+  // Leave Balances
+  listBalances: async (params?: {
+    employee_id?: number;
+    leave_type_id?: number;
+    year?: number;
+  }): Promise<{
+    items: Array<{
+      id: number;
+      employee_id: number;
+      employee_name: string | null;
+      employee_no: string | null;
+      leave_type_id: number;
+      leave_type_code: string | null;
+      leave_type_name: string | null;
+      year: number;
+      entitled_days: number;
+      used_days: number;
+      pending_days: number;
+      carried_over_days: number;
+      remaining_days: number;
+      created_at: string;
+      updated_at: string | null;
+    }>;
+    total: number;
+  }> => {
+    const response = await api.get('/leave/balances', { params });
+    return response.data;
+  },
+
+  getEmployeeBalances: async (employeeId: number, year?: number): Promise<{
+    employee_id: number;
+    year: number;
+    balances: Array<{
+      id: number;
+      employee_id: number;
+      employee_name: string | null;
+      employee_no: string | null;
+      leave_type_id: number;
+      leave_type_code: string | null;
+      leave_type_name: string | null;
+      year: number;
+      entitled_days: number;
+      used_days: number;
+      pending_days: number;
+      carried_over_days: number;
+      remaining_days: number;
+      created_at: string;
+      updated_at: string | null;
+    }>;
+    total_entitled: number;
+    total_used: number;
+    total_remaining: number;
+  }> => {
+    const response = await api.get(`/leave/balances/employee/${employeeId}`, { params: { year } });
+    return response.data;
+  },
+
+  createBalance: async (data: {
+    employee_id: number;
+    leave_type_id: number;
+    year: number;
+    entitled_days?: number;
+    carried_over_days?: number;
+  }) => {
+    const response = await api.post('/leave/balances', data);
+    return response.data;
+  },
+
+  updateBalance: async (balanceId: number, data: {
+    entitled_days?: number;
+    used_days?: number;
+    pending_days?: number;
+    carried_over_days?: number;
+  }) => {
+    const response = await api.patch(`/leave/balances/${balanceId}`, data);
+    return response.data;
+  },
+
+  initializeBalances: async (data: {
+    employee_ids: number[];
+    year: number;
+    use_defaults?: boolean;
+  }): Promise<{
+    message: string;
+    created: number;
+    skipped: number;
+  }> => {
+    const response = await api.post('/leave/balances/initialize', data);
+    return response.data;
+  },
+
+  // Leave Requests
+  listRequests: async (params?: {
+    employee_id?: number;
+    leave_type_id?: number;
+    status?: string;
+    date_from?: string;
+    date_to?: string;
+  }): Promise<{
+    items: Array<{
+      id: number;
+      employee_id: number;
+      employee_name: string | null;
+      employee_no: string | null;
+      leave_type_id: number;
+      leave_type_code: string | null;
+      leave_type_name: string | null;
+      start_date: string;
+      end_date: string;
+      total_days: number;
+      is_half_day: boolean;
+      half_day_period: string | null;
+      reason: string | null;
+      contact_number: string | null;
+      attachment_path: string | null;
+      status: string;
+      reviewed_by: number | null;
+      reviewer_name: string | null;
+      reviewed_at: string | null;
+      review_notes: string | null;
+      created_at: string;
+      updated_at: string | null;
+    }>;
+    total: number;
+  }> => {
+    const response = await api.get('/leave/requests', { params });
+    return response.data;
+  },
+
+  getRequest: async (requestId: number) => {
+    const response = await api.get(`/leave/requests/${requestId}`);
+    return response.data;
+  },
+
+  createRequest: async (data: {
+    employee_id: number;
+    leave_type_id: number;
+    start_date: string;
+    end_date: string;
+    is_half_day?: boolean;
+    half_day_period?: string;
+    reason?: string;
+    contact_number?: string;
+  }) => {
+    const response = await api.post('/leave/requests', data);
+    return response.data;
+  },
+
+  updateRequest: async (requestId: number, data: {
+    start_date?: string;
+    end_date?: string;
+    is_half_day?: boolean;
+    half_day_period?: string;
+    reason?: string;
+    contact_number?: string;
+  }) => {
+    const response = await api.patch(`/leave/requests/${requestId}`, data);
+    return response.data;
+  },
+
+  reviewRequest: async (requestId: number, data: {
+    status: 'approved' | 'rejected';
+    review_notes?: string;
+  }) => {
+    const response = await api.post(`/leave/requests/${requestId}/review`, data);
+    return response.data;
+  },
+
+  cancelRequest: async (requestId: number): Promise<{ message: string }> => {
+    const response = await api.post(`/leave/requests/${requestId}/cancel`);
+    return response.data;
+  },
+
+  deleteRequest: async (requestId: number): Promise<{ message: string }> => {
+    const response = await api.delete(`/leave/requests/${requestId}`);
+    return response.data;
+  },
+
+  // Calendar
+  getCalendar: async (params: {
+    start_date: string;
+    end_date: string;
+    employee_id?: number;
+    status?: string;
+  }): Promise<Array<{
+    date: string;
+    employee_id: number;
+    employee_name: string;
+    leave_type: string;
+    status: string;
+    is_half_day: boolean;
+    half_day_period: string | null;
+  }>> => {
+    const response = await api.get('/leave/calendar', { params });
+    return response.data;
+  },
+};
+
+// Reports API
+export const reportsApi = {
+  // Get available reports
+  list: async (): Promise<{
+    reports: Array<{
+      id: string;
+      name: string;
+      description: string;
+      parameters: string[];
+      formats: string[];
+    }>;
+  }> => {
+    const response = await api.get('/reports');
+    return response.data;
+  },
+
+  // Payroll Summary
+  getPayrollSummary: async (year: number, month: number, department?: string) => {
+    const response = await api.get('/reports/payroll-summary', {
+      params: { year, month, department }
+    });
+    return response.data;
+  },
+
+  exportPayrollSummaryCsv: async (year: number, month: number, department?: string) => {
+    const response = await api.get('/reports/payroll-summary/csv', {
+      params: { year, month, department },
+      responseType: 'blob'
+    });
+    return response.data;
+  },
+
+  // Attendance Report
+  getAttendance: async (startDate: string, endDate: string, employeeId?: number, department?: string) => {
+    const response = await api.get('/reports/attendance', {
+      params: { start_date: startDate, end_date: endDate, employee_id: employeeId, department }
+    });
+    return response.data;
+  },
+
+  exportAttendanceCsv: async (startDate: string, endDate: string, employeeId?: number, department?: string, detailed?: boolean) => {
+    const response = await api.get('/reports/attendance/csv', {
+      params: { start_date: startDate, end_date: endDate, employee_id: employeeId, department, detailed },
+      responseType: 'blob'
+    });
+    return response.data;
+  },
+
+  // SSS R3
+  getSSR3: async (year: number, month: number) => {
+    const response = await api.get('/reports/sss-r3', {
+      params: { year, month }
+    });
+    return response.data;
+  },
+
+  exportSSR3Csv: async (year: number, month: number) => {
+    const response = await api.get('/reports/sss-r3/csv', {
+      params: { year, month },
+      responseType: 'blob'
+    });
+    return response.data;
+  },
+
+  exportSSR3Txt: async (year: number, month: number, employerSssNo?: string, employerName?: string) => {
+    const response = await api.get('/reports/sss-r3/txt', {
+      params: { year, month, employer_sss_no: employerSssNo, employer_name: employerName },
+      responseType: 'blob'
+    });
+    return response.data;
+  },
+
+  // PhilHealth RF-1
+  getPhilHealthRF1: async (year: number, month: number) => {
+    const response = await api.get('/reports/philhealth-rf1', {
+      params: { year, month }
+    });
+    return response.data;
+  },
+
+  exportPhilHealthRF1Csv: async (year: number, month: number) => {
+    const response = await api.get('/reports/philhealth-rf1/csv', {
+      params: { year, month },
+      responseType: 'blob'
+    });
+    return response.data;
+  },
+
+  exportPhilHealthRF1Txt: async (year: number, month: number, employerNo?: string, employerName?: string, address?: string) => {
+    const response = await api.get('/reports/philhealth-rf1/txt', {
+      params: { year, month, employer_philhealth_no: employerNo, employer_name: employerName, address },
+      responseType: 'blob'
+    });
+    return response.data;
+  },
+
+  // Pag-IBIG MCR
+  getPagIBIGMCR: async (year: number, month: number) => {
+    const response = await api.get('/reports/pagibig-mcr', {
+      params: { year, month }
+    });
+    return response.data;
+  },
+
+  exportPagIBIGMCRCsv: async (year: number, month: number) => {
+    const response = await api.get('/reports/pagibig-mcr/csv', {
+      params: { year, month },
+      responseType: 'blob'
+    });
+    return response.data;
+  },
+
+  exportPagIBIGMCRTxt: async (year: number, month: number, employerNo?: string, employerName?: string, address?: string) => {
+    const response = await api.get('/reports/pagibig-mcr/txt', {
+      params: { year, month, employer_pagibig_no: employerNo, employer_name: employerName, address },
+      responseType: 'blob'
+    });
     return response.data;
   },
 };

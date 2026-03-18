@@ -11,10 +11,14 @@ from .attendance import (
     ProcessedAttendance, AttendanceStatus, CorrectionRequest, PunchType
 )
 from .payroll import (
-    PayrollRun, Payslip, DeductionConfig, DeductionType, PayrollStatus
+    PayrollRun, Payslip, DeductionConfig, DeductionType, PayrollStatus,
+    ContributionTable, ContributionType, PayrollSettings, ThirteenthMonthPay
 )
 from .audit import AuditLog, AuditAction
 from .settings import SystemSettings
+from .holiday import Holiday, HolidayType
+from .loan import LoanTypeConfig, Loan, LoanDeduction, LoanType, LoanStatus
+from .leave import LeaveTypeConfig, LeaveBalance, LeaveRequest, LeaveStatus
 
 __all__ = [
     # User
@@ -26,8 +30,15 @@ __all__ = [
     "ProcessedAttendance", "AttendanceStatus", "CorrectionRequest", "PunchType",
     # Payroll
     "PayrollRun", "Payslip", "DeductionConfig", "DeductionType", "PayrollStatus",
+    "ContributionTable", "ContributionType", "PayrollSettings", "ThirteenthMonthPay",
     # Audit
     "AuditLog", "AuditAction",
     # Settings
     "SystemSettings",
+    # Holiday
+    "Holiday", "HolidayType",
+    # Loan
+    "LoanTypeConfig", "Loan", "LoanDeduction", "LoanType", "LoanStatus",
+    # Leave
+    "LeaveTypeConfig", "LeaveBalance", "LeaveRequest", "LeaveStatus",
 ]

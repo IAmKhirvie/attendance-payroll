@@ -27,6 +27,12 @@ interface EmployeeFormData {
   philhealth_contribution: string;
   pagibig_contribution: string;
   tax_amount: string;
+  // Schedule settings
+  call_time: string;
+  time_out: string;
+  work_hours_per_day: string;
+  buffer_minutes: string;
+  is_flexible: boolean;
 }
 
 const emptyForm: EmployeeFormData = {
@@ -51,6 +57,12 @@ const emptyForm: EmployeeFormData = {
   philhealth_contribution: '',
   pagibig_contribution: '',
   tax_amount: '',
+  // Schedule settings
+  call_time: '08:00',
+  time_out: '17:00',
+  work_hours_per_day: '8',
+  buffer_minutes: '10',
+  is_flexible: false,
 };
 
 // Props for EmployeeForm component
@@ -390,6 +402,74 @@ const EmployeeForm = memo(function EmployeeForm({
         </div>
       </div>
 
+      {/* Schedule Settings */}
+      <div className="pt-4 border-t">
+        <div className="flex items-center justify-between mb-3">
+          <h4 className="font-semibold text-gray-700">Schedule Settings</h4>
+          <span className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded">
+            For part-time / contractual employees
+          </span>
+        </div>
+        <div className="grid grid-cols-4 gap-4">
+          <div>
+            <label className="form-label">Call Time (Start)</label>
+            <input
+              type="time"
+              value={formData.call_time}
+              onChange={(e) => handleFieldChange('call_time', e.target.value)}
+              className="form-input"
+            />
+          </div>
+          <div>
+            <label className="form-label">Time Out (End)</label>
+            <input
+              type="time"
+              value={formData.time_out}
+              onChange={(e) => handleFieldChange('time_out', e.target.value)}
+              className="form-input"
+            />
+          </div>
+          <div>
+            <label className="form-label">Work Hours/Day</label>
+            <input
+              type="number"
+              step="0.5"
+              min="1"
+              max="24"
+              value={formData.work_hours_per_day}
+              onChange={(e) => handleFieldChange('work_hours_per_day', e.target.value)}
+              className="form-input"
+              placeholder="8"
+            />
+            <p className="text-xs text-gray-400 mt-1">Part-time: 4, Full-time: 8</p>
+          </div>
+          <div>
+            <label className="form-label">Buffer (mins)</label>
+            <input
+              type="number"
+              min="0"
+              max="60"
+              value={formData.buffer_minutes}
+              onChange={(e) => handleFieldChange('buffer_minutes', e.target.value)}
+              className="form-input"
+              placeholder="10"
+            />
+            <p className="text-xs text-gray-400 mt-1">Grace period for late</p>
+          </div>
+        </div>
+        <div className="mt-3">
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={formData.is_flexible}
+              onChange={(e) => setFormData(prev => ({ ...prev, is_flexible: e.target.checked }))}
+              className="w-4 h-4 text-primary-600 border-gray-300 rounded focus:ring-primary-500"
+            />
+            <span className="text-sm text-gray-700">Flexible Schedule (no late deductions)</span>
+          </label>
+        </div>
+      </div>
+
       <div className="flex gap-2 justify-end pt-4">
         <button
           type="button"
@@ -421,6 +501,10 @@ export function EmployeesPage() {
   // Sorting state
   const [sortBy, setSortBy] = useState<string>('name');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
+
+  // Bulk selection state
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [bulkActionLoading, setBulkActionLoading] = useState(false);
 
   // Modal states
   const [showAddModal, setShowAddModal] = useState(false);
@@ -537,6 +621,12 @@ export function EmployeesPage() {
       philhealth_contribution: emp.philhealth_contribution || '',
       pagibig_contribution: emp.pagibig_contribution || '',
       tax_amount: emp.tax_amount || '',
+      // Schedule settings
+      call_time: (emp as any).call_time || '08:00',
+      time_out: (emp as any).time_out || '17:00',
+      work_hours_per_day: (emp as any).work_hours_per_day?.toString() || '8',
+      buffer_minutes: (emp as any).buffer_minutes?.toString() || '10',
+      is_flexible: (emp as any).is_flexible || false,
     });
     setError('');
     setShowEditModal(true);
@@ -564,6 +654,80 @@ export function EmployeesPage() {
       alert(error.response?.data?.detail || 'Failed to verify employees');
     }
   };
+
+  // Bulk selection handlers
+  const handleSelectAll = (checked: boolean) => {
+    if (checked) {
+      setSelectedIds(new Set(employees.map(e => e.id)));
+    } else {
+      setSelectedIds(new Set());
+    }
+  };
+
+  const handleSelectOne = (id: number, checked: boolean) => {
+    const newSelected = new Set(selectedIds);
+    if (checked) {
+      newSelected.add(id);
+    } else {
+      newSelected.delete(id);
+    }
+    setSelectedIds(newSelected);
+  };
+
+  const clearSelection = () => {
+    setSelectedIds(new Set());
+  };
+
+  // Bulk action: Verify selected
+  const handleBulkVerify = async () => {
+    if (selectedIds.size === 0) return;
+    if (!confirm(`Verify ${selectedIds.size} selected employee(s)?`)) return;
+
+    setBulkActionLoading(true);
+    try {
+      let successCount = 0;
+      for (const id of selectedIds) {
+        try {
+          await employeesApi.verify(id);
+          successCount++;
+        } catch (e) {
+          console.error(`Failed to verify employee ${id}:`, e);
+        }
+      }
+      alert(`Verified ${successCount} of ${selectedIds.size} employees`);
+      clearSelection();
+      loadEmployees();
+    } finally {
+      setBulkActionLoading(false);
+    }
+  };
+
+  // Bulk action: Delete (deactivate) selected
+  const handleBulkDelete = async () => {
+    if (selectedIds.size === 0) return;
+    if (!confirm(`Delete (deactivate) ${selectedIds.size} selected employee(s)?\n\nThis will mark them as inactive.`)) return;
+
+    setBulkActionLoading(true);
+    try {
+      let successCount = 0;
+      for (const id of selectedIds) {
+        try {
+          await api.delete(`/employees/${id}`);
+          successCount++;
+        } catch (e) {
+          console.error(`Failed to delete employee ${id}:`, e);
+        }
+      }
+      alert(`Deleted ${successCount} of ${selectedIds.size} employees`);
+      clearSelection();
+      loadEmployees();
+    } finally {
+      setBulkActionLoading(false);
+    }
+  };
+
+  const isAllSelected = employees.length > 0 && selectedIds.size === employees.length;
+  const isSomeSelected = selectedIds.size > 0 && selectedIds.size < employees.length;
 
   const handleDeleteEmployee = async (emp: Employee) => {
     if (!confirm(`Are you sure you want to delete "${emp.full_name || emp.first_name + ' ' + emp.last_name}"?\n\nThis will deactivate the employee record.`)) {
@@ -607,7 +771,13 @@ export function EmployeesPage() {
         philhealth_contribution: formData.philhealth_contribution || undefined,
         pagibig_contribution: formData.pagibig_contribution || undefined,
         tax_amount: formData.tax_amount || undefined,
-      });
+        // Schedule settings
+        call_time: formData.call_time || undefined,
+        time_out: formData.time_out || undefined,
+        work_hours_per_day: formData.work_hours_per_day ? parseFloat(formData.work_hours_per_day) : undefined,
+        buffer_minutes: formData.buffer_minutes ? parseInt(formData.buffer_minutes) : undefined,
+        is_flexible: formData.is_flexible,
+      } as any);
       setShowAddModal(false);
       loadEmployees();
     } catch (err: any) {
@@ -647,7 +817,13 @@ export function EmployeesPage() {
         philhealth_contribution: formData.philhealth_contribution || undefined,
         pagibig_contribution: formData.pagibig_contribution || undefined,
         tax_amount: formData.tax_amount || undefined,
-      });
+        // Schedule settings
+        call_time: formData.call_time || undefined,
+        time_out: formData.time_out || undefined,
+        work_hours_per_day: formData.work_hours_per_day ? parseFloat(formData.work_hours_per_day) : undefined,
+        buffer_minutes: formData.buffer_minutes ? parseInt(formData.buffer_minutes) : undefined,
+        is_flexible: formData.is_flexible,
+      } as any);
       setShowEditModal(false);
       loadEmployees();
     } catch (err: any) {
@@ -774,6 +950,41 @@ export function EmployeesPage() {
         )}
       </div>
 
+      {/* Bulk Action Bar */}
+      {selectedIds.size > 0 && (
+        <div className="bg-primary-50 border border-primary-200 rounded-lg p-4 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <span className="font-medium text-primary-700">
+              {selectedIds.size} employee{selectedIds.size > 1 ? 's' : ''} selected
+            </span>
+            <button
+              onClick={clearSelection}
+              className="text-primary-600 hover:text-primary-800 text-sm underline"
+            >
+              Clear selection
+            </button>
+          </div>
+          <div className="flex gap-2">
+            {statusFilter === 'pending' && (
+              <button
+                onClick={handleBulkVerify}
+                disabled={bulkActionLoading}
+                className="px-3 py-1.5 bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50 text-sm font-medium"
+              >
+                {bulkActionLoading ? 'Processing...' : 'Verify Selected'}
+              </button>
+            )}
+            <button
+              onClick={handleBulkDelete}
+              disabled={bulkActionLoading}
+              className="px-3 py-1.5 bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50 text-sm font-medium"
+            >
+              {bulkActionLoading ? 'Processing...' : 'Delete Selected'}
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Employees Table */}
       <div className="card overflow-hidden">
         {loading ? (
@@ -792,6 +1003,17 @@ export function EmployeesPage() {
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gray-50">
                 <tr>
+                  <th className="px-3 py-3">
+                    <input
+                      type="checkbox"
+                      checked={isAllSelected}
+                      ref={(input) => {
+                        if (input) input.indeterminate = isSomeSelected;
+                      }}
+                      onChange={(e) => handleSelectAll(e.target.checked)}
+                      className="w-4 h-4 text-primary-600 border-gray-300 rounded focus:ring-primary-500"
+                    />
+                  </th>
                   <th
                     className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase cursor-pointer hover:bg-gray-100 select-none"
                     onClick={() => handleSort('employee_no')}
@@ -863,7 +1085,15 @@ export function EmployeesPage() {
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
                 {employees.map((emp) => (
-                  <tr key={emp.id} className={`hover:bg-gray-50 ${emp.status === 'pending' ? 'bg-yellow-50' : ''}`}>
+                  <tr key={emp.id} className={`hover:bg-gray-50 ${emp.status === 'pending' ? 'bg-yellow-50' : ''} ${selectedIds.has(emp.id) ? 'bg-primary-50' : ''}`}>
+                    <td className="px-3 py-4">
+                      <input
+                        type="checkbox"
+                        checked={selectedIds.has(emp.id)}
+                        onChange={(e) => handleSelectOne(emp.id, e.target.checked)}
+                        className="w-4 h-4 text-primary-600 border-gray-300 rounded focus:ring-primary-500"
+                      />
+                    </td>
                     <td className="px-6 py-4 whitespace-nowrap font-medium">{emp.employee_no}</td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       {emp.full_name || `${emp.first_name} ${emp.middle_name ? emp.middle_name + ' ' : ''}${emp.last_name}`}
@@ -1091,6 +1321,34 @@ export function EmployeesPage() {
                   <p className="text-sm text-gray-500">Biometric ID</p>
                   <p className="font-medium">{selectedEmployee.biometric_id || '-'}</p>
                 </div>
+              </div>
+
+              {/* Schedule Settings */}
+              <div className="pt-4 border-t">
+                <h4 className="font-semibold mb-3">Schedule Settings</h4>
+                <div className="grid grid-cols-4 gap-4">
+                  <div className="p-3 bg-gray-50 rounded">
+                    <p className="text-sm text-gray-500">Call Time</p>
+                    <p className="font-medium">{(selectedEmployee as any).call_time || '08:00'}</p>
+                  </div>
+                  <div className="p-3 bg-gray-50 rounded">
+                    <p className="text-sm text-gray-500">Time Out</p>
+                    <p className="font-medium">{(selectedEmployee as any).time_out || '17:00'}</p>
+                  </div>
+                  <div className="p-3 bg-gray-50 rounded">
+                    <p className="text-sm text-gray-500">Work Hours/Day</p>
+                    <p className="font-medium">{(selectedEmployee as any).work_hours_per_day || 8} hours</p>
+                  </div>
+                  <div className="p-3 bg-gray-50 rounded">
+                    <p className="text-sm text-gray-500">Buffer</p>
+                    <p className="font-medium">{(selectedEmployee as any).buffer_minutes ?? 10} mins</p>
+                  </div>
+                </div>
+                {(selectedEmployee as any).is_flexible && (
+                  <div className="mt-3 p-2 bg-green-50 text-green-700 rounded inline-block text-sm">
+                    Flexible Schedule (no late deductions)
+                  </div>
+                )}
               </div>
 
               {/* Salary Info */}

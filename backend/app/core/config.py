@@ -47,6 +47,15 @@ class Settings(BaseSettings):
     # Audit Log
     AUDIT_LOG_RETENTION_DAYS: int = 365 * 7  # 7 years
 
+    # Email Configuration (Gmail SMTP)
+    SMTP_HOST: str = "smtp.gmail.com"
+    SMTP_PORT: int = 587
+    SMTP_USER: Optional[str] = None  # Gmail address
+    SMTP_PASSWORD: Optional[str] = None  # Gmail App Password
+    SMTP_FROM_NAME: str = "ICAN A&P System"
+    SMTP_FROM_EMAIL: Optional[str] = None  # Defaults to SMTP_USER
+    EMAIL_ENABLED: bool = False  # Set to True when configured
+
     class Config:
         env_file = ".env"
         case_sensitive = True

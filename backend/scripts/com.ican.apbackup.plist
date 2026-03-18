@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.ican.apbackup</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/icanstudio2/attendance-payroll/backend/venv/bin/python</string>
+        <string>/Users/icanstudio2/attendance-payroll/backend/scripts/backup.py</string>
+        <string>--cleanup</string>
+    </array>
+
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>0</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+
+    <key>StandardOutPath</key>
+    <string>/Users/icanstudio2/attendance-payroll/logs/backup.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/Users/icanstudio2/attendance-payroll/logs/backup_error.log</string>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/icanstudio2/attendance-payroll/backend</string>
+
+    <key>RunAtLoad</key>
+    <false/>
+</dict>
+</plist>

@@ -13,7 +13,7 @@ import logging
 import os
 
 from app.core.config import settings
-from app.core.database import engine, Base, SessionLocal
+from app.core.database import engine, Base, SessionLocal, seed_contribution_tables
 from app.api.v1 import api_router
 from app.models.user import User, Role, UserStatus
 from app.models.settings import SystemSettings
@@ -37,6 +37,13 @@ async def lifespan(app: FastAPI):
 
     # Create default admin user if none exists
     create_default_admin()
+
+    # Seed government contribution tables (SSS, PhilHealth, Pag-IBIG)
+    try:
+        seed_contribution_tables()
+        logger.info("Government contribution tables seeded")
+    except Exception as e:
+        logger.error(f"Error seeding contribution tables: {e}")
 
     yield
 

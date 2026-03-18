@@ -18,6 +18,10 @@ from app.schemas.attendance import (
     CorrectionRequestCreate, CorrectionRequestResponse, CorrectionReviewRequest,
     DeviceCreate, DeviceResponse
 )
+from app.services.email_service import email_service
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -698,5 +702,34 @@ async def review_correction(
             # TODO: Recalculate worked hours, late minutes, etc.
 
     db.commit()
+
+    # Send email notification
+    from app.models.employee import Employee
+    employee = db.query(Employee).filter(Employee.id == correction.employee_id).first()
+    if employee and employee.email:
+        try:
+            employee_name = f"{employee.first_name} {employee.last_name}"
+            correction_date = correction.attendance_date.strftime("%B %d, %Y") if hasattr(correction, 'attendance_date') and correction.attendance_date else "N/A"
+            correction_type = "Time In/Out Correction"
+
+            if review_data.approved:
+                email_service.send_correction_approved_notification(
+                    to_email=employee.email,
+                    employee_name=employee_name,
+                    date=correction_date,
+                    correction_type=correction_type,
+                    review_notes=review_data.notes
+                )
+            else:
+                email_service.send_correction_rejected_notification(
+                    to_email=employee.email,
+                    employee_name=employee_name,
+                    date=correction_date,
+                    correction_type=correction_type,
+                    review_notes=review_data.notes
+                )
+            logger.info(f"Correction notification email sent to {employee.email}")
+        except Exception as e:
+            logger.error(f"Failed to send correction notification email: {e}")
 
     return {"message": f"Correction {'approved' if review_data.approved else 'rejected'}"}

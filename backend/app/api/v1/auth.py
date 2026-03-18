@@ -16,6 +16,7 @@ from app.schemas.user import (
 from app.services.auth_service import AuthService
 from app.services.audit_service import AuditService
 from app.models.audit import AuditAction
+from app.core.security import get_password_strength
 
 router = APIRouter()
 
@@ -190,3 +191,12 @@ async def get_password_policy(db: Session = Depends(get_db)):
     """
     auth_service = AuthService(db)
     return auth_service.get_password_policy()
+
+
+@router.post("/check-password-strength")
+async def check_password_strength(password: str):
+    """
+    Check password strength (public endpoint).
+    Used by frontend for real-time password strength feedback.
+    """
+    return get_password_strength(password)

@@ -71,6 +71,51 @@ class DeductionConfig(Base):
         return f"<DeductionConfig {self.code}: {self.name}>"
 
 
+class ContributionType(str, enum.Enum):
+    """Types of government contributions."""
+    SSS = "sss"
+    PHILHEALTH = "philhealth"
+    PAGIBIG = "pagibig"
+    TAX = "tax"
+
+
+class ContributionTable(Base):
+    """
+    Government contribution tables (SSS, PhilHealth, Pag-IBIG).
+    Stores contribution brackets/rates that can be updated annually.
+    """
+    __tablename__ = "contribution_tables"
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    # Contribution type
+    contribution_type = Column(SQLEnum(ContributionType), nullable=False, index=True)
+
+    # Effective year (e.g., 2025)
+    effective_year = Column(Integer, nullable=False, index=True)
+
+    # Name/description
+    name = Column(String(100), nullable=False)  # e.g., "SSS 2025 Contribution Table"
+    description = Column(Text, nullable=True)
+
+    # Contribution brackets (JSON array)
+    # SSS format: [{"min": 4250, "max": 4749.99, "msc": 4500, "ee": 202.50, "er": 427.50, "ec": 10}, ...]
+    # PhilHealth format: {"rate": 0.05, "employee_share": 0.5, "min_contribution": 500, "max_contribution": 5000}
+    # Pag-IBIG format: {"rate": 0.02, "max_contribution": 200}
+    brackets = Column(JSON, nullable=False)
+
+    # Status
+    is_active = Column(Boolean, default=True, index=True)
+
+    # Timestamps
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+
+    def __repr__(self):
+        return f"<ContributionTable {self.contribution_type.value} {self.effective_year}>"
+
+
 class PayrollStatus(str, enum.Enum):
     """Payroll run status."""
     DRAFT = "draft"        # Being prepared

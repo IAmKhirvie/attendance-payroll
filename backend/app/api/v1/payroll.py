@@ -17,14 +17,19 @@ import tempfile
 
 from app.api.deps import get_db, get_current_admin, get_current_user
 from app.models.user import User, Role
-from app.models.payroll import PayrollRun, Payslip, DeductionConfig, PayrollStatus, PayrollSettings, ThirteenthMonthPay
+from app.models.payroll import PayrollRun, Payslip, DeductionConfig, PayrollStatus, PayrollSettings, ThirteenthMonthPay, ContributionTable, ContributionType
 from app.models.employee import Employee
 from app.schemas.payroll import (
     PayrollRunCreate, PayrollRunResponse, PayrollRunListResponse,
     PayslipResponse, PayslipListResponse, PayslipAdjustRequest,
     DeductionConfigCreate, DeductionConfigUpdate, DeductionConfigResponse,
-    PayrollSettingsUpdate, PayrollSettingsResponse
+    PayrollSettingsUpdate, PayrollSettingsResponse,
+    ContributionTableCreate, ContributionTableUpdate, ContributionTableResponse, ContributionTableListResponse
 )
+from app.services.email_service import email_service
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -1003,7 +1008,27 @@ async def release_payslips(
 
     db.commit()
 
-    return {"message": f"Released {len(payslips)} payslips to employees"}
+    # Send email notifications
+    emails_sent = 0
+    for payslip in payslips:
+        if payslip.employee and payslip.employee.email:
+            try:
+                employee_name = f"{payslip.employee.first_name} {payslip.employee.last_name}"
+                period = f"{run.period_start.strftime('%b %d')} - {run.period_end.strftime('%b %d, %Y')}"
+                net_pay = float(payslip.net_pay) if payslip.net_pay else 0.0
+
+                email_service.send_payslip_notification(
+                    to_email=payslip.employee.email,
+                    employee_name=employee_name,
+                    period=period,
+                    net_pay=net_pay
+                )
+                emails_sent += 1
+            except Exception as e:
+                logger.error(f"Failed to send payslip email to {payslip.employee.email}: {e}")
+
+    logger.info(f"Released {len(payslips)} payslips, sent {emails_sent} email notifications")
+    return {"message": f"Released {len(payslips)} payslips to employees", "emails_sent": emails_sent}
 
 
 @router.post("/payslips/{payslip_id}/adjust")
@@ -1310,6 +1335,139 @@ async def delete_payslip(
     db.commit()
 
     return {"message": "Payslip deleted"}
+
+
+# === Contribution Tables (Government Rates) ===
+
+@router.get("/contributions", response_model=ContributionTableListResponse)
+async def list_contribution_tables(
+    contribution_type: Optional[ContributionType] = None,
+    year: Optional[int] = None,
+    include_inactive: bool = False,
+    current_admin: User = Depends(get_current_admin),
+    db: Session = Depends(get_db)
+):
+    """List all contribution tables (Admin only)."""
+    query = db.query(ContributionTable)
+
+    if contribution_type:
+        query = query.filter(ContributionTable.contribution_type == contribution_type)
+    if year:
+        query = query.filter(ContributionTable.effective_year == year)
+    if not include_inactive:
+        query = query.filter(ContributionTable.is_active == True)
+
+    tables = query.order_by(
+        ContributionTable.contribution_type,
+        ContributionTable.effective_year.desc()
+    ).all()
+
+    return ContributionTableListResponse(
+        items=[ContributionTableResponse.model_validate(t) for t in tables],
+        total=len(tables)
+    )
+
+
+@router.get("/contributions/{table_id}", response_model=ContributionTableResponse)
+async def get_contribution_table(
+    table_id: int,
+    current_admin: User = Depends(get_current_admin),
+    db: Session = Depends(get_db)
+):
+    """Get a specific contribution table (Admin only)."""
+    table = db.query(ContributionTable).filter(ContributionTable.id == table_id).first()
+    if not table:
+        raise HTTPException(status_code=404, detail="Contribution table not found")
+    return ContributionTableResponse.model_validate(table)
+
+
+@router.post("/contributions", response_model=ContributionTableResponse, status_code=status.HTTP_201_CREATED)
+async def create_contribution_table(
+    table_data: ContributionTableCreate,
+    current_admin: User = Depends(get_current_admin),
+    db: Session = Depends(get_db)
+):
+    """Create a new contribution table (Admin only)."""
+    # Check if table already exists for this type and year
+    existing = db.query(ContributionTable).filter(
+        ContributionTable.contribution_type == table_data.contribution_type,
+        ContributionTable.effective_year == table_data.effective_year
+    ).first()
+
+    if existing:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Contribution table for {table_data.contribution_type.value} {table_data.effective_year} already exists"
+        )
+
+    table = ContributionTable(
+        contribution_type=table_data.contribution_type,
+        effective_year=table_data.effective_year,
+        name=table_data.name,
+        description=table_data.description,
+        brackets=table_data.brackets,
+        is_active=table_data.is_active,
+        created_by=current_admin.id
+    )
+    db.add(table)
+    db.commit()
+    db.refresh(table)
+
+    return ContributionTableResponse.model_validate(table)
+
+
+@router.patch("/contributions/{table_id}", response_model=ContributionTableResponse)
+async def update_contribution_table(
+    table_id: int,
+    update_data: ContributionTableUpdate,
+    current_admin: User = Depends(get_current_admin),
+    db: Session = Depends(get_db)
+):
+    """Update a contribution table (Admin only)."""
+    table = db.query(ContributionTable).filter(ContributionTable.id == table_id).first()
+    if not table:
+        raise HTTPException(status_code=404, detail="Contribution table not found")
+
+    update_dict = update_data.model_dump(exclude_unset=True)
+    for field, value in update_dict.items():
+        setattr(table, field, value)
+
+    db.commit()
+    db.refresh(table)
+
+    return ContributionTableResponse.model_validate(table)
+
+
+@router.delete("/contributions/{table_id}")
+async def delete_contribution_table(
+    table_id: int,
+    current_admin: User = Depends(get_current_admin),
+    db: Session = Depends(get_db)
+):
+    """Delete a contribution table (Admin only). Sets is_active to False."""
+    table = db.query(ContributionTable).filter(ContributionTable.id == table_id).first()
+    if not table:
+        raise HTTPException(status_code=404, detail="Contribution table not found")
+
+    # Soft delete - just deactivate
+    table.is_active = False
+    db.commit()
+
+    return {"message": "Contribution table deactivated"}
+
+
+@router.post("/contributions/seed")
+async def seed_contribution_tables(
+    current_admin: User = Depends(get_current_admin),
+    db: Session = Depends(get_db)
+):
+    """Seed default contribution tables if they don't exist (Admin only)."""
+    from app.core.database import seed_contribution_tables
+    try:
+        seed_contribution_tables()
+        return {"message": "Contribution tables seeded successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # === Payroll Settings ===

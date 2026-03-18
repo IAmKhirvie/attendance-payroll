@@ -33,12 +33,13 @@ Deductions:
 
 from decimal import Decimal, ROUND_HALF_UP
 from datetime import date
-from typing import Dict, Any
+from typing import Dict, Any, Optional, List
 from sqlalchemy.orm import Session
 
 from app.models.employee import Employee
 from app.models.attendance import ProcessedAttendance, AttendanceStatus, ImportRecord, ImportBatch
-from app.models.payroll import PayrollRun, Payslip, PayrollStatus, PayrollSettings
+from app.models.payroll import PayrollRun, Payslip, PayrollStatus, PayrollSettings, ContributionTable, ContributionType
+from app.models.loan import Loan, LoanDeduction, LoanStatus
 
 
 # 2024 SSS Contribution Table
@@ -99,17 +100,87 @@ SSS_TABLE_2024 = [
 ]
 
 
+def get_contribution_table(db: Session, contribution_type: ContributionType, year: int = None) -> Optional[ContributionTable]:
+    """
+    Get the active contribution table for a given type and year.
+    If no year specified, uses current year.
+    Falls back to most recent year if current year not found.
+    """
+    if year is None:
+        year = date.today().year
+
+    # Try to get table for specified year
+    table = db.query(ContributionTable).filter(
+        ContributionTable.contribution_type == contribution_type,
+        ContributionTable.effective_year == year,
+        ContributionTable.is_active == True
+    ).first()
+
+    if table:
+        return table
+
+    # Fall back to most recent year
+    table = db.query(ContributionTable).filter(
+        ContributionTable.contribution_type == contribution_type,
+        ContributionTable.is_active == True
+    ).order_by(ContributionTable.effective_year.desc()).first()
+
+    return table
+
+
+def calculate_sss_from_db(db: Session, monthly_salary: float, year: int = None) -> float:
+    """
+    Calculate SSS employee contribution using database table.
+    Falls back to hardcoded 2024 table if no DB table found.
+    """
+    table = get_contribution_table(db, ContributionType.SSS, year)
+
+    if table and table.brackets:
+        brackets = table.brackets
+        for bracket in brackets:
+            if bracket["min"] <= monthly_salary <= bracket["max"]:
+                return bracket["ee"]
+        # Return maximum from last bracket
+        if brackets:
+            return brackets[-1]["ee"]
+
+    # Fallback to hardcoded table
+    return calculate_sss(monthly_salary)
+
+
 def calculate_sss(monthly_salary: float) -> float:
-    """Calculate SSS employee contribution based on 2024 table."""
+    """Calculate SSS employee contribution based on 2024 table (fallback)."""
     for bracket in SSS_TABLE_2024:
         if bracket["min"] <= monthly_salary <= bracket["max"]:
             return bracket["ee"]
     return 1350  # Maximum
 
 
+def calculate_philhealth_from_db(db: Session, monthly_salary: float, year: int = None) -> float:
+    """
+    Calculate PhilHealth employee contribution using database table.
+    Falls back to hardcoded calculation if no DB table found.
+    """
+    table = get_contribution_table(db, ContributionType.PHILHEALTH, year)
+
+    if table and table.brackets:
+        config = table.brackets
+        rate = config.get("rate", 0.05)
+        employee_share = config.get("employee_share_percent", 0.5)
+        min_premium = config.get("min_monthly_premium", 500)
+        max_premium = config.get("max_monthly_premium", 5000)
+
+        total = monthly_salary * rate
+        total = max(min_premium, min(total, max_premium))
+        return round(total * employee_share, 2)
+
+    # Fallback to hardcoded calculation
+    return calculate_philhealth(monthly_salary)
+
+
 def calculate_philhealth(monthly_salary: float) -> float:
     """
-    Calculate PhilHealth employee contribution.
+    Calculate PhilHealth employee contribution (fallback).
     2024: 5% of monthly basic salary, shared equally (2.5% each).
     Min: PHP 500, Max: PHP 5,000 (total), employee share is half.
     """
@@ -118,13 +189,133 @@ def calculate_philhealth(monthly_salary: float) -> float:
     return round(total / 2, 2)
 
 
+def calculate_pagibig_from_db(db: Session, monthly_salary: float, year: int = None) -> float:
+    """
+    Calculate Pag-IBIG employee contribution using database table.
+    Falls back to hardcoded calculation if no DB table found.
+    """
+    table = get_contribution_table(db, ContributionType.PAGIBIG, year)
+
+    if table and table.brackets:
+        config = table.brackets
+        rate_below_1500 = config.get("employee_rate_below_1500", 0.01)
+        rate_above_1500 = config.get("employee_rate_above_1500", 0.02)
+        max_contribution = config.get("max_employee_contribution", 200)
+
+        if monthly_salary <= 1500:
+            contribution = monthly_salary * rate_below_1500
+        else:
+            contribution = monthly_salary * rate_above_1500
+
+        return min(round(contribution, 2), max_contribution)
+
+    # Fallback to hardcoded calculation
+    return calculate_pagibig(monthly_salary)
+
+
 def calculate_pagibig(monthly_salary: float) -> float:
     """
-    Calculate Pag-IBIG employee contribution.
+    Calculate Pag-IBIG employee contribution (fallback).
     2% of monthly salary, max PHP 200.
     """
     contribution = monthly_salary * 0.02
     return min(round(contribution, 2), 200)
+
+
+def get_employee_loan_deductions(db: Session, employee_id: int) -> Dict[str, Any]:
+    """
+    Get active loans and total monthly deductions for an employee.
+    Returns breakdown by loan type for payslip transparency.
+    """
+    from sqlalchemy import func
+
+    active_loans = db.query(Loan).filter(
+        Loan.employee_id == employee_id,
+        Loan.status == LoanStatus.ACTIVE,
+        Loan.remaining_balance > 0
+    ).all()
+
+    total_deduction = 0.0
+    loan_breakdown = []
+
+    for loan in active_loans:
+        monthly = float(loan.monthly_deduction or 0)
+        remaining = float(loan.remaining_balance or 0)
+
+        # Don't deduct more than remaining balance
+        actual_deduction = min(monthly, remaining)
+
+        if actual_deduction > 0:
+            loan_breakdown.append({
+                'loan_id': loan.id,
+                'loan_type_id': loan.loan_type_id,
+                'loan_type_code': loan.loan_type.code if loan.loan_type else 'UNKNOWN',
+                'reference_no': loan.reference_no,
+                'monthly_deduction': monthly,
+                'actual_deduction': actual_deduction,
+                'remaining_balance': remaining,
+            })
+            total_deduction += actual_deduction
+
+    return {
+        'total': round(total_deduction, 2),
+        'loans': loan_breakdown,
+        'loan_count': len(loan_breakdown),
+    }
+
+
+def record_loan_deductions(
+    db: Session,
+    employee_id: int,
+    payslip_id: int,
+    deduction_date: date
+) -> float:
+    """
+    Record loan deductions for a payslip and update loan balances.
+    Returns total amount deducted.
+    """
+    active_loans = db.query(Loan).filter(
+        Loan.employee_id == employee_id,
+        Loan.status == LoanStatus.ACTIVE,
+        Loan.remaining_balance > 0
+    ).all()
+
+    total_deducted = 0.0
+
+    for loan in active_loans:
+        monthly = float(loan.monthly_deduction or 0)
+        remaining = float(loan.remaining_balance or 0)
+
+        # Don't deduct more than remaining balance
+        actual_deduction = min(monthly, remaining)
+
+        if actual_deduction > 0:
+            balance_after = remaining - actual_deduction
+
+            # Create loan deduction record
+            loan_deduction = LoanDeduction(
+                loan_id=loan.id,
+                payslip_id=payslip_id,
+                amount=actual_deduction,
+                balance_before=remaining,
+                balance_after=balance_after,
+                deduction_date=deduction_date,
+                notes=f"Auto-deducted from payslip #{payslip_id}"
+            )
+            db.add(loan_deduction)
+
+            # Update loan balance
+            loan.remaining_balance = balance_after
+            loan.total_paid = float(loan.total_paid or 0) + actual_deduction
+
+            # Check if loan is fully paid
+            if balance_after <= 0:
+                loan.status = LoanStatus.PAID
+                loan.actual_end_date = deduction_date
+
+            total_deducted += actual_deduction
+
+    return round(total_deducted, 2)
 
 
 def calculate_tax(monthly_taxable: float) -> float:
@@ -443,6 +634,10 @@ def generate_payslip(
     default_pagibig = float(settings.default_pagibig or 0)
     default_tax = float(settings.default_tax or 0)
 
+    # Get employee loan deductions
+    loan_info = get_employee_loan_deductions(db, employee.id)
+    loan_deduction_total = loan_info['total']
+
     # Government deductions based on cutoff
     if cutoff == 1:
         # 1st cutoff: Only loans and tax
@@ -454,7 +649,8 @@ def generate_payslip(
             tax_semi = round(calculate_tax(monthly_basic) / 2, 2)
 
         deductions['tax'] = tax_semi
-        deductions['loans'] = 0  # HR will fill
+        deductions['loans'] = loan_deduction_total  # Auto-calculated from active loans
+        deductions['loans_breakdown'] = loan_info['loans']  # Detailed breakdown
         deductions['sss'] = 0
         deductions['philhealth'] = 0
         deductions['pagibig'] = 0
@@ -467,21 +663,24 @@ def generate_payslip(
         elif default_sss is not None:
             deductions['sss'] = default_sss
         else:
-            deductions['sss'] = calculate_sss(monthly_basic)
+            # Use database-aware calculation (falls back to hardcoded if no DB table)
+            deductions['sss'] = calculate_sss_from_db(db, monthly_basic)
 
         if emp_philhealth is not None:
             deductions['philhealth'] = emp_philhealth
         elif default_philhealth is not None:
             deductions['philhealth'] = default_philhealth
         else:
-            deductions['philhealth'] = calculate_philhealth(monthly_basic)
+            # Use database-aware calculation (falls back to hardcoded if no DB table)
+            deductions['philhealth'] = calculate_philhealth_from_db(db, monthly_basic)
 
         if emp_pagibig is not None:
             deductions['pagibig'] = emp_pagibig
         elif default_pagibig is not None:
             deductions['pagibig'] = default_pagibig
         else:
-            deductions['pagibig'] = calculate_pagibig(monthly_basic)
+            # Use database-aware calculation (falls back to hardcoded if no DB table)
+            deductions['pagibig'] = calculate_pagibig_from_db(db, monthly_basic)
 
         if emp_tax is not None:
             deductions['tax'] = round(emp_tax / 2, 2)
@@ -490,7 +689,8 @@ def generate_payslip(
         else:
             deductions['tax'] = round(calculate_tax(monthly_basic) / 2, 2)
 
-        deductions['loans'] = 0  # HR will fill
+        deductions['loans'] = loan_deduction_total  # Auto-calculated from active loans
+        deductions['loans_breakdown'] = loan_info['loans']  # Detailed breakdown
 
     # Calculate totals
     total_deductions = (
@@ -580,6 +780,16 @@ def process_payroll(db: Session, payroll_run: PayrollRun) -> Dict[str, Any]:
         # Generate payslip with settings
         payslip = generate_payslip(db, employee, payroll_run, attendance, settings)
         db.add(payslip)
+        db.flush()  # Get payslip ID for loan deductions
+
+        # Record loan deductions and update loan balances
+        if payslip.deductions.get('loans', 0) > 0:
+            record_loan_deductions(
+                db,
+                employee.id,
+                payslip.id,
+                payroll_run.period_end  # Use period end as deduction date
+            )
 
         total_gross += float(payslip.total_earnings)
         total_deductions += float(payslip.total_deductions)

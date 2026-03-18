@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 from typing import Optional, List, Dict, Any
 from datetime import date, datetime
 from decimal import Decimal
-from app.models.payroll import PayrollStatus, DeductionType
+from app.models.payroll import PayrollStatus, DeductionType, ContributionType
 
 
 # === Deduction Config ===
@@ -283,3 +283,45 @@ class PayrollSettingsResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+# === Contribution Tables (Government Rates) ===
+
+class ContributionTableCreate(BaseModel):
+    """Create contribution table request."""
+    contribution_type: ContributionType
+    effective_year: int = Field(..., ge=2020, le=2100)
+    name: str = Field(..., min_length=1, max_length=100)
+    description: Optional[str] = None
+    brackets: Dict[str, Any]  # JSON structure varies by type
+    is_active: bool = True
+
+
+class ContributionTableUpdate(BaseModel):
+    """Update contribution table request."""
+    name: Optional[str] = Field(None, min_length=1, max_length=100)
+    description: Optional[str] = None
+    brackets: Optional[Dict[str, Any]] = None
+    is_active: Optional[bool] = None
+
+
+class ContributionTableResponse(BaseModel):
+    """Contribution table response."""
+    id: int
+    contribution_type: ContributionType
+    effective_year: int
+    name: str
+    description: Optional[str]
+    brackets: Dict[str, Any]
+    is_active: bool
+    created_at: datetime
+    updated_at: Optional[datetime]
+
+    class Config:
+        from_attributes = True
+
+
+class ContributionTableListResponse(BaseModel):
+    """List of contribution tables."""
+    items: List[ContributionTableResponse]
+    total: int

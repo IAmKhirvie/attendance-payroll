@@ -61,11 +61,16 @@ import { AttendancePage } from './pages/admin/Attendance';
 import { PayrollPage } from './pages/admin/Payroll';
 import { SettingsPage } from './pages/admin/Settings';
 import { ManagementPage } from './pages/admin/Management';
+import { HolidaysPage } from './pages/admin/Holidays';
+import { LoansPage } from './pages/admin/Loans';
+import LeavePage from './pages/admin/Leave';
+import ReportsPage from './pages/admin/Reports';
 
 // Employee Pages
 import { EmployeeDashboard } from './pages/employee/Dashboard';
 import { EmployeeAttendancePage } from './pages/employee/Attendance';
 import { EmployeePayslipsPage } from './pages/employee/Payslips';
+import { EmployeeLeavePage } from './pages/employee/Leave';
 
 function App() {
   const { checkAuth, isAuthenticated, user } = useAuthStore();
@@ -107,6 +112,10 @@ function App() {
           <Route path="payroll" element={<PayrollPage />} />
           <Route path="settings" element={<SettingsPage />} />
           <Route path="management" element={<ManagementPage />} />
+          <Route path="holidays" element={<HolidaysPage />} />
+          <Route path="loans" element={<LoansPage />} />
+          <Route path="leave" element={<LeavePage />} />
+          <Route path="reports" element={<ReportsPage />} />
         </Route>
 
         {/* Employee routes */}
@@ -121,6 +130,7 @@ function App() {
           <Route index element={<EmployeeDashboard />} />
           <Route path="attendance" element={<EmployeeAttendancePage />} />
           <Route path="payslips" element={<EmployeePayslipsPage />} />
+          <Route path="leave" element={<EmployeeLeavePage />} />
         </Route>
 
         {/* Root redirect */}

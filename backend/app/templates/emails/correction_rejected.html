@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Correction Request Update</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background-color: #ffffff;
+            border-radius: 8px;
+            padding: 30px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .header {
+            text-align: center;
+            border-bottom: 2px solid #EF4444;
+            padding-bottom: 20px;
+            margin-bottom: 20px;
+        }
+        .header h1 {
+            color: #EF4444;
+            margin: 0;
+            font-size: 24px;
+        }
+        .header .tagalog {
+            color: #666;
+            font-size: 16px;
+            margin-top: 5px;
+        }
+        .status-badge {
+            display: inline-block;
+            background-color: #EF4444;
+            color: white;
+            padding: 8px 20px;
+            border-radius: 20px;
+            font-weight: bold;
+            font-size: 14px;
+            margin: 10px 0;
+        }
+        .content {
+            padding: 20px 0;
+        }
+        .greeting {
+            font-size: 18px;
+            margin-bottom: 15px;
+        }
+        .details-box {
+            background-color: #fef2f2;
+            border: 1px solid #EF4444;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px 0;
+        }
+        .details-box h3 {
+            color: #EF4444;
+            margin-top: 0;
+            margin-bottom: 15px;
+        }
+        .detail-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 0;
+            border-bottom: 1px solid #fecaca;
+        }
+        .detail-row:last-child {
+            border-bottom: none;
+        }
+        .detail-label {
+            color: #666;
+        }
+        .detail-value {
+            font-weight: bold;
+        }
+        .reason-box {
+            background-color: #fff7ed;
+            border-left: 4px solid #f97316;
+            padding: 15px;
+            margin: 15px 0;
+        }
+        .reason-box strong {
+            color: #c2410c;
+        }
+        .tagalog-text {
+            color: #666;
+            font-style: italic;
+            font-size: 14px;
+        }
+        .footer {
+            border-top: 1px solid #eee;
+            padding-top: 20px;
+            margin-top: 30px;
+            text-align: center;
+            color: #666;
+            font-size: 12px;
+        }
+        .footer .logo {
+            font-weight: bold;
+            color: #EF4444;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Correction Request Update</h1>
+            <div class="tagalog">Update sa iyong correction request</div>
+            <span class="status-badge">NOT APPROVED</span>
+        </div>
+
+        <div class="content">
+            <div class="greeting">
+                Dear <strong>{{ employee_name }}</strong>,
+            </div>
+
+            <p>We regret to inform you that your attendance correction request could not be approved at this time.</p>
+            <p class="tagalog-text">Ikinalulungkot naming ipaalam na ang iyong correction request ay hindi na-approve sa ngayon.</p>
+
+            <div class="details-box">
+                <h3>Correction Request Details</h3>
+                <div class="detail-row">
+                    <span class="detail-label">Date:</span>
+                    <span class="detail-value">{{ date }}</span>
+                </div>
+                <div class="detail-row">
+                    <span class="detail-label">Type:</span>
+                    <span class="detail-value">{{ correction_type }}</span>
+                </div>
+            </div>
+
+            {{ #if review_notes }}
+            <div class="reason-box">
+                <strong>Reason / Dahilan:</strong>
+                <p>{{ review_notes }}</p>
+            </div>
+            {{ /if }}
+
+            <p>If you have questions or would like to discuss this decision, please contact HR or your supervisor.</p>
+            <p class="tagalog-text">Kung may katanungan kayo o gusto ninyong pag-usapan ang desisyong ito, makipag-ugnayan po sa HR o sa inyong supervisor.</p>
+        </div>
+
+        <div class="footer">
+            <p>This is an automated message from</p>
+            <p class="logo">ICAN Attendance & Payroll System</p>
+        </div>
+    </div>
+</body>
+</html>

@@ -1,7 +1,12 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import api, { employeesApi } from '../../api/client';
 import dayjs from 'dayjs';
 import { useImportStore } from '../../stores/importStore';
+
+interface Department {
+  id: number;
+  name: string;
+}
 
 interface AttendanceRecord {
   id: number;
@@ -58,6 +63,12 @@ export function AttendancePage() {
   const [dateFrom, setDateFrom] = useState(dayjs().startOf('month').format('YYYY-MM-DD'));
   const [dateTo, setDateTo] = useState(dayjs().endOf('month').format('YYYY-MM-DD'));
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Department and search filters for records tab
+  const [departments, setDepartments] = useState<Department[]>([]);
+  const [selectedDepartment, setSelectedDepartment] = useState<string>('all');
+  const [recordsSearchTerm, setRecordsSearchTerm] = useState('');
+  const [recordsStatusFilter, setRecordsStatusFilter] = useState<string>('all');
 
   // Import results state
   const [searchTerm, setSearchTerm] = useState('');
@@ -211,6 +222,20 @@ export function AttendancePage() {
     setHistoryExpandedEmployees(new Set());
   };
 
+  // Load departments on mount
+  useEffect(() => {
+    loadDepartments();
+  }, []);
+
+  const loadDepartments = async () => {
+    try {
+      const response = await api.get('/employees/departments');
+      setDepartments(response.data);
+    } catch (error) {
+      console.error('Failed to load departments:', error);
+    }
+  };
+
   // Auto-switch to results tab when import completes
   useEffect(() => {
     if (importResult && !isUploading) {
@@ -228,6 +253,31 @@ export function AttendancePage() {
       loadImportHistory();
     }
   }, [activeTab, dateFrom, dateTo]);
+
+  // Filter attendance records
+  const filteredAttendance = useMemo(() => {
+    return attendance.filter(record => {
+      // Search filter
+      if (recordsSearchTerm) {
+        const searchLower = recordsSearchTerm.toLowerCase();
+        if (!record.employee_name.toLowerCase().includes(searchLower) &&
+            !record.employee_no.toLowerCase().includes(searchLower)) {
+          return false;
+        }
+      }
+
+      // Status filter
+      if (recordsStatusFilter !== 'all') {
+        if (recordsStatusFilter === 'exceptions' && !record.has_exception) return false;
+        if (recordsStatusFilter === 'complete' && record.status !== 'complete') return false;
+        if (recordsStatusFilter === 'incomplete' && record.status !== 'incomplete') return false;
+        if (recordsStatusFilter === 'late' && record.late_minutes === 0) return false;
+        if (recordsStatusFilter === 'overtime' && record.overtime_minutes === 0) return false;
+      }
+
+      return true;
+    });
+  }, [attendance, recordsSearchTerm, recordsStatusFilter]);
 
   const loadImportHistory = async () => {
     setHistoryLoading(true);
@@ -933,6 +983,7 @@ export function AttendancePage() {
 
       {activeTab === 'records' && (
         <div className="card">
+          {/* Date Range Filters */}
           <div className="flex flex-wrap gap-4 mb-4">
             <div>
               <label className="form-label">From</label>
@@ -954,9 +1005,47 @@ export function AttendancePage() {
             </div>
             <div className="flex items-end">
               <button onClick={loadAttendance} className="btn-primary">
-                Filter
+                Load Records
               </button>
             </div>
+          </div>
+
+          {/* Search and Filter Controls */}
+          <div className="flex flex-wrap gap-4 mb-4 pb-4 border-b">
+            <div className="flex-1 min-w-[200px]">
+              <input
+                type="text"
+                placeholder="Search by name or employee no..."
+                value={recordsSearchTerm}
+                onChange={(e) => setRecordsSearchTerm(e.target.value)}
+                className="form-input"
+              />
+            </div>
+            <div>
+              <select
+                value={recordsStatusFilter}
+                onChange={(e) => setRecordsStatusFilter(e.target.value)}
+                className="form-input"
+              >
+                <option value="all">All Status</option>
+                <option value="complete">Complete</option>
+                <option value="incomplete">Incomplete</option>
+                <option value="exceptions">With Exceptions</option>
+                <option value="late">Late</option>
+                <option value="overtime">With Overtime</option>
+              </select>
+            </div>
+            {(recordsSearchTerm || recordsStatusFilter !== 'all') && (
+              <button
+                onClick={() => {
+                  setRecordsSearchTerm('');
+                  setRecordsStatusFilter('all');
+                }}
+                className="text-sm text-gray-500 hover:text-gray-700 underline"
+              >
+                Clear filters
+              </button>
+            )}
           </div>
 
           {loading ? (
@@ -967,52 +1056,61 @@ export function AttendancePage() {
             <div className="text-center py-12 text-gray-500">
               No attendance records found. Import attendance data to get started.
             </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-gray-200">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Employee</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Time In</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Time Out</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Hours</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Late</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">OT</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-                  </tr>
-                </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
-                  {attendance.map((record) => (
-                    <tr key={record.id} className={record.has_exception ? 'bg-orange-50' : 'hover:bg-gray-50'}>
-                      <td className="px-4 py-3 whitespace-nowrap">
-                        <div className="text-sm font-medium text-gray-900">{record.employee_name}</div>
-                        <div className="text-xs text-gray-500">{record.employee_no}</div>
-                      </td>
-                      <td className="px-4 py-3 whitespace-nowrap text-sm">
-                        {dayjs(record.date).format('ddd, MMM D, YYYY')}
-                      </td>
-                      <td className="px-4 py-3 whitespace-nowrap text-sm">{record.time_in || '-'}</td>
-                      <td className="px-4 py-3 whitespace-nowrap text-sm">{record.time_out || '-'}</td>
-                      <td className="px-4 py-3 whitespace-nowrap text-sm font-medium">{record.worked_hours}h</td>
-                      <td className="px-4 py-3 whitespace-nowrap text-sm">
-                        {record.late_minutes > 0 ? (
-                          <span className="text-red-600">{record.late_minutes}m</span>
-                        ) : '-'}
-                      </td>
-                      <td className="px-4 py-3 whitespace-nowrap text-sm">
-                        {record.overtime_minutes > 0 ? (
-                          <span className="text-green-600">{record.overtime_minutes}m</span>
-                        ) : '-'}
-                      </td>
-                      <td className="px-4 py-3 whitespace-nowrap">
-                        {getStatusBadge(record.status, record.has_exception)}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+          ) : filteredAttendance.length === 0 ? (
+            <div className="text-center py-12 text-gray-500">
+              No records match your filters. Try adjusting your search criteria.
             </div>
+          ) : (
+            <>
+              <div className="text-sm text-gray-500 mb-2">
+                Showing {filteredAttendance.length} of {attendance.length} records
+              </div>
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Employee</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Time In</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Time Out</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Hours</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Late</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">OT</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {filteredAttendance.map((record) => (
+                      <tr key={record.id} className={record.has_exception ? 'bg-orange-50' : 'hover:bg-gray-50'}>
+                        <td className="px-4 py-3 whitespace-nowrap">
+                          <div className="text-sm font-medium text-gray-900">{record.employee_name}</div>
+                          <div className="text-xs text-gray-500">{record.employee_no}</div>
+                        </td>
+                        <td className="px-4 py-3 whitespace-nowrap text-sm">
+                          {dayjs(record.date).format('ddd, MMM D, YYYY')}
+                        </td>
+                        <td className="px-4 py-3 whitespace-nowrap text-sm">{record.time_in || '-'}</td>
+                        <td className="px-4 py-3 whitespace-nowrap text-sm">{record.time_out || '-'}</td>
+                        <td className="px-4 py-3 whitespace-nowrap text-sm font-medium">{record.worked_hours}h</td>
+                        <td className="px-4 py-3 whitespace-nowrap text-sm">
+                          {record.late_minutes > 0 ? (
+                            <span className="text-red-600">{record.late_minutes}m</span>
+                          ) : '-'}
+                        </td>
+                        <td className="px-4 py-3 whitespace-nowrap text-sm">
+                          {record.overtime_minutes > 0 ? (
+                            <span className="text-green-600">{record.overtime_minutes}m</span>
+                          ) : '-'}
+                        </td>
+                        <td className="px-4 py-3 whitespace-nowrap">
+                          {getStatusBadge(record.status, record.has_exception)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
           )}
         </div>
       )}

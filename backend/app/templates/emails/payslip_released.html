@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Payslip Ready</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background-color: #ffffff;
+            border-radius: 8px;
+            padding: 30px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .header {
+            text-align: center;
+            border-bottom: 2px solid #4F46E5;
+            padding-bottom: 20px;
+            margin-bottom: 20px;
+        }
+        .header h1 {
+            color: #4F46E5;
+            margin: 0;
+            font-size: 24px;
+        }
+        .header .tagalog {
+            color: #666;
+            font-size: 16px;
+            margin-top: 5px;
+        }
+        .content {
+            padding: 20px 0;
+        }
+        .greeting {
+            font-size: 18px;
+            margin-bottom: 15px;
+        }
+        .highlight-box {
+            background: linear-gradient(135deg, #4F46E5 0%, #7C3AED 100%);
+            color: white;
+            border-radius: 8px;
+            padding: 20px;
+            text-align: center;
+            margin: 20px 0;
+        }
+        .highlight-box .label {
+            font-size: 14px;
+            opacity: 0.9;
+        }
+        .highlight-box .amount {
+            font-size: 32px;
+            font-weight: bold;
+            margin: 10px 0;
+        }
+        .highlight-box .period {
+            font-size: 14px;
+            opacity: 0.9;
+        }
+        .info-section {
+            background-color: #f8f9fa;
+            border-radius: 8px;
+            padding: 15px;
+            margin: 15px 0;
+        }
+        .info-section p {
+            margin: 5px 0;
+        }
+        .tagalog-text {
+            color: #666;
+            font-style: italic;
+            font-size: 14px;
+        }
+        .cta-button {
+            display: inline-block;
+            background-color: #4F46E5;
+            color: white;
+            padding: 12px 30px;
+            text-decoration: none;
+            border-radius: 6px;
+            font-weight: bold;
+            margin: 20px 0;
+        }
+        .footer {
+            border-top: 1px solid #eee;
+            padding-top: 20px;
+            margin-top: 30px;
+            text-align: center;
+            color: #666;
+            font-size: 12px;
+        }
+        .footer .logo {
+            font-weight: bold;
+            color: #4F46E5;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Payslip Ready</h1>
+            <div class="tagalog">Ang iyong payslip ay handa na po</div>
+        </div>
+
+        <div class="content">
+            <div class="greeting">
+                Dear <strong>{{ employee_name }}</strong>,
+            </div>
+
+            <p>Your payslip for the period is now available for viewing.</p>
+            <p class="tagalog-text">Ang iyong payslip para sa nasabing panahon ay pwede na po ninyong tingnan.</p>
+
+            <div class="highlight-box">
+                <div class="label">Net Pay / Sahod</div>
+                <div class="amount">PHP {{ net_pay }}</div>
+                <div class="period">{{ period }}</div>
+            </div>
+
+            <div class="info-section">
+                <p><strong>What to do next:</strong></p>
+                <p>1. Log in to the A&P System</p>
+                <p>2. Go to "My Payslips"</p>
+                <p>3. Review your payslip details</p>
+                <p class="tagalog-text">Mag-login sa A&P System, pumunta sa "My Payslips", at tingnan ang detalye ng inyong payslip.</p>
+            </div>
+
+            <p>If you have any questions about your payslip, please contact HR.</p>
+            <p class="tagalog-text">Kung may katanungan kayo tungkol sa inyong payslip, makipag-ugnayan po sa HR.</p>
+        </div>
+
+        <div class="footer">
+            <p>This is an automated message from</p>
+            <p class="logo">ICAN Attendance & Payroll System</p>
+            <p>{{ date }}</p>
+        </div>
+    </div>
+</body>
+</html>
