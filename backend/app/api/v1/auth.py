@@ -44,7 +44,7 @@ async def login(
             user_email=login_data.email,
             ip_address=ip_address,
             user_agent=request.headers.get("User-Agent"),
-            metadata={"error": error}
+            extra_data={"error": error}
         )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -105,7 +105,7 @@ async def register(
         resource_id=str(user.id),
         new_value={"email": user.email, "status": user.status.value},
         ip_address=ip_address,
-        metadata={"registration_type": "self"}
+        extra_data={"registration_type": "self"}
     )
 
     return UserResponse.model_validate(user)
