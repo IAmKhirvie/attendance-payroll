@@ -314,7 +314,7 @@ async def reset_user_password(
         user_email=current_admin.email,
         resource_id=str(user.id),
         ip_address=ip_address,
-        metadata={"reset_by_admin": True}
+        extra_data={"reset_by_admin": True}
     )
 
     return {

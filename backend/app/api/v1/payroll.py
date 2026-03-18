@@ -340,7 +340,7 @@ async def update_payroll_run(
             user_email=current_admin.email,
             resource_id=str(run_id),
             reason=reason,
-            metadata={"action": "FORCE_EDIT", "original_status": str(run.status)}
+            extra_data={"action": "FORCE_EDIT", "original_status": str(run.status)}
         )
 
     # Check for overlapping period (exclude current run)
@@ -410,7 +410,7 @@ async def delete_payroll_run(
         user_email=current_admin.email,
         resource_id=str(run_id),
         reason=reason,
-        metadata={
+        extra_data={
             "action": "SOFT_DELETE",
             "status": str(run.status.value),
             "employee_count": run.employee_count
@@ -461,7 +461,7 @@ async def restore_payroll_run(
         user_email=current_admin.email,
         resource_id=str(run_id),
         reason=f"Restored from trash. Original deletion reason: {run.deletion_reason[:200] if run.deletion_reason else 'N/A'}...",
-        metadata={"action": "RESTORE", "original_deleted_at": run.deleted_at.isoformat() if run.deleted_at else None}
+        extra_data={"action": "RESTORE", "original_deleted_at": run.deleted_at.isoformat() if run.deleted_at else None}
     )
 
     # Restore the payroll run
@@ -519,7 +519,7 @@ async def permanently_delete_payroll_run(
         user_email=current_admin.email,
         resource_id=str(run_id),
         reason=f"Permanently deleted. Original deletion reason: {run.deletion_reason[:500] if run.deletion_reason else 'N/A'}",
-        metadata={
+        extra_data={
             "action": "PERMANENT_DELETE",
             "period_start": run.period_start.isoformat(),
             "period_end": run.period_end.isoformat(),
