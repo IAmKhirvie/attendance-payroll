@@ -83,15 +83,22 @@ export function AdminDashboard() {
   return (
     <div className="space-y-6">
       {/* Welcome Banner */}
-      <div className="relative overflow-hidden bg-gradient-to-r from-blue-600 to-indigo-700 rounded-2xl p-6 lg:p-8 text-white">
+      <div
+        className="relative overflow-hidden rounded-2xl p-6 lg:p-8"
+        style={{
+          background: 'linear-gradient(135deg, #ffffff 0%, #faf9f6 100%)',
+          border: '2px solid #e5e5e5',
+          boxShadow: '0 12px 40px rgba(0, 0, 0, 0.08)',
+        }}
+      >
         <div className="relative z-10">
-          <h1 className="text-2xl lg:text-3xl font-bold mb-2">ICAN Attendance & Payroll</h1>
-          <p className="text-blue-100 max-w-xl">
+          <h1 className="text-2xl lg:text-3xl font-bold mb-2 gradient-text">ICAN Attendance & Payroll</h1>
+          <p style={{ color: '#4b5563' }} className="max-w-xl">
             Upload attendance → Review payroll → Download payslips
           </p>
         </div>
-        <div className="absolute right-0 top-0 -mt-4 -mr-4 opacity-20">
-          <svg width="200" height="200" viewBox="0 0 200 200" fill="currentColor">
+        <div className="absolute right-0 top-0 -mt-4 -mr-4 opacity-10">
+          <svg width="200" height="200" viewBox="0 0 200 200" fill="#4f46e5">
             <circle cx="100" cy="100" r="80" />
             <circle cx="160" cy="40" r="40" />
           </svg>

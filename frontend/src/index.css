@@ -259,11 +259,13 @@ table {
 }
 
 table thead {
-  background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
+  background: linear-gradient(135deg, #faf9f6 0%, #f0efe9 100%);
+  border-bottom: 2px solid var(--border);
 }
 
 table thead th {
-  @apply text-xs font-bold uppercase tracking-wider text-white;
+  @apply text-xs font-bold uppercase tracking-wider;
+  color: var(--text-primary);
   padding: 16px 20px;
   letter-spacing: 0.1em;
 }
