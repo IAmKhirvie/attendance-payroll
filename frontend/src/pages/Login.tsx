@@ -81,27 +81,48 @@ export function LoginPage() {
 
   if (showRegister) {
     return (
-      <div className="min-h-screen flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8 grid-pattern">
+      <div
+        className="min-h-screen flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8"
+        style={{
+          background: 'var(--bg-primary)',
+          backgroundImage: `
+            radial-gradient(circle at 20% 20%, rgba(79, 70, 229, 0.08) 0%, transparent 50%),
+            radial-gradient(circle at 80% 80%, rgba(168, 85, 247, 0.08) 0%, transparent 50%),
+            radial-gradient(circle at 50% 50%, rgba(217, 119, 6, 0.05) 0%, transparent 70%)
+          `,
+        }}
+      >
         <div className="max-w-md w-full animate-fade-in">
-          <div className="card">
+          {/* Decorative elements */}
+          <div className="absolute top-10 left-10 w-20 h-20 rounded-full opacity-20"
+            style={{ background: 'var(--primary-gradient)', filter: 'blur(40px)' }}
+          ></div>
+          <div className="absolute bottom-10 right-10 w-32 h-32 rounded-full opacity-20"
+            style={{ background: 'linear-gradient(135deg, #d97706, #f59e0b)', filter: 'blur(60px)' }}
+          ></div>
+
+          <div className="card-premium">
             {/* Header */}
             <div className="text-center mb-8">
-              <div className="flex justify-center mb-4">
+              <div className="flex justify-center mb-5">
                 <div
-                  className="h-16 w-16 rounded-xl flex items-center justify-center animate-glow"
-                  style={{ background: 'var(--accent)' }}
+                  className="h-20 w-20 rounded-2xl flex items-center justify-center shadow-xl animate-float"
+                  style={{
+                    background: 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 50%, #a855f7 100%)',
+                    boxShadow: '0 8px 32px rgba(79, 70, 229, 0.3)',
+                  }}
                 >
                   <img
                     src="/logo.png"
                     alt="ICAN Logo"
-                    className="h-10 w-10 object-contain"
+                    className="h-12 w-12 object-contain"
                   />
                 </div>
               </div>
-              <h2 className="text-2xl font-bold text-white">
+              <h2 className="text-3xl font-bold gradient-text">
                 Create Account
               </h2>
-              <p className="mt-2 text-sm text-slate-400">
+              <p className="mt-3 text-sm" style={{ color: 'var(--text-secondary)' }}>
                 Register for an account. Your registration will need HR approval.
               </p>
             </div>
@@ -109,13 +130,18 @@ export function LoginPage() {
             {registerSuccess ? (
               <div className="text-center">
                 <div
-                  className="mb-4 p-4 rounded-lg text-emerald-300"
+                  className="mb-6 p-5 rounded-xl"
                   style={{
-                    background: 'rgba(16, 185, 129, 0.15)',
-                    border: '1px solid rgba(16, 185, 129, 0.3)',
+                    background: 'linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%)',
+                    border: '2px solid #6ee7b7',
                   }}
                 >
-                  Registration successful! Your account is pending approval from HR.
+                  <svg className="h-12 w-12 mx-auto mb-3" fill="none" viewBox="0 0 24 24" stroke="#059669">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  <p className="font-semibold" style={{ color: '#065f46' }}>
+                    Registration successful! Your account is pending approval from HR.
+                  </p>
                 </div>
                 <button
                   onClick={() => {
@@ -128,13 +154,14 @@ export function LoginPage() {
                 </button>
               </div>
             ) : (
-              <form onSubmit={handleRegister} className="space-y-4">
+              <form onSubmit={handleRegister} className="space-y-5">
                 {registerError && (
                   <div
-                    className="p-3 rounded-lg text-red-300 text-sm"
+                    className="p-4 rounded-xl text-sm font-medium"
                     style={{
-                      background: 'rgba(239, 68, 68, 0.15)',
-                      border: '1px solid rgba(239, 68, 68, 0.3)',
+                      background: 'linear-gradient(135deg, #fee2e2 0%, #fecaca 100%)',
+                      border: '2px solid #f87171',
+                      color: '#991b1b',
                     }}
                   >
                     {registerError}
@@ -216,12 +243,13 @@ export function LoginPage() {
                   Register
                 </button>
 
-                <p className="text-center text-sm text-slate-400">
+                <p className="text-center text-sm" style={{ color: 'var(--text-secondary)' }}>
                   Already have an account?{' '}
                   <button
                     type="button"
                     onClick={() => setShowRegister(false)}
-                    className="text-indigo-400 hover:text-indigo-300 font-medium"
+                    className="font-bold hover:underline"
+                    style={{ color: 'var(--primary)' }}
                   >
                     Sign in
                   </button>
@@ -235,38 +263,60 @@ export function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8 grid-pattern">
-      <div className="max-w-md w-full animate-fade-in">
-        <div className="card">
+    <div
+      className="min-h-screen flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8 relative overflow-hidden"
+      style={{
+        background: 'var(--bg-primary)',
+        backgroundImage: `
+          radial-gradient(circle at 20% 20%, rgba(79, 70, 229, 0.08) 0%, transparent 50%),
+          radial-gradient(circle at 80% 80%, rgba(168, 85, 247, 0.08) 0%, transparent 50%),
+          radial-gradient(circle at 50% 50%, rgba(217, 119, 6, 0.05) 0%, transparent 70%)
+        `,
+      }}
+    >
+      {/* Decorative background elements */}
+      <div className="absolute top-0 left-0 w-96 h-96 rounded-full opacity-30"
+        style={{ background: 'var(--primary-gradient)', filter: 'blur(100px)', transform: 'translate(-50%, -50%)' }}
+      ></div>
+      <div className="absolute bottom-0 right-0 w-96 h-96 rounded-full opacity-20"
+        style={{ background: 'linear-gradient(135deg, #d97706, #f59e0b)', filter: 'blur(100px)', transform: 'translate(50%, 50%)' }}
+      ></div>
+
+      <div className="max-w-md w-full animate-fade-in relative z-10">
+        <div className="card-premium">
           {/* Header */}
-          <div className="text-center mb-8">
-            <div className="flex justify-center mb-4">
+          <div className="text-center mb-10">
+            <div className="flex justify-center mb-6">
               <div
-                className="h-20 w-20 rounded-xl flex items-center justify-center animate-glow"
-                style={{ background: 'var(--accent)' }}
+                className="h-24 w-24 rounded-2xl flex items-center justify-center shadow-xl animate-float"
+                style={{
+                  background: 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 50%, #a855f7 100%)',
+                  boxShadow: '0 12px 40px rgba(79, 70, 229, 0.4)',
+                }}
               >
                 <img
                   src="/logo.png"
                   alt="ICAN Logo"
-                  className="h-12 w-12 object-contain"
+                  className="h-14 w-14 object-contain"
                 />
               </div>
             </div>
-            <h2 className="text-2xl font-bold text-white">
+            <h2 className="text-3xl font-bold gradient-text">
               ICAN Attendance & Payroll
             </h2>
-            <p className="mt-2 text-sm text-slate-400">
+            <p className="mt-3" style={{ color: 'var(--text-secondary)' }}>
               Sign in to manage attendance and payroll
             </p>
           </div>
 
-          <form onSubmit={handleLogin} className="space-y-5">
+          <form onSubmit={handleLogin} className="space-y-6">
             {error && (
               <div
-                className="p-3 rounded-lg text-red-300 text-sm"
+                className="p-4 rounded-xl text-sm font-medium"
                 style={{
-                  background: 'rgba(239, 68, 68, 0.15)',
-                  border: '1px solid rgba(239, 68, 68, 0.3)',
+                  background: 'linear-gradient(135deg, #fee2e2 0%, #fecaca 100%)',
+                  border: '2px solid #f87171',
+                  color: '#991b1b',
                 }}
               >
                 {error}
@@ -275,7 +325,7 @@ export function LoginPage() {
 
             <div>
               <label htmlFor="email" className="form-label">
-                Email
+                Email Address
               </label>
               <input
                 id="email"
@@ -301,30 +351,34 @@ export function LoginPage() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 className="form-input"
+                placeholder="Enter your password"
               />
             </div>
 
             <button
               type="submit"
               disabled={isLoading}
-              className="btn-primary w-full"
+              className="btn-primary w-full text-lg py-4"
             >
               {isLoading ? (
-                <span className="flex items-center justify-center gap-2">
-                  <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></div>
+                <span className="flex items-center justify-center gap-3">
+                  <div className="animate-spin rounded-full h-5 w-5 border-3 border-white border-t-transparent"></div>
                   Signing in...
                 </span>
               ) : (
-                'Sign in'
+                'Sign In'
               )}
             </button>
 
-            <p className="text-center text-sm text-slate-400">
+            <div className="divider my-6"></div>
+
+            <p className="text-center text-sm" style={{ color: 'var(--text-secondary)' }}>
               Don't have an account?{' '}
               <button
                 type="button"
                 onClick={() => setShowRegister(true)}
-                className="text-indigo-400 hover:text-indigo-300 font-medium"
+                className="font-bold hover:underline"
+                style={{ color: 'var(--primary)' }}
               >
                 Register
               </button>
@@ -332,7 +386,7 @@ export function LoginPage() {
           </form>
         </div>
 
-        <p className="mt-6 text-center text-xs text-slate-500">
+        <p className="mt-8 text-center text-sm font-medium" style={{ color: 'var(--text-muted)' }}>
           ICAN Language Center - Internal Use Only
         </p>
       </div>

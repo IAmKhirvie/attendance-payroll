@@ -125,53 +125,66 @@ export function Layout() {
   };
 
   return (
-    <div className="min-h-screen grid-pattern">
+    <div className="min-h-screen" style={{ background: 'var(--bg-primary)' }}>
       {/* Mobile sidebar backdrop */}
       {sidebarOpen && (
         <div
-          className="fixed inset-0 bg-black/70 backdrop-blur-sm z-20 lg:hidden"
+          className="fixed inset-0 z-20 lg:hidden modal-overlay"
           onClick={() => setSidebarOpen(false)}
         />
       )}
 
-      {/* Sidebar - Dark style */}
+      {/* Sidebar - Maximalist Light Design */}
       <aside
-        className={`fixed inset-y-0 left-0 z-30 w-64 transform transition-all duration-300 ease-in-out lg:translate-x-0 ${
+        className={`fixed inset-y-0 left-0 z-30 w-72 transform transition-all duration-300 ease-in-out lg:translate-x-0 ${
           sidebarOpen ? 'translate-x-0' : '-translate-x-full'
         }`}
         style={{
-          background: 'var(--bg-secondary)',
-          borderRight: '1px solid var(--border)',
+          background: 'linear-gradient(180deg, #ffffff 0%, #faf9f6 100%)',
+          borderRight: '2px solid var(--border)',
+          boxShadow: 'var(--shadow-xl)',
         }}
       >
         <div className="flex flex-col h-screen overflow-hidden">
-          {/* Logo/Brand */}
+          {/* Logo/Brand - Premium Header */}
           <div
-            className="flex items-center justify-between h-16 px-4"
-            style={{ borderBottom: '1px solid var(--border)' }}
+            className="flex items-center justify-between px-6 py-5"
+            style={{
+              background: 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 50%, #a855f7 100%)',
+            }}
           >
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-4">
               <div
-                className="h-10 w-10 rounded-lg flex items-center justify-center animate-glow"
-                style={{ background: 'var(--accent)' }}
+                className="h-12 w-12 rounded-xl flex items-center justify-center shadow-lg"
+                style={{
+                  background: 'rgba(255, 255, 255, 0.2)',
+                  backdropFilter: 'blur(10px)',
+                  border: '2px solid rgba(255, 255, 255, 0.3)',
+                }}
               >
-                <img src="/logo.png" alt="ICAN" className="h-7 w-7 object-contain" />
+                <img src="/logo.png" alt="ICAN" className="h-8 w-8 object-contain" />
               </div>
               <div>
-                <span className="text-lg font-bold text-white">ICAN</span>
-                <p className="text-xs text-slate-400 -mt-0.5">Attendance & Payroll</p>
+                <span className="text-xl font-bold text-white tracking-tight">ICAN</span>
+                <p className="text-xs text-white/80 font-medium">Attendance & Payroll</p>
               </div>
             </div>
             <button
               onClick={() => setSidebarOpen(false)}
-              className="lg:hidden p-2 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition-colors"
+              className="lg:hidden p-2 rounded-lg text-white/80 hover:text-white hover:bg-white/10 transition-colors"
             >
               <XIcon />
             </button>
           </div>
 
+          {/* Decorative divider */}
+          <div className="h-1" style={{ background: 'linear-gradient(90deg, #4f46e5, #a855f7, #4f46e5)' }}></div>
+
           {/* Navigation */}
-          <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
+          <nav className="flex-1 px-4 py-6 space-y-2 overflow-y-auto">
+            <p className="px-4 text-xs font-bold uppercase tracking-widest text-gray-400 mb-4">
+              Navigation
+            </p>
             {navItems.map((item) => {
               const isActive = location.pathname === item.href;
               const Icon = item.icon;
@@ -189,33 +202,45 @@ export function Layout() {
             })}
           </nav>
 
-          {/* User info and logout */}
+          {/* User info and logout - Premium footer */}
           <div
-            className="p-4"
+            className="p-5"
             style={{
-              borderTop: '1px solid var(--border)',
-              background: 'var(--bg-primary)',
+              borderTop: '2px solid var(--border)',
+              background: 'linear-gradient(180deg, #faf9f6 0%, #f0efe9 100%)',
             }}
           >
-            <div className="flex items-center mb-3">
-              <div
-                className="w-10 h-10 rounded-lg flex items-center justify-center"
-                style={{ background: 'var(--accent)' }}
-              >
-                <span className="text-white font-semibold text-sm">
-                  {user?.first_name?.charAt(0)}{user?.last_name?.charAt(0)}
-                </span>
+            <div className="flex items-center mb-4">
+              <div className="avatar-ring">
+                <div
+                  className="w-11 h-11 rounded-full flex items-center justify-center"
+                  style={{ background: 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)' }}
+                >
+                  <span className="text-white font-bold text-sm">
+                    {user?.first_name?.charAt(0)}{user?.last_name?.charAt(0)}
+                  </span>
+                </div>
               </div>
               <div className="ml-3">
-                <p className="text-sm font-semibold text-white">
+                <p className="text-sm font-bold" style={{ color: 'var(--text-primary)' }}>
                   {user?.first_name} {user?.last_name}
                 </p>
-                <p className="text-xs text-slate-400 capitalize">{user?.role}</p>
+                <p
+                  className="text-xs font-semibold uppercase tracking-wider"
+                  style={{ color: 'var(--primary)' }}
+                >
+                  {user?.role}
+                </p>
               </div>
             </div>
             <button
               onClick={handleLogout}
-              className="sidebar-link w-full text-red-400 hover:text-red-300 hover:bg-red-500/10"
+              className="w-full flex items-center px-4 py-3 rounded-xl font-semibold transition-all duration-300"
+              style={{
+                background: 'linear-gradient(135deg, #fee2e2 0%, #fecaca 100%)',
+                color: '#991b1b',
+                border: '2px solid #f87171',
+              }}
             >
               <LogoutIcon />
               Logout
@@ -225,38 +250,52 @@ export function Layout() {
       </aside>
 
       {/* Main content - offset for fixed sidebar on desktop */}
-      <div className="flex-1 flex flex-col min-h-screen lg:ml-64">
-        {/* Top bar */}
+      <div className="flex-1 flex flex-col min-h-screen lg:ml-72">
+        {/* Top bar - Maximalist Header */}
         <header
-          className="h-16 flex items-center justify-between px-4 lg:px-8 sticky top-0 z-10"
+          className="h-20 flex items-center justify-between px-6 lg:px-10 sticky top-0 z-10"
           style={{
-            background: 'var(--bg-secondary)',
-            borderBottom: '1px solid var(--border)',
+            background: 'linear-gradient(180deg, #ffffff 0%, #faf9f6 100%)',
+            borderBottom: '2px solid var(--border)',
+            boxShadow: 'var(--shadow-md)',
           }}
         >
           <div className="flex items-center">
             <button
               onClick={() => setSidebarOpen(true)}
-              className="lg:hidden p-2 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition-colors"
+              className="lg:hidden p-3 rounded-xl transition-all duration-300"
+              style={{
+                background: 'var(--bg-accent)',
+                border: '2px solid var(--border)',
+                color: 'var(--text-primary)',
+              }}
             >
               <MenuIcon />
             </button>
-            <h1 className="ml-2 lg:ml-0 text-lg font-semibold text-white">
-              {navItems.find((item) => item.href === location.pathname)?.name || 'Dashboard'}
-            </h1>
+            <div className="ml-4 lg:ml-0">
+              <h1
+                className="text-2xl font-bold"
+                style={{ color: 'var(--text-primary)' }}
+              >
+                {navItems.find((item) => item.href === location.pathname)?.name || 'Dashboard'}
+              </h1>
+              <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
+                Welcome back, {user?.first_name}
+              </p>
+            </div>
           </div>
 
           {/* Global Import Progress Indicator */}
           {isUploading && (
             <Link
               to="/admin/attendance"
-              className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-white transition-all"
+              className="flex items-center gap-3 px-5 py-3 rounded-xl text-sm font-bold text-white transition-all uppercase tracking-wide"
               style={{
-                background: 'var(--accent)',
-                boxShadow: '0 0 20px var(--accent-glow)',
+                background: 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)',
+                boxShadow: 'var(--shadow-md), 0 4px 20px rgba(79, 70, 229, 0.3)',
               }}
             >
-              <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></div>
+              <div className="animate-spin rounded-full h-5 w-5 border-3 border-white border-t-transparent"></div>
               <span>{uploadProgress || 'Importing...'}</span>
             </Link>
           )}
@@ -265,14 +304,14 @@ export function Layout() {
           {!isUploading && importResult && location.pathname !== '/admin/attendance' && (
             <Link
               to="/admin/attendance"
-              className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-white transition-all"
+              className="flex items-center gap-3 px-5 py-3 rounded-xl text-sm font-bold text-white transition-all uppercase tracking-wide"
               style={{
-                background: 'var(--success)',
-                boxShadow: '0 0 20px rgba(16, 185, 129, 0.3)',
+                background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                boxShadow: 'var(--shadow-md), 0 4px 20px rgba(16, 185, 129, 0.3)',
               }}
             >
-              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+              <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
               </svg>
               <span>Import complete - {importResult.summary.imported} records</span>
             </Link>
@@ -280,9 +319,22 @@ export function Layout() {
         </header>
 
         {/* Page content */}
-        <main className="flex-1 p-4 lg:p-8">
+        <main className="flex-1 p-6 lg:p-10">
           <Outlet />
         </main>
+
+        {/* Footer */}
+        <footer
+          className="py-4 px-6 text-center"
+          style={{
+            borderTop: '1px solid var(--border)',
+            background: 'var(--bg-accent)',
+          }}
+        >
+          <p className="text-sm font-medium" style={{ color: 'var(--text-muted)' }}>
+            ICAN Language Center - Attendance & Payroll System
+          </p>
+        </footer>
       </div>
     </div>
   );

@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="300" height="200" viewBox="0 0 300 200">
+  <rect width="300" height="200" fill="#f0f9ff"/>
+  <!-- Money/Document stack -->
+  <rect x="80" y="60" width="140" height="100" rx="8" fill="#dbeafe"/>
+  <rect x="90" y="50" width="140" height="100" rx="8" fill="#93c5fd"/>
+  <rect x="100" y="40" width="140" height="100" rx="8" fill="#3b82f6"/>
+  <!-- Dollar sign -->
+  <text x="170" y="105" text-anchor="middle" font-family="system-ui" font-size="48" font-weight="bold" fill="white">$</text>
+  <!-- Lines representing text -->
+  <rect x="120" y="120" width="60" height="6" rx="3" fill="white" opacity="0.7"/>
+  <rect x="120" y="130" width="40" height="4" rx="2" fill="white" opacity="0.5"/>
+  <!-- Coins -->
+  <circle cx="230" cy="140" r="20" fill="#fbbf24"/>
+  <circle cx="250" cy="155" r="15" fill="#f59e0b"/>
+  <circle cx="60" cy="130" r="18" fill="#fbbf24"/>
+  <text x="60" y="136" text-anchor="middle" font-family="system-ui" font-size="16" font-weight="bold" fill="#92400e">$</text>
+  <text x="230" y="146" text-anchor="middle" font-family="system-ui" font-size="20" font-weight="bold" fill="#92400e">$</text>
+</svg>
