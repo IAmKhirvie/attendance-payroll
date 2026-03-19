@@ -81,18 +81,15 @@ export function LoginPage() {
 
   if (showRegister) {
     return (
-      <div className="min-h-screen flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
+      <div className="min-h-screen flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8 grid-pattern">
         <div className="max-w-md w-full animate-fade-in">
           <div className="card">
             {/* Header */}
             <div className="text-center mb-8">
               <div className="flex justify-center mb-4">
                 <div
-                  className="h-16 w-16 rounded-xl flex items-center justify-center"
-                  style={{
-                    background: 'linear-gradient(135deg, #1e3a5f 0%, #0f2744 100%)',
-                    boxShadow: '0 4px 12px rgba(30, 58, 95, 0.4)',
-                  }}
+                  className="h-16 w-16 rounded-xl flex items-center justify-center animate-glow"
+                  style={{ background: 'var(--accent)' }}
                 >
                   <img
                     src="/logo.png"
@@ -101,17 +98,23 @@ export function LoginPage() {
                   />
                 </div>
               </div>
-              <h2 className="text-2xl font-bold text-slate-800">
+              <h2 className="text-2xl font-bold text-white">
                 Create Account
               </h2>
-              <p className="mt-2 text-sm text-slate-500">
+              <p className="mt-2 text-sm text-slate-400">
                 Register for an account. Your registration will need HR approval.
               </p>
             </div>
 
             {registerSuccess ? (
               <div className="text-center">
-                <div className="mb-4 p-4 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-700">
+                <div
+                  className="mb-4 p-4 rounded-lg text-emerald-300"
+                  style={{
+                    background: 'rgba(16, 185, 129, 0.15)',
+                    border: '1px solid rgba(16, 185, 129, 0.3)',
+                  }}
+                >
                   Registration successful! Your account is pending approval from HR.
                 </div>
                 <button
@@ -127,7 +130,13 @@ export function LoginPage() {
             ) : (
               <form onSubmit={handleRegister} className="space-y-4">
                 {registerError && (
-                  <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm">
+                  <div
+                    className="p-3 rounded-lg text-red-300 text-sm"
+                    style={{
+                      background: 'rgba(239, 68, 68, 0.15)',
+                      border: '1px solid rgba(239, 68, 68, 0.3)',
+                    }}
+                  >
                     {registerError}
                   </div>
                 )}
@@ -207,12 +216,12 @@ export function LoginPage() {
                   Register
                 </button>
 
-                <p className="text-center text-sm text-slate-500">
+                <p className="text-center text-sm text-slate-400">
                   Already have an account?{' '}
                   <button
                     type="button"
                     onClick={() => setShowRegister(false)}
-                    className="text-blue-600 hover:text-blue-700 font-medium"
+                    className="text-indigo-400 hover:text-indigo-300 font-medium"
                   >
                     Sign in
                   </button>
@@ -226,18 +235,15 @@ export function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
+    <div className="min-h-screen flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8 grid-pattern">
       <div className="max-w-md w-full animate-fade-in">
         <div className="card">
           {/* Header */}
           <div className="text-center mb-8">
             <div className="flex justify-center mb-4">
               <div
-                className="h-20 w-20 rounded-xl flex items-center justify-center"
-                style={{
-                  background: 'linear-gradient(135deg, #1e3a5f 0%, #0f2744 100%)',
-                  boxShadow: '0 4px 12px rgba(30, 58, 95, 0.4)',
-                }}
+                className="h-20 w-20 rounded-xl flex items-center justify-center animate-glow"
+                style={{ background: 'var(--accent)' }}
               >
                 <img
                   src="/logo.png"
@@ -246,17 +252,23 @@ export function LoginPage() {
                 />
               </div>
             </div>
-            <h2 className="text-2xl font-bold text-slate-800">
+            <h2 className="text-2xl font-bold text-white">
               ICAN Attendance & Payroll
             </h2>
-            <p className="mt-2 text-sm text-slate-500">
+            <p className="mt-2 text-sm text-slate-400">
               Sign in to manage attendance and payroll
             </p>
           </div>
 
           <form onSubmit={handleLogin} className="space-y-5">
             {error && (
-              <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm">
+              <div
+                className="p-3 rounded-lg text-red-300 text-sm"
+                style={{
+                  background: 'rgba(239, 68, 68, 0.15)',
+                  border: '1px solid rgba(239, 68, 68, 0.3)',
+                }}
+              >
                 {error}
               </div>
             )}
@@ -307,12 +319,12 @@ export function LoginPage() {
               )}
             </button>
 
-            <p className="text-center text-sm text-slate-500">
+            <p className="text-center text-sm text-slate-400">
               Don't have an account?{' '}
               <button
                 type="button"
                 onClick={() => setShowRegister(true)}
-                className="text-blue-600 hover:text-blue-700 font-medium"
+                className="text-indigo-400 hover:text-indigo-300 font-medium"
               >
                 Register
               </button>
