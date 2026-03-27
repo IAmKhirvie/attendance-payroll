@@ -4,6 +4,8 @@ Security Module
 Password hashing, JWT token management, and security utilities.
 """
 
+import secrets
+import string
 from datetime import datetime, timedelta
 from typing import Optional, Any
 from jose import jwt, JWTError
@@ -214,3 +216,47 @@ def get_password_strength(password: str) -> dict:
         "strength": strength,
         "feedback": feedback
     }
+
+
+def generate_temp_password(length: int = 12) -> str:
+    """
+    Generate a secure random temporary password.
+
+    The password will contain:
+    - At least one uppercase letter
+    - At least one lowercase letter
+    - At least one digit
+    - At least one special character
+
+    Args:
+        length: Password length (minimum 8, default 12)
+
+    Returns:
+        A secure random password string
+    """
+    if length < 8:
+        length = 8
+
+    # Define character sets
+    lowercase = string.ascii_lowercase
+    uppercase = string.ascii_uppercase
+    digits = string.digits
+    special = "!@#$%^&*"
+
+    # Ensure at least one character from each required set
+    password = [
+        secrets.choice(lowercase),
+        secrets.choice(uppercase),
+        secrets.choice(digits),
+        secrets.choice(special),
+    ]
+
+    # Fill remaining length with random characters from all sets
+    all_chars = lowercase + uppercase + digits + special
+    password.extend(secrets.choice(all_chars) for _ in range(length - 4))
+
+    # Shuffle to avoid predictable positions
+    password_list = list(password)
+    secrets.SystemRandom().shuffle(password_list)
+
+    return ''.join(password_list)

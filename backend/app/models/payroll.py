@@ -311,6 +311,10 @@ class Payslip(Base):
     adjustments = Column(JSON, nullable=True)  # {"reason": "...", "amount": 500}
     adjustment_notes = Column(Text, nullable=True)
 
+    # Additional (internal use only - NOT printed on payslip)
+    additional_amount = Column(Numeric(12, 2), default=0)  # Hidden additional amount
+    additional_notes = Column(Text, nullable=True)  # Hidden notes for admin
+
     # Status
     is_released = Column(Boolean, default=False)  # Visible to employee
     released_at = Column(DateTime(timezone=True), nullable=True)

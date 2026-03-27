@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
-import { settingsApi, backupsApi } from '../../api/client';
+import { settingsApi, backupsApi, authApi } from '../../api/client';
+import api from '../../api/client';
 import type { SystemSettings } from '../../types';
 
 interface BackupInfo {
@@ -19,6 +20,28 @@ interface BackupStatus {
   retention_days: number;
 }
 
+interface SessionItem {
+  id: number;
+  user_id: number | null;
+  user_email: string | null;
+  action: string;
+  details: string | null;
+  ip_address: string | null;
+  user_agent: string | null;
+  created_at: string;
+}
+
+interface AuditLogItem {
+  id: number;
+  user_id: number | null;
+  user_email: string | null;
+  action: string;
+  details: string | null;
+  ip_address: string | null;
+  user_agent: string | null;
+  created_at: string;
+}
+
 export function SettingsPage() {
   const [settings, setSettings] = useState<SystemSettings | null>(null);
   const [loading, setLoading] = useState(true);
@@ -33,10 +56,41 @@ export function SettingsPage() {
   const [showRestoreConfirm, setShowRestoreConfirm] = useState<string | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null);
 
+  // Change Password state
+  const [passwordData, setPasswordData] = useState({
+    currentPassword: '',
+    newPassword: '',
+    confirmPassword: '',
+  });
+  const [changingPassword, setChangingPassword] = useState(false);
+
+  // Sessions state
+  const [sessions, setSessions] = useState<SessionItem[]>([]);
+  const [sessionsLoading, setSessionsLoading] = useState(true);
+  const [sessionsPage, setSessionsPage] = useState(1);
+  const [sessionsTotal, setSessionsTotal] = useState(0);
+
+  // Audit Log state
+  const [auditLogs, setAuditLogs] = useState<AuditLogItem[]>([]);
+  const [auditLoading, setAuditLoading] = useState(true);
+  const [auditPage, setAuditPage] = useState(1);
+  const [auditTotal, setAuditTotal] = useState(0);
+  const [auditFilter, setAuditFilter] = useState('');
+
   useEffect(() => {
     loadSettings();
     loadBackups();
+    loadSessions();
+    loadAuditLogs();
   }, []);
+
+  useEffect(() => {
+    loadSessions();
+  }, [sessionsPage]);
+
+  useEffect(() => {
+    loadAuditLogs();
+  }, [auditPage, auditFilter]);
 
   const loadSettings = async () => {
     try {
@@ -61,6 +115,67 @@ export function SettingsPage() {
       console.error('Failed to load backups:', error);
     } finally {
       setBackupLoading(false);
+    }
+  };
+
+  const loadSessions = async () => {
+    setSessionsLoading(true);
+    try {
+      const response = await api.get('/settings/sessions', {
+        params: { page: sessionsPage, page_size: 10 }
+      });
+      setSessions(response.data.items);
+      setSessionsTotal(response.data.total);
+    } catch (error) {
+      console.error('Failed to load sessions:', error);
+    } finally {
+      setSessionsLoading(false);
+    }
+  };
+
+  const loadAuditLogs = async () => {
+    setAuditLoading(true);
+    try {
+      const response = await api.get('/settings/audit-logs', {
+        params: {
+          page: auditPage,
+          page_size: 20,
+          action: auditFilter || undefined
+        }
+      });
+      setAuditLogs(response.data.items);
+      setAuditTotal(response.data.total);
+    } catch (error) {
+      console.error('Failed to load audit logs:', error);
+    } finally {
+      setAuditLoading(false);
+    }
+  };
+
+  const handleChangePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setMessage(null);
+
+    if (passwordData.newPassword !== passwordData.confirmPassword) {
+      setMessage({ type: 'error', text: 'New passwords do not match' });
+      return;
+    }
+
+    if (passwordData.newPassword.length < (settings?.password_min_length || 8)) {
+      setMessage({ type: 'error', text: `Password must be at least ${settings?.password_min_length || 8} characters` });
+      return;
+    }
+
+    setChangingPassword(true);
+    try {
+      await authApi.changePassword(passwordData.currentPassword, passwordData.newPassword);
+      setMessage({ type: 'success', text: 'Password changed successfully' });
+      setPasswordData({ currentPassword: '', newPassword: '', confirmPassword: '' });
+    } catch (error: any) {
+      const errorMessage = error.response?.data?.detail || 'Failed to change password';
+      setMessage({ type: 'error', text: errorMessage });
+    } finally {
+      setChangingPassword(false);
     }
   };
 
@@ -363,6 +478,252 @@ export function SettingsPage() {
             {saving ? 'Saving...' : 'Save Registration Settings'}
           </button>
         </form>
+      </div>
+
+      {/* Change Password */}
+      <div className="card">
+        <h2 className="text-lg font-semibold text-gray-900 mb-4">Change Password</h2>
+        <form onSubmit={handleChangePassword} className="space-y-4 max-w-md">
+          <div>
+            <label className="form-label">Current Password</label>
+            <input
+              type="password"
+              value={passwordData.currentPassword}
+              onChange={(e) => setPasswordData({ ...passwordData, currentPassword: e.target.value })}
+              className="form-input"
+              required
+            />
+          </div>
+          <div>
+            <label className="form-label">New Password</label>
+            <input
+              type="password"
+              value={passwordData.newPassword}
+              onChange={(e) => setPasswordData({ ...passwordData, newPassword: e.target.value })}
+              className="form-input"
+              required
+              minLength={settings?.password_min_length || 8}
+            />
+            <p className="text-xs text-gray-500 mt-1">
+              Minimum {settings?.password_min_length || 8} characters
+              {settings?.password_require_uppercase && ', 1 uppercase'}
+              {settings?.password_require_numbers && ', 1 number'}
+              {settings?.password_require_special && ', 1 special character'}
+            </p>
+          </div>
+          <div>
+            <label className="form-label">Confirm New Password</label>
+            <input
+              type="password"
+              value={passwordData.confirmPassword}
+              onChange={(e) => setPasswordData({ ...passwordData, confirmPassword: e.target.value })}
+              className="form-input"
+              required
+            />
+          </div>
+          <button type="submit" disabled={changingPassword} className="btn-primary">
+            {changingPassword ? 'Changing...' : 'Change Password'}
+          </button>
+        </form>
+      </div>
+
+      {/* Session Tracker */}
+      <div className="card">
+        <h2 className="text-lg font-semibold text-gray-900 mb-4">Login Sessions</h2>
+        <p className="text-sm text-gray-500 mb-4">Recent login activity for all users</p>
+
+        {sessionsLoading ? (
+          <div className="flex justify-center py-8">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div>
+          </div>
+        ) : (
+          <>
+            <div className="border rounded-lg overflow-hidden">
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">User</th>
+                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Action</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">IP Address</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Time</th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {sessions.length === 0 ? (
+                    <tr>
+                      <td colSpan={4} className="px-4 py-8 text-center text-gray-500">
+                        No login sessions recorded
+                      </td>
+                    </tr>
+                  ) : (
+                    sessions.map((session) => (
+                      <tr key={session.id} className="hover:bg-gray-50">
+                        <td className="px-4 py-3 text-sm">
+                          {session.user_email || `User #${session.user_id}` || 'Unknown'}
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          <span className={`text-xs px-2 py-1 rounded font-medium ${
+                            session.action === 'LOGIN' ? 'bg-green-100 text-green-700' :
+                            session.action === 'LOGOUT' ? 'bg-gray-100 text-gray-700' :
+                            session.action === 'LOGIN_FAILED' ? 'bg-red-100 text-red-700' :
+                            'bg-blue-100 text-blue-700'
+                          }`}>
+                            {session.action}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-sm text-gray-600 font-mono">
+                          {session.ip_address || '-'}
+                        </td>
+                        <td className="px-4 py-3 text-sm text-gray-600">
+                          {formatDate(session.created_at)}
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Pagination */}
+            {sessionsTotal > 10 && (
+              <div className="flex justify-between items-center mt-4">
+                <p className="text-sm text-gray-500">
+                  Showing {(sessionsPage - 1) * 10 + 1} - {Math.min(sessionsPage * 10, sessionsTotal)} of {sessionsTotal}
+                </p>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setSessionsPage(p => Math.max(1, p - 1))}
+                    disabled={sessionsPage === 1}
+                    className="btn-secondary text-sm"
+                  >
+                    Previous
+                  </button>
+                  <button
+                    onClick={() => setSessionsPage(p => p + 1)}
+                    disabled={sessionsPage * 10 >= sessionsTotal}
+                    className="btn-secondary text-sm"
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+
+      {/* Audit Log */}
+      <div className="card">
+        <div className="flex justify-between items-start mb-4">
+          <div>
+            <h2 className="text-lg font-semibold text-gray-900">Activity Log</h2>
+            <p className="text-sm text-gray-500">Track all system activities and changes</p>
+          </div>
+          <select
+            value={auditFilter}
+            onChange={(e) => { setAuditFilter(e.target.value); setAuditPage(1); }}
+            className="form-input w-48"
+          >
+            <option value="">All Activities</option>
+            <option value="LOGIN">Login</option>
+            <option value="LOGOUT">Logout</option>
+            <option value="LOGIN_FAILED">Login Failed</option>
+            <option value="PASSWORD_CHANGE">Password Change</option>
+            <option value="EMPLOYEE_CREATE">Employee Create</option>
+            <option value="EMPLOYEE_UPDATE">Employee Update</option>
+            <option value="PAYROLL_GENERATE">Payroll Generate</option>
+            <option value="PAYROLL_RELEASE">Payroll Release</option>
+            <option value="ATTENDANCE_IMPORT">Attendance Import</option>
+            <option value="BACKUP_CREATE">Backup Create</option>
+            <option value="BACKUP_RESTORE">Backup Restore</option>
+          </select>
+        </div>
+
+        {auditLoading ? (
+          <div className="flex justify-center py-8">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div>
+          </div>
+        ) : (
+          <>
+            <div className="border rounded-lg overflow-hidden">
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Time</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">User</th>
+                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Action</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Details</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">IP</th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {auditLogs.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="px-4 py-8 text-center text-gray-500">
+                        No activity logs found
+                      </td>
+                    </tr>
+                  ) : (
+                    auditLogs.map((log) => (
+                      <tr key={log.id} className="hover:bg-gray-50">
+                        <td className="px-4 py-3 text-sm text-gray-600 whitespace-nowrap">
+                          {formatDate(log.created_at)}
+                        </td>
+                        <td className="px-4 py-3 text-sm">
+                          {log.user_email || `User #${log.user_id}` || 'System'}
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          <span className={`text-xs px-2 py-1 rounded font-medium ${
+                            log.action.includes('LOGIN') && !log.action.includes('FAILED') ? 'bg-green-100 text-green-700' :
+                            log.action.includes('FAILED') ? 'bg-red-100 text-red-700' :
+                            log.action.includes('CREATE') ? 'bg-blue-100 text-blue-700' :
+                            log.action.includes('UPDATE') ? 'bg-yellow-100 text-yellow-700' :
+                            log.action.includes('DELETE') ? 'bg-red-100 text-red-700' :
+                            log.action.includes('BACKUP') ? 'bg-purple-100 text-purple-700' :
+                            'bg-gray-100 text-gray-700'
+                          }`}>
+                            {log.action.replace(/_/g, ' ')}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-sm text-gray-600 max-w-xs truncate">
+                          {log.details || '-'}
+                        </td>
+                        <td className="px-4 py-3 text-sm text-gray-600 font-mono">
+                          {log.ip_address || '-'}
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Pagination */}
+            {auditTotal > 20 && (
+              <div className="flex justify-between items-center mt-4">
+                <p className="text-sm text-gray-500">
+                  Showing {(auditPage - 1) * 20 + 1} - {Math.min(auditPage * 20, auditTotal)} of {auditTotal}
+                </p>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setAuditPage(p => Math.max(1, p - 1))}
+                    disabled={auditPage === 1}
+                    className="btn-secondary text-sm"
+                  >
+                    Previous
+                  </button>
+                  <button
+                    onClick={() => setAuditPage(p => p + 1)}
+                    disabled={auditPage * 20 >= auditTotal}
+                    className="btn-secondary text-sm"
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
+            )}
+          </>
+        )}
       </div>
 
       {/* Backup Management - 3-2-1 Strategy */}

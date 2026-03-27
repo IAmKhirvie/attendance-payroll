@@ -1,7 +1,10 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Link, useLocation, useNavigate, Outlet } from 'react-router-dom';
 import { useAuthStore } from '../stores/authStore';
 import { useImportStore } from '../stores/importStore';
+import { RightSidebar } from './RightSidebar';
+import { EndDateNotificationModal } from './EndDateNotificationModal';
+import { employeesApi } from '../api/client';
 
 // Icons (using simple SVG)
 const MenuIcon = () => (
@@ -112,12 +115,31 @@ const employeeNavItems: NavItem[] = [
 
 export function Layout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [showEndDateModal, setShowEndDateModal] = useState(false);
   const { user, logout } = useAuthStore();
   const { isUploading, uploadProgress, importResult } = useImportStore();
   const location = useLocation();
   const navigate = useNavigate();
 
   const navItems = user?.role === 'admin' ? adminNavItems : employeeNavItems;
+
+  // Check for employees with passed end dates (admin only)
+  useEffect(() => {
+    if (user?.role === 'admin') {
+      checkEndDateNotifications();
+    }
+  }, [user]);
+
+  const checkEndDateNotifications = async () => {
+    try {
+      const response = await employeesApi.getEndDateNotifications();
+      if (response.items && response.items.length > 0) {
+        setShowEndDateModal(true);
+      }
+    } catch (error) {
+      console.error('Failed to check end date notifications:', error);
+    }
+  };
 
   const handleLogout = async () => {
     await logout();
@@ -318,10 +340,16 @@ export function Layout() {
           )}
         </header>
 
-        {/* Page content */}
-        <main className="flex-1 p-6 lg:p-10">
-          <Outlet />
-        </main>
+        {/* Page content with right sidebar */}
+        <div className="flex-1 flex">
+          <main className="flex-1 p-6 lg:p-10 overflow-auto">
+            <Outlet />
+          </main>
+          {/* Right sidebar - hidden on mobile, sticky */}
+          <div className="hidden xl:block p-4 pr-6 sticky top-20 self-start h-fit">
+            <RightSidebar />
+          </div>
+        </div>
 
         {/* Footer */}
         <footer
@@ -336,6 +364,11 @@ export function Layout() {
           </p>
         </footer>
       </div>
+
+      {/* End Date Notification Modal */}
+      {showEndDateModal && (
+        <EndDateNotificationModal onClose={() => setShowEndDateModal(false)} />
+      )}
     </div>
   );
 }

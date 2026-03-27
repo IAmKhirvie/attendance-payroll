@@ -54,13 +54,28 @@ The `work_time` field (e.g., 9.11 hours) includes lunch break. This is correct -
 - PhilHealth - 5% of monthly basic, split 50/50
 - Pag-IBIG - 2% employee share, max PHP 200
 
-### ICAN Attendance Deduction Formulas
+### ICAN Salary & Attendance Deduction Formulas
 
-The system uses ICAN Company Policy formulas for calculating attendance-based deductions:
+The system uses ICAN Company Policy formulas:
+
+#### Salary Rate Calculation
+```
+Daily Rate = Basic Monthly × 12 months ÷ 261 days
+Hourly Rate = Daily Rate ÷ Work Hours per Day
+```
+
+**Examples by work hours:**
+- Basic Monthly: ₱8,000
+- Daily Rate = ₱8,000 × 12 ÷ 261 = ₱367.82
+
+| Work Hours | Hourly Rate Calculation | Result |
+|------------|------------------------|--------|
+| 8 hours (Full-time) | ₱367.82 ÷ 8 | ₱45.98 |
+| 6 hours (Part-time) | ₱367.82 ÷ 6 | ₱61.30 |
+| 4 hours (Part-time) | ₱367.82 ÷ 4 | ₱91.95 |
 
 #### Absence Deduction
 ```
-Daily Rate = Monthly Salary × 12 months ÷ 261 days
 Absence Deduction = Daily Rate × Number of Absent Days
 ```
 
@@ -84,7 +99,7 @@ Late/Undertime Deduction = Minute Rate × Total Minutes
 #### Configuration
 - `use_ican_formula`: Enabled by default in PayrollSettings
 - `working_days_per_year`: 261 (ICAN standard)
-- `work_hours_per_day`: 8 hours
+- `work_hours_per_day`: 4, 6, or 8 hours
 
 ### Currency
 All amounts in Philippine Peso (PHP), not USD.

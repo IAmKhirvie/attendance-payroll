@@ -84,6 +84,21 @@ export default function LeavePage() {
   const [leaveTypes, setLeaveTypes] = useState<LeaveType[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
 
+  // Pagination for requests
+  const [requestsPage, setRequestsPage] = useState(1);
+  const [requestsPageSize, setRequestsPageSize] = useState(() => {
+    const saved = localStorage.getItem('leave_requests_page_size');
+    return saved ? parseInt(saved, 10) : 25;
+  });
+  const [requestsTotal, setRequestsTotal] = useState(0);
+
+  // Save page size to localStorage
+  useEffect(() => {
+    localStorage.setItem('leave_requests_page_size', requestsPageSize.toString());
+  }, [requestsPageSize]);
+
+  const requestsTotalPages = Math.ceil(requestsTotal / requestsPageSize);
+
   // Year selection for balances
   const currentYear = new Date().getFullYear();
   const [selectedYear, setSelectedYear] = useState(currentYear);
@@ -135,12 +150,17 @@ export default function LeavePage() {
   const fetchRequests = useCallback(async () => {
     try {
       const statusParam = requestFilter === 'all' ? undefined : requestFilter;
-      const data = await leaveApi.listRequests({ status: statusParam });
+      const data = await leaveApi.listRequests({
+        status: statusParam,
+        page: requestsPage,
+        page_size: requestsPageSize
+      });
       setRequests(data.items);
+      setRequestsTotal(data.total || 0);
     } catch (err) {
       console.error('Failed to fetch requests:', err);
     }
-  }, [requestFilter]);
+  }, [requestFilter, requestsPage, requestsPageSize]);
 
   const fetchBalances = useCallback(async () => {
     try {
@@ -731,6 +751,64 @@ export default function LeavePage() {
                 )}
               </tbody>
             </table>
+
+            {/* Pagination Controls */}
+            {requestsTotal > 0 && (
+              <div className="px-4 py-3 border-t border-gray-200 flex items-center justify-between">
+                <div className="text-sm text-gray-500 flex items-center gap-4">
+                  <span>Showing {((requestsPage - 1) * requestsPageSize) + 1} to {Math.min(requestsPage * requestsPageSize, requestsTotal)} of {requestsTotal} requests</span>
+                  <select
+                    value={requestsPageSize}
+                    onChange={(e) => {
+                      setRequestsPageSize(Number(e.target.value));
+                      setRequestsPage(1);
+                    }}
+                    className="border border-gray-300 rounded px-2 py-1 text-sm"
+                  >
+                    <option value={10}>10 per page</option>
+                    <option value={25}>25 per page</option>
+                    <option value={50}>50 per page</option>
+                    <option value={75}>75 per page</option>
+                    <option value={100}>100 per page</option>
+                  </select>
+                </div>
+                {requestsTotalPages > 1 && (
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setRequestsPage(1)}
+                      disabled={requestsPage === 1}
+                      className="px-3 py-1 text-sm border rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      First
+                    </button>
+                    <button
+                      onClick={() => setRequestsPage(requestsPage - 1)}
+                      disabled={requestsPage === 1}
+                      className="px-3 py-1 text-sm border rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      Prev
+                    </button>
+                    <span className="px-3 py-1 text-sm">
+                      Page {requestsPage} of {requestsTotalPages}
+                    </span>
+                    <button
+                      onClick={() => setRequestsPage(requestsPage + 1)}
+                      disabled={requestsPage >= requestsTotalPages}
+                      className="px-3 py-1 text-sm border rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      Next
+                    </button>
+                    <button
+                      onClick={() => setRequestsPage(requestsTotalPages)}
+                      disabled={requestsPage >= requestsTotalPages}
+                      className="px-3 py-1 text-sm border rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      Last
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
       )}

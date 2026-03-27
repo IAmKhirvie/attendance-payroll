@@ -98,7 +98,13 @@ export function HolidaysPage() {
       setShowModal(false);
       loadData();
     } catch (error: any) {
-      setMessage({ type: 'error', text: error.response?.data?.detail || 'Failed to save' });
+      const detail = error.response?.data?.detail;
+      const errorText = typeof detail === 'string'
+        ? detail
+        : Array.isArray(detail)
+          ? detail.map((e: any) => e.msg || e.message || JSON.stringify(e)).join(', ')
+          : 'Failed to save';
+      setMessage({ type: 'error', text: errorText });
     } finally {
       setSaving(false);
     }
@@ -113,7 +119,13 @@ export function HolidaysPage() {
       setMessage({ type: 'success', text: `Holiday ${permanent ? 'deleted' : 'deactivated'}` });
       loadData();
     } catch (error: any) {
-      setMessage({ type: 'error', text: error.response?.data?.detail || `Failed to ${action}` });
+      const detail = error.response?.data?.detail;
+      const errorText = typeof detail === 'string'
+        ? detail
+        : Array.isArray(detail)
+          ? detail.map((e: any) => e.msg || e.message || JSON.stringify(e)).join(', ')
+          : `Failed to ${action}`;
+      setMessage({ type: 'error', text: errorText });
     }
   };
 
@@ -127,7 +139,13 @@ export function HolidaysPage() {
       setMessage({ type: 'success', text: result.message });
       loadData();
     } catch (error: any) {
-      setMessage({ type: 'error', text: error.response?.data?.detail || 'Failed to seed holidays' });
+      const detail = error.response?.data?.detail;
+      const errorText = typeof detail === 'string'
+        ? detail
+        : Array.isArray(detail)
+          ? detail.map((e: any) => e.msg || e.message || JSON.stringify(e)).join(', ')
+          : 'Failed to seed holidays';
+      setMessage({ type: 'error', text: errorText });
     } finally {
       setSeeding(false);
     }

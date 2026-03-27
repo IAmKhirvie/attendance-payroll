@@ -4,7 +4,7 @@ Attendance API Endpoints
 Attendance management, imports, and corrections.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, status, Query, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, status, Query, UploadFile, File, Form
 from sqlalchemy.orm import Session
 from typing import Optional, List
 from datetime import date
@@ -419,9 +419,9 @@ async def preview_employees_from_file(
 @router.post("/import")
 async def import_attendance_file(
     file: UploadFile = File(...),
-    create_employees: bool = False,
-    auto_generate_payroll: bool = True,
-    force_reimport: bool = False,
+    create_employees: str = Form("false"),
+    auto_generate_payroll: str = Form("true"),
+    force_reimport: str = Form("false"),
     current_admin: User = Depends(get_current_admin),
     db: Session = Depends(get_db)
 ):
@@ -433,6 +433,11 @@ async def import_attendance_file(
     import os
     import tempfile
     from app.services.attendance_import import import_time_report
+
+    # Convert string form values to booleans
+    create_employees_bool = create_employees.lower() == "true"
+    auto_generate_payroll_bool = auto_generate_payroll.lower() == "true"
+    force_reimport_bool = force_reimport.lower() == "true"
 
     # Validate file extension
     filename = file.filename or "upload.xls"
@@ -446,7 +451,7 @@ async def import_attendance_file(
     # Check for duplicate import (same filename)
     existing_import = db.query(ImportBatch).filter(ImportBatch.filename == filename).first()
     if existing_import:
-        if force_reimport:
+        if force_reimport_bool:
             # Delete the old import batch (cascade will delete ImportRecord entries)
             db.delete(existing_import)
             db.commit()
@@ -467,7 +472,7 @@ async def import_attendance_file(
         result = import_time_report(
             db=db,
             file_path=tmp_path,
-            create_employees=create_employees
+            create_employees=create_employees_bool
         )
 
         # Save import batch to history
@@ -536,7 +541,7 @@ async def import_attendance_file(
 
         # Auto-generate payroll if enabled
         payroll_result = None
-        if auto_generate_payroll and date_from and date_to:
+        if auto_generate_payroll_bool and date_from and date_to:
             try:
                 from app.models.payroll import PayrollRun, PayrollStatus
                 from app.services.payroll_calculator import process_payroll

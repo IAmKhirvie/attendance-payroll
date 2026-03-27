@@ -162,10 +162,12 @@ async def list_loans(
     loan_type_id: Optional[int] = None,
     status: Optional[LoanStatus] = None,
     include_paid: bool = False,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(25, ge=1, le=100),
     current_admin: User = Depends(get_current_admin),
     db: Session = Depends(get_db)
 ):
-    """List all loans (Admin only). Filter by employee, type, or status."""
+    """List all loans with pagination (Admin only). Filter by employee, type, or status."""
     query = db.query(Loan)
 
     if employee_id:
@@ -177,7 +179,12 @@ async def list_loans(
     if not include_paid:
         query = query.filter(Loan.status == LoanStatus.ACTIVE)
 
-    loans = query.order_by(Loan.start_date.desc()).all()
+    # Get total count before pagination
+    total = query.count()
+
+    # Apply pagination
+    offset = (page - 1) * page_size
+    loans = query.order_by(Loan.start_date.desc()).offset(offset).limit(page_size).all()
 
     # Build response with employee and loan type info
     items = []
@@ -191,7 +198,7 @@ async def list_loans(
             response.loan_type_name = loan.loan_type_config.name
         items.append(response)
 
-    return LoanListResponse(items=items, total=len(items))
+    return LoanListResponse(items=items, total=total)
 
 
 @router.get("/{loan_id}", response_model=LoanResponse)

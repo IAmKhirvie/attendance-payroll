@@ -186,6 +186,45 @@ export const employeesApi = {
     const response = await api.get('/employees/without-users');
     return response.data;
   },
+
+  bulkAction: async (action: string, employeeIds: number[]): Promise<{ message: string; success_count: number }> => {
+    const ids = employeeIds.join(',');
+    const response = await api.post(`/employees/bulk-action?action=${action}&employee_ids=${ids}`);
+    return response.data;
+  },
+
+  setStatus: async (employeeId: number, status: string): Promise<{ message: string }> => {
+    const response = await api.post(`/employees/${employeeId}/set-status?new_status=${status}`);
+    return response.data;
+  },
+
+  getEndDateNotifications: async (): Promise<{
+    items: Array<{
+      id: number;
+      employee_no: string;
+      full_name: string;
+      position: string | null;
+      end_date: string;
+      days_past: number;
+    }>;
+    total: number;
+  }> => {
+    const response = await api.get('/employees/end-date-notifications');
+    return response.data;
+  },
+
+  handleEndDateAction: async (
+    employeeId: number,
+    action: 'confirm' | 'reactivate' | 'reschedule',
+    newEndDate?: string
+  ): Promise<{ message: string }> => {
+    const params = new URLSearchParams({ action });
+    if (newEndDate) {
+      params.append('new_end_date', newEndDate);
+    }
+    const response = await api.post(`/employees/${employeeId}/end-date-action?${params.toString()}`);
+    return response.data;
+  },
 };
 
 // Attendance API
@@ -1143,6 +1182,29 @@ export const holidaysApi = {
     };
   }> => {
     const response = await api.get(`/holidays/check/${date}`);
+    return response.data;
+  },
+
+  getUpcoming: async (limit: number = 5): Promise<{
+    today: string;
+    is_holiday_today: boolean;
+    today_holiday: {
+      id: number;
+      date: string;
+      name: string;
+      holiday_type: string;
+      description: string | null;
+    } | null;
+    upcoming: Array<{
+      id: number;
+      date: string;
+      name: string;
+      holiday_type: string;
+      description: string | null;
+    }>;
+    total: number;
+  }> => {
+    const response = await api.get('/holidays/upcoming/list', { params: { limit } });
     return response.data;
   },
 };

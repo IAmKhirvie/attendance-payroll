@@ -148,11 +148,20 @@ export function PayrollPage() {
   const [payslipSortBy, setPayslipSortBy] = useState<string>('employee_name');
   const [payslipSortOrder, setPayslipSortOrder] = useState<'asc' | 'desc'>('asc');
 
+  // Payslips pagination
+  const [payslipPage, setPayslipPage] = useState(1);
+  const [payslipPageSize, setPayslipPageSize] = useState(25);
+  const [payslipTotal, setPayslipTotal] = useState(0);
+
+  // Show additions toggle (hidden by default)
+  const [showAdditions, setShowAdditions] = useState(false);
+
   // Edit mode
   const [editMode, setEditMode] = useState(false);
   const [editEarnings, setEditEarnings] = useState<Record<string, number>>({});
   const [editDeductions, setEditDeductions] = useState<Record<string, number>>({});
   const [editAttendance, setEditAttendance] = useState<{ days_worked?: number; days_absent?: number; late_count?: number; total_late_minutes?: number; overtime_hours?: number; work_hours_per_day?: number; call_time?: string; time_out?: string; buffer_minutes?: number; is_flexible?: boolean; recalculate_deductions?: boolean }>({});
+  const [editAdditional, setEditAdditional] = useState<{ additional_amount?: number; additional_notes?: string }>({});
   const [saving, setSaving] = useState(false);
 
   // Payroll Settings
@@ -227,43 +236,6 @@ export function PayrollPage() {
   };
 
   // Auto-calculate work hours and basic salary based on schedule
-  const calculateFromSchedule = (timeIn: string, timeOut: string) => {
-    const BASE_SALARY = settings?.default_basic_salary || 15200; // Base salary for 8 hours
-    const BASE_HOURS = 8;
-    const LUNCH_BREAK = 1; // 1 hour lunch break
-
-    // Parse times
-    const [inH, inM] = timeIn.split(':').map(Number);
-    const [outH, outM] = timeOut.split(':').map(Number);
-
-    // Calculate total hours
-    let totalMinutes = (outH * 60 + outM) - (inH * 60 + inM);
-    if (totalMinutes < 0) totalMinutes += 24 * 60; // Handle overnight shifts
-
-    const totalHours = totalMinutes / 60;
-    const workHours = Math.max(0, totalHours - LUNCH_BREAK); // Subtract lunch
-
-    // Calculate salary proportionally
-    const basicSalary = Math.round((BASE_SALARY * workHours / BASE_HOURS) * 100) / 100;
-
-    return { workHours, basicSalary };
-  };
-
-  const handleScheduleChange = (field: 'call_time' | 'time_out', value: string) => {
-    const newAttendance = { ...editAttendance, [field]: value };
-    const timeIn = field === 'call_time' ? value : (editAttendance.call_time || '08:00');
-    const timeOut = field === 'time_out' ? value : (editAttendance.time_out || '17:00');
-
-    const { workHours, basicSalary } = calculateFromSchedule(timeIn, timeOut);
-
-    // Update attendance with new work hours
-    newAttendance.work_hours_per_day = workHours;
-    setEditAttendance(newAttendance);
-
-    // Update earnings with new basic salary (semi-monthly = monthly / 2)
-    setEditEarnings({ ...editEarnings, basic_semi: basicSalary / 2 });
-  };
-
   const handleRestoreRun = async (id: number) => {
     if (!confirm('Restore this payroll run from trash?')) return;
     setRestoringId(id);
@@ -357,24 +329,11 @@ export function PayrollPage() {
     }
   };
 
-  const handleDownloadAllPayslipsPng = async (runId: number) => {
+  const handleDownloadAllPayslipsPdf = async (runId: number) => {
     try {
-      const { pages } = await payrollApi.getPayslipsPageCount(runId);
-      if (pages === 0) {
-        alert('No payslips to download');
-        return;
-      }
-
-      // Download all pages
-      for (let page = 1; page <= pages; page++) {
-        await payrollApi.downloadPayslipsSheet(runId, page);
-        // Small delay between downloads
-        await new Promise(resolve => setTimeout(resolve, 500));
-      }
-
-      alert(`Downloaded ${pages} sheet(s) with 6 payslips each`);
+      await payrollApi.downloadAllPayslipsPdf(runId);
     } catch (error: any) {
-      alert(error.response?.data?.detail || 'Failed to download payslips');
+      alert(error.response?.data?.detail || 'Failed to download PDF');
     }
   };
 
@@ -490,11 +449,17 @@ export function PayrollPage() {
     }
   };
 
-  const loadPayslips = async (runId: number) => {
+  const loadPayslips = async (runId: number, page: number = 1, pageSize: number = 25) => {
     setLoadingPayslips(true);
     try {
-      const response = await payrollApi.listPayslips({ payroll_run_id: runId });
+      const response = await payrollApi.listPayslips({
+        payroll_run_id: runId,
+        page,
+        page_size: pageSize
+      });
       setPayslips(response.items as unknown as PayslipData[]);
+      setPayslipTotal(response.total || 0);
+      setPayslipPage(page);
     } catch (error) {
       console.error('Failed to load payslips:', error);
     } finally {
@@ -504,7 +469,22 @@ export function PayrollPage() {
 
   const handleViewRun = async (run: PayrollRun) => {
     setSelectedRun(run);
-    await loadPayslips(run.id);
+    setPayslipPage(1); // Reset to first page
+    await loadPayslips(run.id, 1, payslipPageSize);
+  };
+
+  const handlePageChange = (newPage: number) => {
+    if (selectedRun) {
+      loadPayslips(selectedRun.id, newPage, payslipPageSize);
+    }
+  };
+
+  const handlePageSizeChange = (newSize: number) => {
+    setPayslipPageSize(newSize);
+    setPayslipPage(1);
+    if (selectedRun) {
+      loadPayslips(selectedRun.id, 1, newSize);
+    }
   };
 
   const handleCreateRun = async (e: React.FormEvent) => {
@@ -709,6 +689,10 @@ export function PayrollPage() {
       is_flexible: empSettings.is_flexible || false,
       recalculate_deductions: false,
     });
+    setEditAdditional({
+      additional_amount: (selectedPayslip as any).additional_amount || 0,
+      additional_notes: (selectedPayslip as any).additional_notes || '',
+    });
     setEditMode(true);
   };
 
@@ -786,6 +770,11 @@ export function PayrollPage() {
         late_amount: lateMinutes * minuteRate,
       };
       await payrollApi.updatePayslipDeductions(selectedPayslip.id, allDeductions);
+
+      // Update additional fields (internal use only, not printed)
+      if (editAdditional.additional_amount !== undefined || editAdditional.additional_notes !== undefined) {
+        await payrollApi.updatePayslipAdditional(selectedPayslip.id, editAdditional);
+      }
 
       // Reload the payslip to get fresh data from server
       const freshPayslip = await payrollApi.getPayslip(selectedPayslip.id) as PayslipData;
@@ -1061,46 +1050,10 @@ export function PayrollPage() {
               )}
             </div>
             <div className="grid grid-cols-6 gap-3">
-              <div className="text-center p-3 bg-gray-50 rounded">
-                {editMode ? (
-                  <>
-                    <input
-                      type="number"
-                      step="1"
-                      min="0"
-                      value={editAttendance.days_worked ?? selectedPayslip.days_worked}
-                      onChange={(e) => setEditAttendance({ ...editAttendance, days_worked: parseInt(e.target.value) || 0 })}
-                      className="w-full h-10 text-center text-lg font-bold text-blue-600 bg-white border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                    />
-                    <p className="text-xs text-gray-500 mt-1">Days Worked</p>
-                  </>
-                ) : (
-                  <>
-                    <p className="text-2xl font-bold text-blue-600">{selectedPayslip.days_worked}</p>
-                    <p className="text-xs text-gray-500">Days Worked</p>
-                  </>
-                )}
-              </div>
-              <div className="text-center p-3 bg-gray-50 rounded">
-                {editMode ? (
-                  <>
-                    <input
-                      type="number"
-                      step="1"
-                      min="1"
-                      max="12"
-                      value={editAttendance.work_hours_per_day ?? selectedPayslip.deductions?.work_hours_per_day_used ?? 8}
-                      onChange={(e) => setEditAttendance({ ...editAttendance, work_hours_per_day: parseFloat(e.target.value) || 8, recalculate_deductions: true })}
-                      className="w-full h-10 text-center text-lg font-bold text-purple-600 bg-white border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
-                    />
-                    <p className="text-xs text-gray-500 mt-1">Work Hrs/Day</p>
-                  </>
-                ) : (
-                  <>
-                    <p className="text-2xl font-bold text-purple-600">{selectedPayslip.deductions?.work_hours_per_day_used || 8}</p>
-                    <p className="text-xs text-gray-500">Work Hrs/Day</p>
-                  </>
-                )}
+              <div className="text-center p-3 bg-gray-50 rounded" title="Set in Employee Management">
+                <p className="text-2xl font-bold text-purple-600">{selectedPayslip.deductions?.work_hours_per_day_used || 8}</p>
+                <p className="text-xs text-gray-500">Work Hrs/Day</p>
+                {editMode && <p className="text-xs text-blue-500">From Employee</p>}
               </div>
               <div className="text-center p-3 bg-gray-50 rounded">
                 {editMode ? (
@@ -1309,7 +1262,10 @@ export function PayrollPage() {
                               <span className="text-gray-500 pl-2 text-sm">₱</span>
                               <input type="number" step="0.01" min="0"
                                 value={editDeductions.absences_daily_rate_used ?? selectedPayslip.deductions?.absences_daily_rate_used ?? 0}
-                                onChange={(e) => setEditDeductions({ ...editDeductions, absences_daily_rate_used: parseFloat(e.target.value) || 0 })}
+                                onChange={(e) => {
+                                  const val = e.target.value === '' ? 0 : parseFloat(e.target.value);
+                                  setEditDeductions({ ...editDeductions, absences_daily_rate_used: isNaN(val) ? 0 : val });
+                                }}
                                 className="w-20 px-1 py-1.5 border-0 text-right text-sm focus:ring-0 focus:outline-none" />
                               <span className="text-xs text-white bg-red-400 py-1.5 px-2 font-medium">/day</span>
                             </div>
@@ -1328,7 +1284,10 @@ export function PayrollPage() {
                               <span className="text-gray-500 pl-2 text-sm">₱</span>
                               <input type="number" step="0.01" min="0"
                                 value={editDeductions.late_minute_rate_used ?? selectedPayslip.deductions?.late_minute_rate_used ?? 0}
-                                onChange={(e) => setEditDeductions({ ...editDeductions, late_minute_rate_used: parseFloat(e.target.value) || 0 })}
+                                onChange={(e) => {
+                                  const val = e.target.value === '' ? 0 : parseFloat(e.target.value);
+                                  setEditDeductions({ ...editDeductions, late_minute_rate_used: isNaN(val) ? 0 : val });
+                                }}
                                 className="w-20 px-1 py-1.5 border-0 text-right text-sm focus:ring-0 focus:outline-none" />
                               <span className="text-xs text-white bg-orange-400 py-1.5 px-2 font-medium">/min</span>
                             </div>
@@ -1342,26 +1301,6 @@ export function PayrollPage() {
                   </>
                 ) : (
                   <>
-                    {/* Daily-based calculation breakdown */}
-                    {selectedPayslip.earnings.daily_rate > 0 && (
-                      <div className="bg-blue-50 p-3 rounded-lg mb-3 text-sm">
-                        <div className="font-medium text-blue-800 mb-2">Computation Breakdown</div>
-                        <div className="space-y-1 text-gray-700">
-                          <div className="flex justify-between">
-                            <span>Daily Rate:</span>
-                            <span className="font-medium">{formatCurrency(selectedPayslip.earnings.daily_rate)}</span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span>Days Worked:</span>
-                            <span className="font-medium">{selectedPayslip.earnings.days_worked || selectedPayslip.days_worked || 0} days</span>
-                          </div>
-                          <div className="flex justify-between border-t pt-1 mt-1">
-                            <span>Daily Rate × Days:</span>
-                            <span className="font-bold text-blue-700">{formatCurrency(selectedPayslip.earnings.daily_based_basic || 0)}</span>
-                          </div>
-                        </div>
-                      </div>
-                    )}
                     <div className="flex justify-between">
                       <span className="text-gray-600">Basic (Semi)</span>
                       <span className="font-medium">{formatCurrency(selectedPayslip.earnings.basic_semi || 0)}</span>
@@ -1462,8 +1401,11 @@ export function PayrollPage() {
                           <input
                             type="number"
                             step="0.01"
-                            value={editDeductions.sss || 0}
-                            onChange={(e) => setEditDeductions({ ...editDeductions, sss: parseFloat(e.target.value) || 0 })}
+                            value={editDeductions.sss ?? 0}
+                            onChange={(e) => {
+                              const val = e.target.value === '' ? 0 : parseFloat(e.target.value);
+                              setEditDeductions({ ...editDeductions, sss: isNaN(val) ? 0 : val });
+                            }}
                             className="w-28 px-2 py-1.5 border border-gray-300 rounded text-right text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                           />
                         </div>
@@ -1472,8 +1414,11 @@ export function PayrollPage() {
                           <input
                             type="number"
                             step="0.01"
-                            value={editDeductions.philhealth || 0}
-                            onChange={(e) => setEditDeductions({ ...editDeductions, philhealth: parseFloat(e.target.value) || 0 })}
+                            value={editDeductions.philhealth ?? 0}
+                            onChange={(e) => {
+                              const val = e.target.value === '' ? 0 : parseFloat(e.target.value);
+                              setEditDeductions({ ...editDeductions, philhealth: isNaN(val) ? 0 : val });
+                            }}
                             className="w-28 px-2 py-1.5 border border-gray-300 rounded text-right text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                           />
                         </div>
@@ -1482,8 +1427,11 @@ export function PayrollPage() {
                           <input
                             type="number"
                             step="0.01"
-                            value={editDeductions.pagibig || 0}
-                            onChange={(e) => setEditDeductions({ ...editDeductions, pagibig: parseFloat(e.target.value) || 0 })}
+                            value={editDeductions.pagibig ?? 0}
+                            onChange={(e) => {
+                              const val = e.target.value === '' ? 0 : parseFloat(e.target.value);
+                              setEditDeductions({ ...editDeductions, pagibig: isNaN(val) ? 0 : val });
+                            }}
                             className="w-28 px-2 py-1.5 border border-gray-300 rounded text-right text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                           />
                         </div>
@@ -1494,8 +1442,11 @@ export function PayrollPage() {
                       <input
                         type="number"
                         step="0.01"
-                        value={editDeductions.tax || 0}
-                        onChange={(e) => setEditDeductions({ ...editDeductions, tax: parseFloat(e.target.value) || 0 })}
+                        value={editDeductions.tax ?? 0}
+                        onChange={(e) => {
+                          const val = e.target.value === '' ? 0 : parseFloat(e.target.value);
+                          setEditDeductions({ ...editDeductions, tax: isNaN(val) ? 0 : val });
+                        }}
                         className="w-28 px-2 py-1.5 border border-gray-300 rounded text-right text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                       />
                     </div>
@@ -1504,8 +1455,11 @@ export function PayrollPage() {
                       <input
                         type="number"
                         step="0.01"
-                        value={editDeductions.loans || 0}
-                        onChange={(e) => setEditDeductions({ ...editDeductions, loans: parseFloat(e.target.value) || 0 })}
+                        value={editDeductions.loans ?? 0}
+                        onChange={(e) => {
+                          const val = e.target.value === '' ? 0 : parseFloat(e.target.value);
+                          setEditDeductions({ ...editDeductions, loans: isNaN(val) ? 0 : val });
+                        }}
                         className="w-28 px-2 py-1.5 border border-gray-300 rounded text-right text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                       />
                     </div>
@@ -1553,83 +1507,30 @@ export function PayrollPage() {
             </div>
           </div>
 
-          {/* Employee Settings - Only in Edit Mode */}
+          {/* Flexible Schedule Toggle - Only in Edit Mode */}
           {editMode && (
             <div className="mt-4 p-4 bg-blue-50 rounded-lg border border-blue-200">
-              <div className="flex items-center justify-between mb-3">
-                <h4 className="font-semibold text-blue-800">Employee Settings (Saved as Default)</h4>
-                <span className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded">Auto-saves to employee record</span>
+              <div className="flex items-center justify-between">
+                <div>
+                  <h4 className="font-semibold text-blue-800">Schedule Override</h4>
+                  <p className="text-xs text-gray-600">All settings come from Employee Management</p>
+                </div>
+                <button
+                  onClick={() => setEditAttendance({ ...editAttendance, is_flexible: !editAttendance.is_flexible })}
+                  className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+                    editAttendance.is_flexible
+                      ? 'bg-green-500 text-white hover:bg-green-600'
+                      : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                  }`}
+                >
+                  {editAttendance.is_flexible ? '✓ Flexible Schedule' : 'Regular Schedule'}
+                </button>
               </div>
-              <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-                {/* Call Time */}
-                <div>
-                  <label className="block text-xs text-gray-600 mb-1">Time In</label>
-                  <input
-                    type="time"
-                    value={editAttendance.call_time || "08:00"}
-                    onChange={(e) => handleScheduleChange('call_time', e.target.value)}
-                    className="w-full px-3 py-2 border border-blue-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
-                {/* Time Out */}
-                <div>
-                  <label className="block text-xs text-gray-600 mb-1">Time Out</label>
-                  <input
-                    type="time"
-                    value={editAttendance.time_out || "17:00"}
-                    onChange={(e) => handleScheduleChange('time_out', e.target.value)}
-                    className="w-full px-3 py-2 border border-blue-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
-                {/* Buffer */}
-                <div>
-                  <label className="block text-xs text-gray-600 mb-1">Buffer (mins before)</label>
-                  <input
-                    type="number"
-                    min="0"
-                    max="60"
-                    value={editAttendance.buffer_minutes ?? 10}
-                    onChange={(e) => setEditAttendance({ ...editAttendance, buffer_minutes: parseInt(e.target.value) || 0 })}
-                    className="w-full px-3 py-2 border border-blue-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
-                {/* Flexible */}
-                <div className="flex items-end">
-                  <label className="flex items-center gap-2 cursor-pointer p-2 bg-white rounded-lg border border-blue-300 w-full">
-                    <input
-                      type="checkbox"
-                      checked={editAttendance.is_flexible || false}
-                      onChange={(e) => setEditAttendance({ ...editAttendance, is_flexible: e.target.checked })}
-                      className="w-4 h-4 text-blue-600 rounded"
-                    />
-                    <span className="text-sm text-gray-700">Flexible Schedule</span>
-                  </label>
-                </div>
-                {/* OT Rate Display */}
-                <div className="bg-green-100 p-2 rounded-lg border border-green-300">
-                  <p className="text-xs text-gray-600">OT Rate/Hour</p>
-                  <p className="text-lg font-bold text-green-700">
-                    {formatCurrency((() => {
-                      const basic = (selectedPayslip as any).employee_settings?.basic_salary || (editEarnings.basic_semi || 0) * 2;
-                      return (basic * 12 / 261 / 8) * 1.25;
-                    })())}
-                  </p>
-                </div>
-              </div>
-              {/* Time-in deadline info */}
-              <p className="text-xs text-gray-600 mt-3 bg-white p-2 rounded">
-                {editAttendance.is_flexible
-                  ? "Flexible schedule - no late deductions will be applied"
-                  : `Time-in deadline: ${(() => {
-                      const [h, m] = (editAttendance.call_time || "08:00").split(":").map(Number);
-                      const buffer = editAttendance.buffer_minutes ?? 10;
-                      const totalMins = h * 60 + m - buffer;
-                      const newH = Math.floor(totalMins / 60);
-                      const newM = totalMins % 60;
-                      return `${String(newH).padStart(2, '0')}:${String(newM).padStart(2, '0')}`;
-                    })()} (must be in ${editAttendance.buffer_minutes ?? 10} mins before ${editAttendance.call_time || "08:00"} call time)`
-                }
-              </p>
+              {editAttendance.is_flexible && (
+                <p className="text-xs text-green-700 mt-2 bg-green-100 p-2 rounded">
+                  Flexible schedule enabled - no late deductions will be applied for this payslip
+                </p>
+              )}
             </div>
           )}
 
@@ -1644,9 +1545,94 @@ export function PayrollPage() {
             </p>
           </div>
 
+          {/* Additional (Internal Only - NOT printed on payslip) */}
+          {editMode && (
+            <div className="mt-4 p-4 bg-amber-50 border border-amber-200 rounded-lg">
+              <h4 className="font-semibold text-amber-800 mb-3 flex items-center gap-2">
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                </svg>
+                Additional (Internal Only)
+                <span className="text-xs font-normal text-amber-600">Not printed on payslip</span>
+              </h4>
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Additional Amount</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={editAdditional.additional_amount ?? 0}
+                    onChange={(e) => setEditAdditional({ ...editAdditional, additional_amount: parseFloat(e.target.value) || 0 })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-amber-500 focus:border-amber-500"
+                    placeholder="0.00"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Additional Notes</label>
+                  <textarea
+                    value={editAdditional.additional_notes ?? ''}
+                    onChange={(e) => setEditAdditional({ ...editAdditional, additional_notes: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-amber-500 focus:border-amber-500"
+                    rows={2}
+                    placeholder="Internal notes (not printed)"
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Show Additional info in view mode if it has values */}
+          {!editMode && ((selectedPayslip as any).additional_amount > 0 || (selectedPayslip as any).additional_notes) && (
+            <div className="mt-4 p-4 bg-amber-50 border border-amber-200 rounded-lg">
+              <h4 className="font-semibold text-amber-800 mb-2 flex items-center gap-2">
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                </svg>
+                Additional (Internal Only)
+              </h4>
+              {(selectedPayslip as any).additional_amount > 0 && (
+                <p className="text-sm"><span className="text-gray-600">Amount:</span> <span className="font-medium">{formatCurrency((selectedPayslip as any).additional_amount)}</span></p>
+              )}
+              {(selectedPayslip as any).additional_notes && (
+                <p className="text-sm mt-1"><span className="text-gray-600">Notes:</span> {(selectedPayslip as any).additional_notes}</p>
+              )}
+            </div>
+          )}
+
           {/* Edit Mode Buttons */}
           {editMode && (
             <div className="mt-4 flex gap-2 justify-end">
+              <button
+                onClick={async () => {
+                  try {
+                    const result = await payrollApi.recalculatePayslip(selectedPayslip.id);
+                    // Reload the payslip details
+                    const detailResponse = await payrollApi.getPayslip(selectedPayslip.id);
+                    setSelectedPayslip(detailResponse);
+                    alert(`Recalculated!\n\n` +
+                      `Monthly: ₱${result.monthly_basic.toLocaleString()}\n` +
+                      `Basic Semi: ₱${result.basic_semi.toLocaleString()}\n` +
+                      `Allowance Semi: ₱${result.allowance_semi.toLocaleString()}\n` +
+                      `Work Hours: ${result.work_hours}\n` +
+                      `Daily Rate: ₱${result.daily_rate.toFixed(2)}\n` +
+                      `Minute Rate: ₱${result.minute_rate.toFixed(4)}\n\n` +
+                      `Absent: ${result.days_absent} days = ₱${result.absent_deduction.toFixed(2)}\n` +
+                      `Late: ${result.late_minutes} mins = ₱${result.late_deduction.toFixed(2)}\n\n` +
+                      `Total Earnings: ₱${result.total_earnings.toLocaleString()}\n` +
+                      `Total Deductions: ₱${result.total_deductions.toLocaleString()}\n` +
+                      `Net Pay: ₱${result.net_pay.toLocaleString()}`);
+                  } catch (error: any) {
+                    alert(error.response?.data?.detail || 'Failed to recalculate payslip');
+                  }
+                }}
+                className="btn-secondary flex items-center gap-2"
+                disabled={saving}
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+                Recalculate
+              </button>
               <button onClick={handleCancelEdit} className="btn-secondary" disabled={saving}>
                 Cancel
               </button>
@@ -1681,7 +1667,7 @@ export function PayrollPage() {
               <p className="text-gray-500">
                 {getStatusBadge(selectedRun.status)}
                 <span className="ml-2 text-blue-600 font-medium">{getCutoffLabel(selectedRun.cutoff)}</span>
-                <span className="ml-2">- {payslips.length} employees</span>
+                <span className="ml-2">- {payslipTotal || payslips.length} employees</span>
               </p>
             </div>
           </div>
@@ -1716,7 +1702,7 @@ export function PayrollPage() {
         </div>
 
         {/* Summary Cards */}
-        <div className="grid grid-cols-4 gap-4">
+        <div className={`grid gap-4 ${showAdditions ? 'grid-cols-5' : 'grid-cols-4'}`}>
           <div className="card text-center">
             <p className="text-2xl font-bold text-blue-600">{formatCurrency(selectedRun.total_gross || 0)}</p>
             <p className="text-sm text-gray-500">Total Gross</p>
@@ -1729,6 +1715,15 @@ export function PayrollPage() {
             <p className="text-2xl font-bold text-green-600">{formatCurrency(selectedRun.total_net || 0)}</p>
             <p className="text-sm text-gray-500">Total Net Pay</p>
           </div>
+          {showAdditions && (
+            <div className="card text-center bg-amber-50 border-amber-200">
+              <p className="text-2xl font-bold text-amber-600">
+                {formatCurrency(payslips.reduce((sum, p) => sum + ((p as any).additional_amount || 0), 0))}
+              </p>
+              <p className="text-sm text-amber-600">Total Additions</p>
+              <p className="text-xs text-amber-500">(Internal Only)</p>
+            </div>
+          )}
           <div className="card text-center">
             <p className="text-2xl font-bold text-purple-600">{selectedRun.employee_count || 0}</p>
             <p className="text-sm text-gray-500">Employees</p>
@@ -1745,12 +1740,31 @@ export function PayrollPage() {
             className="form-input w-full md:w-96"
           />
           <div className="ml-auto flex gap-2">
+            {/* Show Additions Toggle */}
             <button
-              onClick={() => handleDownloadAllPayslipsPng(selectedRun.id)}
-              className="btn-secondary text-sm"
-              title="Download all payslips as PNG images (4 per page, I CAN format)"
+              onClick={() => setShowAdditions(!showAdditions)}
+              className={`px-3 py-2 text-sm rounded-lg font-medium transition-colors flex items-center gap-2 ${
+                showAdditions
+                  ? 'bg-amber-500 text-white hover:bg-amber-600'
+                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+              }`}
+              title={showAdditions ? 'Hide additions (internal only)' : 'Reveal additions (internal only)'}
             >
-              Download All PNG (4/page)
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                {showAdditions ? (
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                ) : (
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
+                )}
+              </svg>
+              {showAdditions ? 'Hide Additions' : 'Show Additions'}
+            </button>
+            <button
+              onClick={() => handleDownloadAllPayslipsPdf(selectedRun.id)}
+              className="btn-secondary text-sm"
+              title="Download all payslips as a single PDF (4 per page on A4)"
+            >
+              Download All PDF (4/page)
             </button>
           </div>
         </div>
@@ -1788,13 +1802,6 @@ export function PayrollPage() {
                     </th>
                     <th
                       className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase cursor-pointer hover:bg-gray-100"
-                      onClick={() => handlePayslipSort('days_worked')}
-                    >
-                      Days Worked
-                      <SortIcon column="days_worked" currentSort={payslipSortBy} currentOrder={payslipSortOrder} />
-                    </th>
-                    <th
-                      className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase cursor-pointer hover:bg-gray-100"
                       onClick={() => handlePayslipSort('total_earnings')}
                     >
                       Gross Pay
@@ -1814,13 +1821,33 @@ export function PayrollPage() {
                       Net Pay
                       <SortIcon column="net_pay" currentSort={payslipSortBy} currentOrder={payslipSortOrder} />
                     </th>
+                    {showAdditions && (
+                      <th className="px-4 py-3 text-right text-xs font-medium text-amber-600 uppercase bg-amber-50">
+                        Addition
+                      </th>
+                    )}
                     <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Status</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
-                  {filteredPayslips.map((payslip) => (
-                    <tr key={payslip.id} className="hover:bg-gray-50">
+                  {filteredPayslips.map((payslip) => {
+                    // Color coding based on payslip status
+                    const deductions = payslip.deductions_json ? JSON.parse(payslip.deductions_json) : {};
+                    const hasLate = deductions.late_minutes > 0;
+                    const hasAbsences = deductions.absences_days > 0;
+
+                    let rowClass = 'hover:bg-gray-50';
+                    if (payslip.is_released) {
+                      rowClass = 'bg-green-50/50 hover:bg-green-100/50';
+                    } else if (hasAbsences) {
+                      rowClass = 'bg-red-50/50 hover:bg-red-100/50';
+                    } else if (hasLate) {
+                      rowClass = 'bg-amber-50/50 hover:bg-amber-100/50';
+                    }
+
+                    return (
+                    <tr key={payslip.id} className={rowClass}>
                       <td className="px-4 py-3">
                         <div className="font-medium text-gray-900">{payslip.employee_name}</div>
                         <div className="text-sm text-gray-500">
@@ -1834,10 +1861,18 @@ export function PayrollPage() {
                           )}
                         </div>
                       </td>
-                      <td className="px-4 py-3 text-right">{payslip.days_worked}</td>
                       <td className="px-4 py-3 text-right font-medium">{formatCurrency(payslip.total_earnings)}</td>
                       <td className="px-4 py-3 text-right text-red-600">{formatCurrency(payslip.total_deductions)}</td>
                       <td className="px-4 py-3 text-right font-bold text-green-600">{formatCurrency(payslip.net_pay)}</td>
+                      {showAdditions && (
+                        <td className="px-4 py-3 text-right bg-amber-50">
+                          {(payslip as any).additional_amount > 0 ? (
+                            <span className="font-bold text-amber-600">+{formatCurrency((payslip as any).additional_amount)}</span>
+                          ) : (
+                            <span className="text-gray-400">-</span>
+                          )}
+                        </td>
+                      )}
                       <td className="px-4 py-3 text-center">
                         {payslip.is_released ? (
                           <span className="px-2 py-1 text-xs bg-green-100 text-green-800 rounded">Released</span>
@@ -1864,9 +1899,69 @@ export function PayrollPage() {
                         </div>
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
+
+              {/* Pagination Controls */}
+              {payslipTotal > 0 && (
+                <div className="px-4 py-3 bg-gray-50 border-t border-gray-200 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-gray-600">Show</span>
+                    <select
+                      value={payslipPageSize}
+                      onChange={(e) => handlePageSizeChange(Number(e.target.value))}
+                      className="form-select text-sm py-1 px-2 rounded border-gray-300"
+                    >
+                      <option value={10}>10</option>
+                      <option value={25}>25</option>
+                      <option value={50}>50</option>
+                      <option value={75}>75</option>
+                      <option value={100}>100</option>
+                    </select>
+                    <span className="text-sm text-gray-600">per page</span>
+                  </div>
+                  <div className="flex items-center gap-4">
+                    <span className="text-sm text-gray-600">
+                      Showing {((payslipPage - 1) * payslipPageSize) + 1} - {Math.min(payslipPage * payslipPageSize, payslipTotal)} of {payslipTotal}
+                    </span>
+                    <div className="flex gap-1">
+                      <button
+                        onClick={() => handlePageChange(1)}
+                        disabled={payslipPage === 1}
+                        className="px-2 py-1 text-sm border rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        «
+                      </button>
+                      <button
+                        onClick={() => handlePageChange(payslipPage - 1)}
+                        disabled={payslipPage === 1}
+                        className="px-2 py-1 text-sm border rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        ‹
+                      </button>
+                      <span className="px-3 py-1 text-sm">
+                        Page {payslipPage} of {Math.ceil(payslipTotal / payslipPageSize)}
+                      </span>
+                      <button
+                        onClick={() => handlePageChange(payslipPage + 1)}
+                        disabled={payslipPage >= Math.ceil(payslipTotal / payslipPageSize)}
+                        className="px-2 py-1 text-sm border rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        ›
+                      </button>
+                      <button
+                        onClick={() => handlePageChange(Math.ceil(payslipTotal / payslipPageSize))}
+                        disabled={payslipPage >= Math.ceil(payslipTotal / payslipPageSize)}
+                        className="px-2 py-1 text-sm border rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        »
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>

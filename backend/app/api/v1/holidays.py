@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from typing import Optional, List
 from datetime import date
 
-from app.api.deps import get_db, get_current_admin
+from app.api.deps import get_db, get_current_admin, get_current_user
 from app.models.user import User
 from app.models.holiday import Holiday, HolidayType
 from app.schemas.holiday import (
@@ -221,6 +221,36 @@ async def seed_holidays(
         "message": f"Seeded {seeded} holidays for {year}",
         "seeded": seeded,
         "year": year
+    }
+
+
+@router.get("/upcoming/list")
+async def get_upcoming_holidays(
+    limit: int = Query(default=5, ge=1, le=20),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Get upcoming holidays from today onwards."""
+    from datetime import date as dt_date
+    today = dt_date.today()
+
+    upcoming = db.query(Holiday).filter(
+        Holiday.date >= today,
+        Holiday.is_active == True
+    ).order_by(Holiday.date).limit(limit).all()
+
+    # Check if today is a holiday
+    today_holiday = db.query(Holiday).filter(
+        Holiday.date == today,
+        Holiday.is_active == True
+    ).first()
+
+    return {
+        "today": today.isoformat(),
+        "is_holiday_today": today_holiday is not None,
+        "today_holiday": HolidayResponse.model_validate(today_holiday) if today_holiday else None,
+        "upcoming": [HolidayResponse.model_validate(h) for h in upcoming],
+        "total": len(upcoming)
     }
 
 

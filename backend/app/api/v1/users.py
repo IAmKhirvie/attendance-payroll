@@ -283,8 +283,7 @@ async def reset_user_password(
     """
     Reset user password to a temporary one (Admin only).
     """
-    from app.core.security import hash_password
-    import secrets
+    from app.core.security import hash_password, generate_temp_password
 
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
@@ -293,8 +292,8 @@ async def reset_user_password(
             detail="User not found"
         )
 
-    # Generate temporary password
-    temp_password = secrets.token_urlsafe(8)
+    # Generate secure temporary password
+    temp_password = generate_temp_password()
     user.password_hash = hash_password(temp_password)
     user.must_change_password = True
     user.failed_login_attempts = 0

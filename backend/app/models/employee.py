@@ -52,6 +52,7 @@ class Employee(Base):
     position = Column(String(100), nullable=True)
     employment_type = Column(String(50), default="regular")  # regular, probationary, contractual
     hire_date = Column(Date, nullable=True)
+    end_date = Column(Date, nullable=True)  # Contract end date or resignation date
 
     # Shift Assignment
     shift_id = Column(Integer, ForeignKey("shifts.id"), nullable=True)

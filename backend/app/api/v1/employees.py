@@ -171,7 +171,7 @@ async def list_employees(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=1000),
     department_id: Optional[int] = None,
-    is_active: Optional[bool] = True,
+    is_active: Optional[bool] = None,
     status: Optional[str] = None,
     search: Optional[str] = None,
     sort_by: Optional[str] = Query(None, description="Field to sort by"),
@@ -266,6 +266,42 @@ async def create_employee(
     db.commit()
     db.refresh(employee)
     return EmployeeResponse.model_validate(employee)
+
+
+@router.get("/end-date-notifications")
+async def get_end_date_notifications(
+    current_admin: User = Depends(get_current_admin),
+    db: Session = Depends(get_db)
+):
+    """
+    Get employees whose end_date has been reached (today or past).
+    Only includes active employees who haven't been handled yet.
+    """
+    from datetime import date
+
+    today = date.today()
+
+    # Find employees with end_date <= today and status is still 'active'
+    employees = db.query(Employee).filter(
+        Employee.end_date.isnot(None),
+        Employee.end_date <= today,
+        Employee.status == 'active',
+        Employee.is_active == True
+    ).all()
+
+    items = []
+    for emp in employees:
+        days_past = (today - emp.end_date).days
+        items.append({
+            "id": emp.id,
+            "employee_no": emp.employee_no,
+            "full_name": emp.full_name,
+            "position": emp.position,
+            "end_date": emp.end_date.isoformat(),
+            "days_past": days_past
+        })
+
+    return {"items": items, "total": len(items)}
 
 
 @router.get("/{employee_id}", response_model=EmployeeResponse)
@@ -367,6 +403,99 @@ async def verify_all_pending(
     return {"message": f"Verified {count} employees"}
 
 
+@router.post("/bulk-action")
+async def bulk_employee_action(
+    action: str = Query(..., description="Action: reactivate, terminate, move_to_inactive, verify"),
+    employee_ids: str = Query(..., description="Comma-separated employee IDs"),
+    current_admin: User = Depends(get_current_admin),
+    db: Session = Depends(get_db)
+):
+    """
+    Perform bulk action on multiple employees (Admin only).
+    Actions:
+    - reactivate: Set status to 'active', is_active to True, clear end_date
+    - terminate: Set status to 'terminated', keep is_active True
+    - move_to_inactive: Set status to 'inactive', is_active to False
+    - verify: Set status from 'pending' to 'active'
+    """
+    # Parse employee IDs
+    try:
+        ids = [int(id.strip()) for id in employee_ids.split(',') if id.strip()]
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid employee IDs format")
+
+    if not ids:
+        raise HTTPException(status_code=400, detail="No employee IDs provided")
+
+    success_count = 0
+    for emp_id in ids:
+        emp = db.query(Employee).filter(Employee.id == emp_id).first()
+        if not emp:
+            continue
+
+        if action == "reactivate":
+            emp.status = "active"
+            emp.is_active = True
+            emp.end_date = None
+            success_count += 1
+        elif action == "terminate":
+            emp.status = "terminated"
+            emp.is_active = True  # Still visible in terminated tab
+            success_count += 1
+        elif action == "move_to_inactive":
+            emp.status = "inactive"
+            emp.is_active = False
+            success_count += 1
+        elif action == "verify":
+            if emp.status == "pending":
+                emp.status = "active"
+                success_count += 1
+
+    db.commit()
+    return {"message": f"Updated {success_count} employees", "success_count": success_count}
+
+
+@router.post("/{employee_id}/set-status")
+async def set_employee_status(
+    employee_id: int,
+    new_status: str = Query(..., description="Status: active, pending, terminated, inactive"),
+    current_admin: User = Depends(get_current_admin),
+    db: Session = Depends(get_db)
+):
+    """
+    Set employee status manually (Admin only).
+    Statuses:
+    - active: Active employee, included in payroll
+    - pending: Awaiting verification
+    - terminated: End date reached, awaiting admin decision
+    - inactive: Permanently deactivated
+    """
+    employee = db.query(Employee).filter(Employee.id == employee_id).first()
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+
+    valid_statuses = ['active', 'pending', 'terminated', 'inactive']
+    if new_status not in valid_statuses:
+        raise HTTPException(status_code=400, detail=f"Invalid status. Must be one of: {', '.join(valid_statuses)}")
+
+    if new_status == "active":
+        employee.status = "active"
+        employee.is_active = True
+        employee.end_date = None
+    elif new_status == "pending":
+        employee.status = "pending"
+        employee.is_active = True
+    elif new_status == "terminated":
+        employee.status = "terminated"
+        employee.is_active = True
+    elif new_status == "inactive":
+        employee.status = "inactive"
+        employee.is_active = False
+
+    db.commit()
+    return {"message": f"Status changed to {new_status}"}
+
+
 @router.post("/sync-users")
 async def sync_employees_to_users(
     current_admin: User = Depends(get_current_admin),
@@ -438,3 +567,57 @@ async def sync_employees_to_users(
         "errors": errors,
         "temp_password": TEMP_PASSWORD
     }
+
+
+@router.post("/{employee_id}/end-date-action")
+async def handle_end_date_action(
+    employee_id: int,
+    action: str = Query(..., description="Action: confirm, reactivate, reschedule"),
+    new_end_date: Optional[str] = Query(None, description="New end date for reschedule action (YYYY-MM-DD)"),
+    current_admin: User = Depends(get_current_admin),
+    db: Session = Depends(get_db)
+):
+    """
+    Handle end date action for an employee.
+    Actions:
+    - confirm: Set status to 'terminated' (awaiting final decision)
+    - reactivate: Clear end_date and keep status 'active'
+    - reschedule: Set new end_date and keep status 'active'
+    """
+    from datetime import datetime
+
+    employee = db.query(Employee).filter(Employee.id == employee_id).first()
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+
+    if action == "confirm":
+        # Confirm termination - set status to 'terminated'
+        employee.status = "terminated"
+        employee.is_active = True  # Still visible in terminated tab
+        message = f"Employee {employee.full_name} has been marked as terminated"
+
+    elif action == "reactivate":
+        # Reactivate - clear end_date and keep active
+        employee.end_date = None
+        employee.status = "active"
+        employee.is_active = True
+        message = f"Employee {employee.full_name} has been reactivated"
+
+    elif action == "reschedule":
+        # Reschedule - set new end_date
+        if not new_end_date:
+            raise HTTPException(status_code=400, detail="New end date is required for reschedule action")
+        try:
+            parsed_date = datetime.strptime(new_end_date, "%Y-%m-%d").date()
+            employee.end_date = parsed_date
+            employee.status = "active"
+            employee.is_active = True
+            message = f"Employee {employee.full_name} end date extended to {new_end_date}"
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD")
+
+    else:
+        raise HTTPException(status_code=400, detail="Invalid action. Must be one of: confirm, reactivate, reschedule")
+
+    db.commit()
+    return {"message": message}

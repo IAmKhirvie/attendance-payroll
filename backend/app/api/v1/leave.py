@@ -511,10 +511,12 @@ async def list_leave_requests(
     leave_type_id: Optional[int] = None,
     status: Optional[LeaveStatus] = None,
     year: Optional[int] = None,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(25, ge=1, le=100),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """List leave requests. Admins see all, employees see only their own."""
+    """List leave requests with pagination. Admins see all, employees see only their own."""
     query = db.query(LeaveRequest)
 
     # Filter by role
@@ -533,7 +535,12 @@ async def list_leave_requests(
     if year:
         query = query.filter(func.extract('year', LeaveRequest.start_date) == year)
 
-    requests = query.order_by(LeaveRequest.created_at.desc()).all()
+    # Get total count before pagination
+    total = query.count()
+
+    # Apply pagination
+    offset = (page - 1) * page_size
+    requests = query.order_by(LeaveRequest.created_at.desc()).offset(offset).limit(page_size).all()
 
     items = []
     for req in requests:
@@ -566,7 +573,7 @@ async def list_leave_requests(
             response.reviewer_name = f"{req.reviewer.first_name} {req.reviewer.last_name}"
         items.append(response)
 
-    return LeaveRequestListResponse(items=items, total=len(items))
+    return LeaveRequestListResponse(items=items, total=total)
 
 
 @router.get("/requests/{request_id}", response_model=LeaveRequestResponse)

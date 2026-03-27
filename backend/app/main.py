@@ -94,14 +94,16 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# CORS middleware - allow network access from any origin (for local network access)
-# In production, replace with specific origins
+# CORS middleware - configurable via CORS_ORIGINS env var
+# For local network: CORS_ORIGINS="*"
+# For production: CORS_ORIGINS="https://your-domain.com,https://admin.your-domain.com"
+cors_origins = settings.CORS_ORIGINS.split(",") if settings.CORS_ORIGINS != "*" else ["*"]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins for local network access
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=cors_origins,
+    allow_credentials=settings.CORS_ALLOW_CREDENTIALS,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "Accept", "Origin", "X-Requested-With"],
 )
 
 

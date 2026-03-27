@@ -57,7 +57,7 @@ export function AdminDashboard() {
       ]);
 
       setStats({
-        totalEmployees: activeData.total + pendingData.total,
+        totalEmployees: activeData.total,  // Only count active employees
         activeEmployees: activeData.total,
         pendingEmployees: pendingData.total,
       });

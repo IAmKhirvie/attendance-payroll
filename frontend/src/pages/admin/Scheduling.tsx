@@ -148,8 +148,8 @@ export default function SchedulingPage() {
       {/* Header */}
       <div className="flex justify-between items-center">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Employee Scheduling</h1>
-          <p className="text-gray-500">Manage working days and call times for each employee</p>
+          <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>Employee Scheduling</h1>
+          <p style={{ color: 'var(--text-muted)' }}>Manage working days and call times for each employee</p>
         </div>
         <button
           onClick={() => setShowBulkModal(true)}
@@ -162,9 +162,23 @@ export default function SchedulingPage() {
 
       {/* Messages */}
       {message && (
-        <div className={`p-4 rounded-lg ${message.type === 'success' ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
+        <div
+          className="p-4 rounded-xl font-medium"
+          style={{
+            background: message.type === 'success'
+              ? 'linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%)'
+              : 'linear-gradient(135deg, #fee2e2 0%, #fecaca 100%)',
+            border: message.type === 'success' ? '2px solid #6ee7b7' : '2px solid #f87171',
+            color: message.type === 'success' ? '#065f46' : '#991b1b',
+          }}
+        >
           {message.text}
-          <button onClick={() => setMessage(null)} className="ml-4 text-sm underline">Dismiss</button>
+          <button
+            onClick={() => setMessage(null)}
+            className="ml-4 text-sm underline font-bold"
+          >
+            Dismiss
+          </button>
         </div>
       )}
 
@@ -180,168 +194,199 @@ export default function SchedulingPage() {
       </div>
 
       {/* Table */}
-      <div className="bg-white rounded-lg shadow overflow-hidden">
+      <div className="card overflow-hidden">
         {loading ? (
-          <div className="p-8 text-center">Loading...</div>
+          <div className="p-8 text-center">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600 mx-auto"></div>
+            <p className="mt-2" style={{ color: 'var(--text-muted)' }}>Loading...</p>
+          </div>
         ) : (
-          <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-4 py-3 text-left">
-                  <input
-                    type="checkbox"
-                    checked={selectedEmployeeIds.size === filteredEmployees.length && filteredEmployees.length > 0}
-                    onChange={toggleSelectAll}
-                    className="rounded"
-                  />
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Employee</th>
-                <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Call Time</th>
-                <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Time Out</th>
-                <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Buffer</th>
-                <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Flexible</th>
-                {DAYS.map(day => (
-                  <th key={day.key} className="px-2 py-3 text-center text-xs font-medium text-gray-500 uppercase">{day.short}</th>
-                ))}
-                <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Days/Wk</th>
-                <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="bg-white divide-y divide-gray-200">
-              {filteredEmployees.map((emp) => (
-                <tr key={emp.id} className={editingEmployee?.id === emp.id ? 'bg-blue-50' : 'hover:bg-gray-50'}>
-                  <td className="px-4 py-3">
+          <div className="overflow-x-auto">
+            <table className="min-w-full">
+              <thead>
+                <tr>
+                  <th className="px-4 py-3 text-left">
                     <input
                       type="checkbox"
-                      checked={selectedEmployeeIds.has(emp.id)}
-                      onChange={(e) => {
-                        const newSet = new Set(selectedEmployeeIds);
-                        if (e.target.checked) {
-                          newSet.add(emp.id);
-                        } else {
-                          newSet.delete(emp.id);
-                        }
-                        setSelectedEmployeeIds(newSet);
-                      }}
-                      className="rounded"
+                      checked={selectedEmployeeIds.size === filteredEmployees.length && filteredEmployees.length > 0}
+                      onChange={toggleSelectAll}
+                      className="rounded border-2"
+                      style={{ borderColor: 'var(--border)' }}
                     />
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="font-medium">{emp.first_name} {emp.last_name}</div>
-                    <div className="text-xs text-gray-500">{emp.employee_no}</div>
-                  </td>
-                  {editingEmployee?.id === emp.id ? (
-                    <>
-                      <td className="px-4 py-3 text-center">
-                        <input
-                          type="time"
-                          value={editingEmployee.call_time || '08:00'}
-                          onChange={(e) => setEditingEmployee({ ...editingEmployee, call_time: e.target.value })}
-                          className="form-input w-24 text-sm"
-                        />
-                      </td>
-                      <td className="px-4 py-3 text-center">
-                        <input
-                          type="time"
-                          value={editingEmployee.time_out || '17:00'}
-                          onChange={(e) => setEditingEmployee({ ...editingEmployee, time_out: e.target.value })}
-                          className="form-input w-24 text-sm"
-                        />
-                      </td>
-                      <td className="px-4 py-3 text-center">
-                        <input
-                          type="number"
-                          min="0"
-                          max="60"
-                          value={editingEmployee.buffer_minutes || 10}
-                          onChange={(e) => setEditingEmployee({ ...editingEmployee, buffer_minutes: parseInt(e.target.value) || 0 })}
-                          className="form-input w-16 text-sm text-center"
-                        />
-                      </td>
-                      <td className="px-4 py-3 text-center">
-                        <input
-                          type="checkbox"
-                          checked={editingEmployee.is_flexible || false}
-                          onChange={(e) => setEditingEmployee({ ...editingEmployee, is_flexible: e.target.checked })}
-                          className="rounded"
-                        />
-                      </td>
-                      {DAYS.map(day => (
-                        <td key={day.key} className="px-2 py-3 text-center">
+                  </th>
+                  <th className="px-4 py-3 text-left">Employee</th>
+                  <th className="px-4 py-3 text-center">Call Time</th>
+                  <th className="px-4 py-3 text-center">Time Out</th>
+                  <th className="px-4 py-3 text-center">Buffer</th>
+                  <th className="px-4 py-3 text-center">Flexible</th>
+                  {DAYS.map(day => (
+                    <th key={day.key} className="px-2 py-3 text-center">{day.short}</th>
+                  ))}
+                  <th className="px-4 py-3 text-center">Days/Wk</th>
+                  <th className="px-4 py-3 text-center">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredEmployees.map((emp) => (
+                  <tr
+                    key={emp.id}
+                    style={{
+                      background: editingEmployee?.id === emp.id
+                        ? 'linear-gradient(135deg, #e0e7ff 0%, #c7d2fe 100%)'
+                        : undefined
+                    }}
+                  >
+                    <td className="px-4 py-3">
+                      <input
+                        type="checkbox"
+                        checked={selectedEmployeeIds.has(emp.id)}
+                        onChange={(e) => {
+                          const newSet = new Set(selectedEmployeeIds);
+                          if (e.target.checked) {
+                            newSet.add(emp.id);
+                          } else {
+                            newSet.delete(emp.id);
+                          }
+                          setSelectedEmployeeIds(newSet);
+                        }}
+                        className="rounded border-2"
+                        style={{ borderColor: 'var(--border)' }}
+                      />
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="font-bold" style={{ color: 'var(--text-primary)' }}>{emp.first_name} {emp.last_name}</div>
+                      <div className="text-xs" style={{ color: 'var(--text-muted)' }}>{emp.employee_no}</div>
+                    </td>
+                    {editingEmployee?.id === emp.id ? (
+                      <>
+                        <td className="px-4 py-3 text-center">
                           <input
-                            type="checkbox"
-                            checked={(editingEmployee as any)[day.key] || false}
-                            onChange={(e) => setEditingEmployee({ ...editingEmployee, [day.key]: e.target.checked })}
-                            className="rounded"
+                            type="time"
+                            value={editingEmployee.call_time || '08:00'}
+                            onChange={(e) => setEditingEmployee({ ...editingEmployee, call_time: e.target.value })}
+                            className="form-input w-24 text-sm"
                           />
                         </td>
-                      ))}
-                      <td className="px-4 py-3 text-center font-medium">
-                        {countWorkDays(editingEmployee)}
-                      </td>
-                      <td className="px-4 py-3 text-center">
-                        <div className="flex gap-2 justify-center">
-                          <button
-                            onClick={() => handleSaveSchedule(editingEmployee)}
-                            disabled={saving === emp.id}
-                            className="text-green-600 hover:text-green-800 text-sm font-medium"
-                          >
-                            {saving === emp.id ? 'Saving...' : 'Save'}
-                          </button>
-                          <button
-                            onClick={() => setEditingEmployee(null)}
-                            className="text-gray-600 hover:text-gray-800 text-sm"
-                          >
-                            Cancel
-                          </button>
-                        </div>
-                      </td>
-                    </>
-                  ) : (
-                    <>
-                      <td className="px-4 py-3 text-center text-sm">{emp.call_time || '08:00'}</td>
-                      <td className="px-4 py-3 text-center text-sm">{emp.time_out || '17:00'}</td>
-                      <td className="px-4 py-3 text-center text-sm">{emp.buffer_minutes ?? 10}m</td>
-                      <td className="px-4 py-3 text-center">
-                        {emp.is_flexible ? (
-                          <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-800">
-                            Flex
-                          </span>
-                        ) : '-'}
-                      </td>
-                      {DAYS.map(day => (
-                        <td key={day.key} className="px-2 py-3 text-center">
-                          {(emp as any)[day.key] ? (
-                            <span className="text-green-600">✓</span>
+                        <td className="px-4 py-3 text-center">
+                          <input
+                            type="time"
+                            value={editingEmployee.time_out || '17:00'}
+                            onChange={(e) => setEditingEmployee({ ...editingEmployee, time_out: e.target.value })}
+                            className="form-input w-24 text-sm"
+                          />
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          <input
+                            type="number"
+                            min="0"
+                            max="60"
+                            value={editingEmployee.buffer_minutes || 10}
+                            onChange={(e) => setEditingEmployee({ ...editingEmployee, buffer_minutes: parseInt(e.target.value) || 0 })}
+                            className="form-input w-16 text-sm text-center"
+                          />
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          <input
+                            type="checkbox"
+                            checked={editingEmployee.is_flexible || false}
+                            onChange={(e) => setEditingEmployee({ ...editingEmployee, is_flexible: e.target.checked })}
+                            className="rounded border-2"
+                            style={{ borderColor: 'var(--border)' }}
+                          />
+                        </td>
+                        {DAYS.map(day => (
+                          <td key={day.key} className="px-2 py-3 text-center">
+                            <input
+                              type="checkbox"
+                              checked={(editingEmployee as any)[day.key] || false}
+                              onChange={(e) => setEditingEmployee({ ...editingEmployee, [day.key]: e.target.checked })}
+                              className="rounded border-2"
+                              style={{ borderColor: 'var(--border)' }}
+                            />
+                          </td>
+                        ))}
+                        <td className="px-4 py-3 text-center font-bold" style={{ color: 'var(--text-primary)' }}>
+                          {countWorkDays(editingEmployee)}
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          <div className="flex gap-2 justify-center">
+                            <button
+                              onClick={() => handleSaveSchedule(editingEmployee)}
+                              disabled={saving === emp.id}
+                              className="text-sm font-bold px-3 py-1 rounded-lg"
+                              style={{ background: '#d1fae5', color: '#065f46', border: '2px solid #6ee7b7' }}
+                            >
+                              {saving === emp.id ? 'Saving...' : 'Save'}
+                            </button>
+                            <button
+                              onClick={() => setEditingEmployee(null)}
+                              className="text-sm font-medium px-3 py-1 rounded-lg"
+                              style={{ background: 'var(--bg-accent)', color: 'var(--text-secondary)', border: '2px solid var(--border)' }}
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </td>
+                      </>
+                    ) : (
+                      <>
+                        <td className="px-4 py-3 text-center text-sm font-medium" style={{ color: 'var(--text-primary)' }}>{emp.call_time || '08:00'}</td>
+                        <td className="px-4 py-3 text-center text-sm font-medium" style={{ color: 'var(--text-primary)' }}>{emp.time_out || '17:00'}</td>
+                        <td className="px-4 py-3 text-center text-sm" style={{ color: 'var(--text-secondary)' }}>{emp.buffer_minutes ?? 10}m</td>
+                        <td className="px-4 py-3 text-center">
+                          {emp.is_flexible ? (
+                            <span
+                              className="inline-flex items-center px-2 py-0.5 rounded-lg text-xs font-bold"
+                              style={{ background: 'linear-gradient(135deg, #e9d5ff 0%, #d8b4fe 100%)', color: '#7c3aed', border: '2px solid #c084fc' }}
+                            >
+                              Flex
+                            </span>
                           ) : (
-                            <span className="text-gray-300">-</span>
+                            <span style={{ color: 'var(--text-muted)' }}>-</span>
                           )}
                         </td>
-                      ))}
-                      <td className="px-4 py-3 text-center font-medium">{countWorkDays(emp)}</td>
-                      <td className="px-4 py-3 text-center">
-                        <button
-                          onClick={() => setEditingEmployee({ ...emp })}
-                          className="text-primary-600 hover:text-primary-800 text-sm font-medium"
-                        >
-                          Edit
-                        </button>
-                      </td>
-                    </>
-                  )}
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                        {DAYS.map(day => (
+                          <td key={day.key} className="px-2 py-3 text-center">
+                            {(emp as any)[day.key] ? (
+                              <span className="font-bold" style={{ color: '#059669' }}>✓</span>
+                            ) : (
+                              <span style={{ color: 'var(--text-muted)' }}>-</span>
+                            )}
+                          </td>
+                        ))}
+                        <td className="px-4 py-3 text-center font-bold" style={{ color: 'var(--text-primary)' }}>{countWorkDays(emp)}</td>
+                        <td className="px-4 py-3 text-center">
+                          <button
+                            onClick={() => setEditingEmployee({ ...emp })}
+                            className="text-sm font-bold"
+                            style={{ color: 'var(--primary)' }}
+                          >
+                            Edit
+                          </button>
+                        </td>
+                      </>
+                    )}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
 
       {/* Bulk Update Modal */}
       {showBulkModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-6 w-full max-w-md">
-            <h2 className="text-lg font-bold mb-4">Bulk Update Schedule</h2>
-            <p className="text-gray-600 mb-4">Update schedule for {selectedEmployeeIds.size} selected employees</p>
+        <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: 'rgba(0, 0, 0, 0.5)' }}>
+          <div
+            className="w-full max-w-md rounded-2xl p-6"
+            style={{
+              background: 'var(--bg-card)',
+              border: '2px solid var(--border)',
+              boxShadow: 'var(--shadow-xl)',
+            }}
+          >
+            <h2 className="text-lg font-bold mb-2" style={{ color: 'var(--text-primary)' }}>Bulk Update Schedule</h2>
+            <p className="mb-4" style={{ color: 'var(--text-muted)' }}>Update schedule for {selectedEmployeeIds.size} selected employees</p>
 
             <div className="space-y-4">
               <div className="grid grid-cols-2 gap-4">
@@ -386,9 +431,10 @@ export default function SchedulingPage() {
                         type="checkbox"
                         checked={(bulkSchedule as any)[day.key]}
                         onChange={(e) => setBulkSchedule({ ...bulkSchedule, [day.key]: e.target.checked })}
-                        className="rounded"
+                        className="rounded border-2"
+                        style={{ borderColor: 'var(--border)' }}
                       />
-                      <span className="text-xs">{day.short}</span>
+                      <span className="text-xs font-medium" style={{ color: 'var(--text-secondary)' }}>{day.short}</span>
                     </label>
                   ))}
                 </div>

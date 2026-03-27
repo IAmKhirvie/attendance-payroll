@@ -30,23 +30,41 @@ export function UsersPage() {
   const [formError, setFormError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [tempPassword, setTempPassword] = useState<string | null>(null);
+  const [newUserCredentials, setNewUserCredentials] = useState<{ email: string; password: string } | null>(null);
+
+  // Pagination state
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(() => {
+    const saved = localStorage.getItem('users_page_size');
+    return saved ? parseInt(saved, 10) : 25;
+  });
+  const [total, setTotal] = useState(0);
+
+  // Save page size to localStorage
+  useEffect(() => {
+    localStorage.setItem('users_page_size', pageSize.toString());
+  }, [pageSize]);
 
   useEffect(() => {
     loadUsers();
-  }, [filter]);
+  }, [filter, page, pageSize]);
 
   const loadUsers = async () => {
     setLoading(true);
     try {
-      const params = filter !== 'all' ? { status: filter } : {};
+      const params: Record<string, any> = { page, page_size: pageSize };
+      if (filter !== 'all') params.status = filter;
       const response = await usersApi.list(params);
       setUsers(response.items);
+      setTotal(response.total || 0);
     } catch (error) {
       console.error('Failed to load users:', error);
     } finally {
       setLoading(false);
     }
   };
+
+  const totalPages = Math.ceil(total / pageSize);
 
   const handleApprove = async (userId: number) => {
     try {
@@ -126,6 +144,11 @@ export function UsersPage() {
         role: formData.role,
       });
 
+      // Save credentials to show in confirmation modal
+      setNewUserCredentials({
+        email: formData.email,
+        password: formData.password,
+      });
       setShowCreateModal(false);
       loadUsers();
     } catch (error: any) {
@@ -313,6 +336,64 @@ export function UsersPage() {
                 ))}
               </tbody>
             </table>
+
+            {/* Pagination Controls */}
+            {total > 0 && (
+              <div className="px-6 py-4 border-t border-gray-200 flex items-center justify-between">
+                <div className="text-sm text-gray-500 flex items-center gap-4">
+                  <span>Showing {((page - 1) * pageSize) + 1} to {Math.min(page * pageSize, total)} of {total} users</span>
+                  <select
+                    value={pageSize}
+                    onChange={(e) => {
+                      setPageSize(Number(e.target.value));
+                      setPage(1);
+                    }}
+                    className="border border-gray-300 rounded px-2 py-1 text-sm"
+                  >
+                    <option value={10}>10 per page</option>
+                    <option value={25}>25 per page</option>
+                    <option value={50}>50 per page</option>
+                    <option value={75}>75 per page</option>
+                    <option value={100}>100 per page</option>
+                  </select>
+                </div>
+                {totalPages > 1 && (
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setPage(1)}
+                      disabled={page === 1}
+                      className="px-3 py-1 text-sm border rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      First
+                    </button>
+                    <button
+                      onClick={() => setPage(page - 1)}
+                      disabled={page === 1}
+                      className="px-3 py-1 text-sm border rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      Prev
+                    </button>
+                    <span className="px-3 py-1 text-sm">
+                      Page {page} of {totalPages}
+                    </span>
+                    <button
+                      onClick={() => setPage(page + 1)}
+                      disabled={page >= totalPages}
+                      className="px-3 py-1 text-sm border rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      Next
+                    </button>
+                    <button
+                      onClick={() => setPage(totalPages)}
+                      disabled={page >= totalPages}
+                      className="px-3 py-1 text-sm border rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      Last
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -549,6 +630,55 @@ export function UsersPage() {
             <div className="flex justify-end">
               <button
                 onClick={() => setTempPassword(null)}
+                className="btn-primary"
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* New User Credentials Modal */}
+      {newUserCredentials && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 w-full max-w-md">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="h-10 w-10 rounded-full bg-green-100 flex items-center justify-center">
+                <svg className="h-6 w-6 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+              </div>
+              <h2 className="text-lg font-semibold">User Created Successfully</h2>
+            </div>
+            <p className="text-gray-600 mb-4">
+              Share these login credentials with the employee:
+            </p>
+            <div className="bg-gray-100 p-4 rounded-md mb-4 space-y-3">
+              <div>
+                <p className="text-xs text-gray-500 uppercase font-medium">Email</p>
+                <code className="text-lg font-mono select-all">{newUserCredentials.email}</code>
+              </div>
+              <div>
+                <p className="text-xs text-gray-500 uppercase font-medium">Password</p>
+                <code className="text-lg font-mono select-all">{newUserCredentials.password}</code>
+              </div>
+            </div>
+            <p className="text-sm text-gray-500 mb-4">
+              Make sure to copy these credentials before closing. The password cannot be retrieved later.
+            </p>
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => {
+                  navigator.clipboard.writeText(`Email: ${newUserCredentials.email}\nPassword: ${newUserCredentials.password}`);
+                  alert('Credentials copied to clipboard!');
+                }}
+                className="btn-secondary"
+              >
+                Copy to Clipboard
+              </button>
+              <button
+                onClick={() => setNewUserCredentials(null)}
                 className="btn-primary"
               >
                 Done

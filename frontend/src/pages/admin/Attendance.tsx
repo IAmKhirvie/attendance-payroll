@@ -336,10 +336,14 @@ export function AttendancePage() {
   };
 
   const [forceReimport, setForceReimport] = useState(false);
+  const [lastUploadedFile, setLastUploadedFile] = useState<File | null>(null);
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+
+    // Store the file for potential reimport
+    setLastUploadedFile(file);
 
     // Start upload in global store (continues even when navigating away)
     startUpload(file, { forceReimport });
@@ -347,6 +351,12 @@ export function AttendancePage() {
 
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
+    }
+  };
+
+  const handleForceReimport = () => {
+    if (lastUploadedFile) {
+      startUpload(lastUploadedFile, { forceReimport: true });
     }
   };
 
@@ -494,20 +504,16 @@ export function AttendancePage() {
                 <div className="flex items-start justify-between gap-4">
                   <div className="flex-1">
                     <p className="text-red-700">{error}</p>
-                    {error.includes('already been imported') && (
-                      <div className="mt-3 flex items-center gap-3">
-                        <label className="flex items-center gap-2 text-sm">
-                          <input
-                            type="checkbox"
-                            checked={forceReimport}
-                            onChange={(e) => setForceReimport(e.target.checked)}
-                            className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
-                          />
-                          <span className="text-gray-700">Replace existing import data</span>
-                        </label>
-                        {forceReimport && (
-                          <span className="text-xs text-gray-500">(Upload the file again to replace)</span>
-                        )}
+                    {error.includes('already been imported') && lastUploadedFile && (
+                      <div className="mt-3">
+                        <button
+                          onClick={handleForceReimport}
+                          disabled={isUploading}
+                          className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white font-semibold rounded-lg transition-colors disabled:opacity-50"
+                        >
+                          {isUploading ? 'Re-importing...' : 'Re-import & Replace'}
+                        </button>
+                        <p className="text-xs text-gray-500 mt-1">This will delete the previous import and replace it with the new data</p>
                       </div>
                     )}
                   </div>

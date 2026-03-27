@@ -56,6 +56,7 @@ class EmployeeCreate(EmployeeBase):
     position: Optional[str] = None
     employment_type: str = "regular"
     hire_date: Optional[date] = None
+    end_date: Optional[date] = None  # Contract end date or resignation date
     shift_id: Optional[int] = None
     basic_salary: Decimal = Decimal("0")
     daily_rate: Decimal = Decimal("0")
@@ -98,6 +99,7 @@ class EmployeeUpdate(BaseModel):
     position: Optional[str] = None
     employment_type: Optional[str] = None
     hire_date: Optional[date] = None
+    end_date: Optional[date] = None  # Contract end date or resignation date
     shift_id: Optional[int] = None
     basic_salary: Optional[Decimal] = None
     daily_rate: Optional[Decimal] = None
@@ -138,6 +140,7 @@ class EmployeeResponse(EmployeeBase):
     position: Optional[str]
     employment_type: str
     hire_date: Optional[date]
+    end_date: Optional[date] = None  # Contract end date or resignation date
     shift_id: Optional[int]
     basic_salary: Decimal
     daily_rate: Decimal

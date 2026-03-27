@@ -123,9 +123,24 @@ function LoansTab({ showPaid }: { showPaid: boolean }) {
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [filterEmployee, setFilterEmployee] = useState<number | ''>('');
 
+  // Pagination state
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(() => {
+    const saved = localStorage.getItem('loans_page_size');
+    return saved ? parseInt(saved, 10) : 25;
+  });
+  const [total, setTotal] = useState(0);
+
+  // Save page size to localStorage
+  useEffect(() => {
+    localStorage.setItem('loans_page_size', pageSize.toString());
+  }, [pageSize]);
+
+  const totalPages = Math.ceil(total / pageSize);
+
   useEffect(() => {
     loadData();
-  }, [showPaid, filterEmployee]);
+  }, [showPaid, filterEmployee, page, pageSize]);
 
   const loadData = async () => {
     setLoading(true);
@@ -134,11 +149,14 @@ function LoansTab({ showPaid }: { showPaid: boolean }) {
         loansApi.list({
           include_paid: showPaid,
           employee_id: filterEmployee || undefined,
+          page,
+          page_size: pageSize,
         }),
         loansApi.listTypes(),
         employeesApi.list({ page_size: 1000 }),
       ]);
       setLoans(loansData.items);
+      setTotal(loansData.total || 0);
       setLoanTypes(typesData.items);
       // Sort employees alphabetically by last name, then first name
       const sortedEmployees = employeesData.items.sort((a: Employee, b: Employee) => {
@@ -384,6 +402,64 @@ function LoansTab({ showPaid }: { showPaid: boolean }) {
               )}
             </tbody>
           </table>
+
+          {/* Pagination Controls */}
+          {total > 0 && (
+            <div className="px-4 py-3 border-t border-gray-200 flex items-center justify-between">
+              <div className="text-sm text-gray-500 flex items-center gap-4">
+                <span>Showing {((page - 1) * pageSize) + 1} to {Math.min(page * pageSize, total)} of {total} loans</span>
+                <select
+                  value={pageSize}
+                  onChange={(e) => {
+                    setPageSize(Number(e.target.value));
+                    setPage(1);
+                  }}
+                  className="border border-gray-300 rounded px-2 py-1 text-sm"
+                >
+                  <option value={10}>10 per page</option>
+                  <option value={25}>25 per page</option>
+                  <option value={50}>50 per page</option>
+                  <option value={75}>75 per page</option>
+                  <option value={100}>100 per page</option>
+                </select>
+              </div>
+              {totalPages > 1 && (
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setPage(1)}
+                    disabled={page === 1}
+                    className="px-3 py-1 text-sm border rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    First
+                  </button>
+                  <button
+                    onClick={() => setPage(page - 1)}
+                    disabled={page === 1}
+                    className="px-3 py-1 text-sm border rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    Prev
+                  </button>
+                  <span className="px-3 py-1 text-sm">
+                    Page {page} of {totalPages}
+                  </span>
+                  <button
+                    onClick={() => setPage(page + 1)}
+                    disabled={page >= totalPages}
+                    className="px-3 py-1 text-sm border rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    Next
+                  </button>
+                  <button
+                    onClick={() => setPage(totalPages)}
+                    disabled={page >= totalPages}
+                    className="px-3 py-1 text-sm border rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    Last
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
 

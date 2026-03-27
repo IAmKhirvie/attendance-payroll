@@ -766,25 +766,60 @@ def generate_payslip(
 
 def process_payroll(db: Session, payroll_run: PayrollRun) -> Dict[str, Any]:
     """
-    Process payroll for all active employees.
+    Process payroll for ONLY employees with attendance records in the period.
     Uses PayrollSettings for universal deduction rates.
     Connects to attendance data (ProcessedAttendance or ImportRecord).
     If employee has default_days_per_cutoff set, uses that instead of attendance-based calculation.
     Returns summary of the processing.
+
+    CRITICAL: Only includes employees who have attendance records for the period.
+    This ensures terminated employees or employees not in the imported file are excluded.
     """
     from datetime import datetime
 
     # Get payroll settings
     settings = get_payroll_settings(db)
 
-    # Get all active, verified employees
+    # Step 1: Find employees with attendance in this period
+    # Get employee IDs from ProcessedAttendance
+    processed_ids = db.query(ProcessedAttendance.employee_id).filter(
+        ProcessedAttendance.date >= payroll_run.period_start,
+        ProcessedAttendance.date <= payroll_run.period_end
+    ).distinct().all()
+    processed_employee_ids = {e[0] for e in processed_ids}
+
+    # Get employee IDs from ImportRecord via biometric_id
+    import_records = db.query(ImportRecord.employee_biometric_id).join(ImportBatch).filter(
+        ImportRecord.date >= payroll_run.period_start,
+        ImportRecord.date <= payroll_run.period_end,
+        ImportRecord.employee_biometric_id.isnot(None),
+        ImportRecord.employee_biometric_id != ''
+    ).distinct().all()
+    biometric_ids = {r[0] for r in import_records if r[0]}
+
+    # Map biometric_ids to employee_ids
+    import_employee_ids = set()
+    if biometric_ids:
+        biometric_employees = db.query(Employee.id).filter(
+            Employee.biometric_id.in_(biometric_ids)
+        ).all()
+        import_employee_ids = {e[0] for e in biometric_employees}
+
+    # Combine: employees with ANY attendance record
+    employees_with_attendance = processed_employee_ids | import_employee_ids
+
+    if not employees_with_attendance:
+        raise ValueError("No employees with attendance records found for this period. Please import attendance data first.")
+
+    # Step 2: Only include ACTIVE employees WITH attendance
     employees = db.query(Employee).filter(
+        Employee.id.in_(employees_with_attendance),
         Employee.is_active == True,
         Employee.status == 'active'
     ).all()
 
     if not employees:
-        raise ValueError("No active employees found. Please verify pending employees first.")
+        raise ValueError("No active employees with attendance records found. Please verify pending employees first.")
 
     total_gross = 0
     total_deductions = 0

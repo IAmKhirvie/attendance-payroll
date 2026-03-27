@@ -44,7 +44,7 @@ export interface Department {
 }
 
 // Employee types
-export type EmployeeStatus = 'pending' | 'active' | 'inactive';
+export type EmployeeStatus = 'pending' | 'active' | 'terminated' | 'inactive';
 
 export interface Employee {
   id: number;
@@ -56,6 +56,7 @@ export interface Employee {
   email?: string;
   phone?: string;
   hire_date: string;
+  end_date?: string;  // Contract end date or resignation date
   position?: string;
   department_id?: number;
   department?: Department;

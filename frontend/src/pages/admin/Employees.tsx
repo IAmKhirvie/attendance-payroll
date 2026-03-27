@@ -15,6 +15,7 @@ interface EmployeeFormData {
   position: string;
   employment_type: string;
   hire_date: string;
+  end_date: string;  // Contract end date or resignation date
   basic_salary: string;
   daily_rate: string;
   hourly_rate: string;
@@ -55,6 +56,7 @@ const emptyForm: EmployeeFormData = {
   position: '',
   employment_type: 'regular',
   hire_date: '',
+  end_date: '',  // Contract end date or resignation date
   basic_salary: '',
   daily_rate: '',
   hourly_rate: '',
@@ -96,9 +98,10 @@ interface EmployeeFormProps {
   error: string;
 }
 
-// Constants for salary computation
-const WORKING_DAYS_PER_MONTH = 22; // Standard Philippine working days
-const HOURS_PER_DAY = 8;
+// ICAN Formula Constants
+// Daily Rate = Basic Monthly × 12 / 261 days
+// Hourly Rate = Daily Rate / Work Hours per Day
+const WORKING_DAYS_PER_YEAR = 261; // ICAN standard
 
 // Employee Form Component - defined OUTSIDE of EmployeesPage to prevent re-mounting
 const EmployeeForm = memo(function EmployeeForm({
@@ -117,11 +120,19 @@ const EmployeeForm = memo(function EmployeeForm({
     setFormData(prev => ({ ...prev, [field]: value }));
   }, [setFormData]);
 
-  // Auto-compute salary rates
+  // Get current work hours for calculations
+  const getWorkHours = useCallback(() => {
+    return parseFloat(formData.work_hours_per_day) || 8;
+  }, [formData.work_hours_per_day]);
+
+  // ICAN Formula: Daily Rate = Basic Monthly × 12 / 261
   const handleBasicSalaryChange = useCallback((value: string) => {
     const basicSalary = parseFloat(value) || 0;
-    const dailyRate = basicSalary > 0 ? (basicSalary / WORKING_DAYS_PER_MONTH).toFixed(2) : '';
-    const hourlyRate = basicSalary > 0 ? (basicSalary / WORKING_DAYS_PER_MONTH / HOURS_PER_DAY).toFixed(2) : '';
+    const workHours = getWorkHours();
+    // Daily Rate = (Basic Monthly × 12) / 261
+    const dailyRate = basicSalary > 0 ? ((basicSalary * 12) / WORKING_DAYS_PER_YEAR).toFixed(2) : '';
+    // Hourly Rate = Daily Rate / Work Hours per Day
+    const hourlyRate = dailyRate ? (parseFloat(dailyRate) / workHours).toFixed(2) : '';
 
     setFormData(prev => ({
       ...prev,
@@ -129,12 +140,14 @@ const EmployeeForm = memo(function EmployeeForm({
       daily_rate: dailyRate,
       hourly_rate: hourlyRate,
     }));
-  }, [setFormData]);
+  }, [setFormData, getWorkHours]);
 
+  // Reverse: Basic Salary = Daily Rate × 261 / 12
   const handleDailyRateChange = useCallback((value: string) => {
     const dailyRate = parseFloat(value) || 0;
-    const basicSalary = dailyRate > 0 ? (dailyRate * WORKING_DAYS_PER_MONTH).toFixed(2) : '';
-    const hourlyRate = dailyRate > 0 ? (dailyRate / HOURS_PER_DAY).toFixed(2) : '';
+    const workHours = getWorkHours();
+    const basicSalary = dailyRate > 0 ? ((dailyRate * WORKING_DAYS_PER_YEAR) / 12).toFixed(2) : '';
+    const hourlyRate = dailyRate > 0 ? (dailyRate / workHours).toFixed(2) : '';
 
     setFormData(prev => ({
       ...prev,
@@ -142,12 +155,14 @@ const EmployeeForm = memo(function EmployeeForm({
       daily_rate: value,
       hourly_rate: hourlyRate,
     }));
-  }, [setFormData]);
+  }, [setFormData, getWorkHours]);
 
+  // Reverse: Daily Rate = Hourly Rate × Work Hours
   const handleHourlyRateChange = useCallback((value: string) => {
     const hourlyRate = parseFloat(value) || 0;
-    const dailyRate = hourlyRate > 0 ? (hourlyRate * HOURS_PER_DAY).toFixed(2) : '';
-    const basicSalary = hourlyRate > 0 ? (hourlyRate * HOURS_PER_DAY * WORKING_DAYS_PER_MONTH).toFixed(2) : '';
+    const workHours = getWorkHours();
+    const dailyRate = hourlyRate > 0 ? (hourlyRate * workHours).toFixed(2) : '';
+    const basicSalary = dailyRate ? ((parseFloat(dailyRate) * WORKING_DAYS_PER_YEAR) / 12).toFixed(2) : '';
 
     setFormData(prev => ({
       ...prev,
@@ -155,7 +170,21 @@ const EmployeeForm = memo(function EmployeeForm({
       daily_rate: dailyRate,
       hourly_rate: value,
     }));
-  }, [setFormData]);
+  }, [setFormData, getWorkHours]);
+
+  // Recalculate hourly rate when work hours per day changes
+  const handleWorkHoursChange = useCallback((value: string) => {
+    const workHours = parseFloat(value) || 8;
+    const dailyRate = parseFloat(formData.daily_rate) || 0;
+    // Hourly Rate = Daily Rate / Work Hours
+    const newHourlyRate = dailyRate > 0 ? (dailyRate / workHours).toFixed(2) : '';
+
+    setFormData(prev => ({
+      ...prev,
+      work_hours_per_day: value,
+      hourly_rate: newHourlyRate,
+    }));
+  }, [setFormData, formData.daily_rate]);
 
   return (
     <form onSubmit={onSubmit} className="space-y-4">
@@ -163,7 +192,8 @@ const EmployeeForm = memo(function EmployeeForm({
         <div className="p-3 bg-red-50 text-red-700 rounded text-sm">{error}</div>
       )}
 
-      <div className="grid grid-cols-2 gap-4">
+      {/* Row 1: Employee No, Biometric ID, First Name, Middle Name */}
+      <div className="grid grid-cols-4 gap-4">
         <div>
           <label className="form-label">Employee No *</label>
           <input
@@ -183,9 +213,6 @@ const EmployeeForm = memo(function EmployeeForm({
             className="form-input"
           />
         </div>
-      </div>
-
-      <div className="grid grid-cols-3 gap-4">
         <div>
           <label className="form-label">First Name *</label>
           <input
@@ -205,6 +232,10 @@ const EmployeeForm = memo(function EmployeeForm({
             className="form-input"
           />
         </div>
+      </div>
+
+      {/* Row 2: Last Name, Email, Phone, Department */}
+      <div className="grid grid-cols-4 gap-4">
         <div>
           <label className="form-label">Last Name *</label>
           <input
@@ -215,9 +246,6 @@ const EmployeeForm = memo(function EmployeeForm({
             required
           />
         </div>
-      </div>
-
-      <div className="grid grid-cols-2 gap-4">
         <div>
           <label className="form-label">Email</label>
           <input
@@ -236,9 +264,6 @@ const EmployeeForm = memo(function EmployeeForm({
             className="form-input"
           />
         </div>
-      </div>
-
-      <div className="grid grid-cols-2 gap-4">
         <div>
           <label className="form-label">Department</label>
           <CreatableSelect
@@ -246,9 +271,13 @@ const EmployeeForm = memo(function EmployeeForm({
             value={formData.department_id}
             onChange={(value) => handleFieldChange('department_id', value)}
             onCreateNew={onCreateDepartment}
-            placeholder="Select or type to create..."
+            placeholder="Select..."
           />
         </div>
+      </div>
+
+      {/* Row 3: Position, Employment Type, Hire Date, End Date */}
+      <div className="grid grid-cols-4 gap-4">
         <div>
           <label className="form-label">Position</label>
           <input
@@ -258,9 +287,6 @@ const EmployeeForm = memo(function EmployeeForm({
             className="form-input"
           />
         </div>
-      </div>
-
-      <div className="grid grid-cols-2 gap-4">
         <div>
           <label className="form-label">Employment Type</label>
           <select
@@ -283,17 +309,21 @@ const EmployeeForm = memo(function EmployeeForm({
             className="form-input"
           />
         </div>
+        <div>
+          <label className="form-label">End Date</label>
+          <input
+            type="date"
+            value={formData.end_date}
+            onChange={(e) => handleFieldChange('end_date', e.target.value)}
+            className="form-input"
+          />
+        </div>
       </div>
 
-      {/* Salary Rates - Auto-computed */}
+      {/* Salary Rates */}
       <div className="pt-4 border-t">
-        <div className="flex items-center justify-between mb-3">
-          <h4 className="font-semibold text-gray-700">Salary Rates</h4>
-          <span className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded">
-            Auto-computes: {WORKING_DAYS_PER_MONTH} days/month, {HOURS_PER_DAY} hrs/day
-          </span>
-        </div>
-        <div className="grid grid-cols-3 gap-4">
+        <h4 className="font-semibold text-gray-700 mb-3">Salary Rates</h4>
+        <div className="grid grid-cols-4 gap-4">
           <div>
             <label className="form-label">Basic Salary (Monthly)</label>
             <input
@@ -302,9 +332,8 @@ const EmployeeForm = memo(function EmployeeForm({
               value={formData.basic_salary}
               onChange={(e) => handleBasicSalaryChange(e.target.value)}
               className="form-input"
-              placeholder="e.g. 40000"
+              placeholder="0.00"
             />
-            <p className="text-xs text-gray-400 mt-1">Enter to auto-compute rates</p>
           </div>
           <div>
             <label className="form-label">Daily Rate</label>
@@ -314,9 +343,8 @@ const EmployeeForm = memo(function EmployeeForm({
               value={formData.daily_rate}
               onChange={(e) => handleDailyRateChange(e.target.value)}
               className="form-input"
-              placeholder="e.g. 1818.18"
+              placeholder="0.00"
             />
-            <p className="text-xs text-gray-400 mt-1">= Monthly / {WORKING_DAYS_PER_MONTH} days</p>
           </div>
           <div>
             <label className="form-label">Hourly Rate</label>
@@ -326,14 +354,26 @@ const EmployeeForm = memo(function EmployeeForm({
               value={formData.hourly_rate}
               onChange={(e) => handleHourlyRateChange(e.target.value)}
               className="form-input"
-              placeholder="e.g. 227.27"
+              placeholder="0.00"
             />
-            <p className="text-xs text-gray-400 mt-1">= Daily / {HOURS_PER_DAY} hours</p>
+          </div>
+          <div>
+            <label className="form-label">Work Hours/Day</label>
+            <select
+              value={formData.work_hours_per_day}
+              onChange={(e) => handleWorkHoursChange(e.target.value)}
+              className="form-input"
+            >
+              <option value="4">4 hours</option>
+              <option value="6">6 hours</option>
+              <option value="8">8 hours</option>
+            </select>
           </div>
         </div>
       </div>
 
-      <div className="grid grid-cols-3 gap-4">
+      {/* Incentives */}
+      <div className="grid grid-cols-4 gap-4">
         <div>
           <label className="form-label">Allowance (Monthly)</label>
           <input
@@ -346,7 +386,7 @@ const EmployeeForm = memo(function EmployeeForm({
           />
         </div>
         <div>
-          <label className="form-label">Productivity Incentive (Monthly)</label>
+          <label className="form-label">Productivity Incentive</label>
           <input
             type="number"
             step="0.01"
@@ -357,7 +397,7 @@ const EmployeeForm = memo(function EmployeeForm({
           />
         </div>
         <div>
-          <label className="form-label">Language Incentive (Monthly)</label>
+          <label className="form-label">Language Incentive</label>
           <input
             type="number"
             step="0.01"
@@ -367,6 +407,7 @@ const EmployeeForm = memo(function EmployeeForm({
             placeholder="0.00"
           />
         </div>
+        <div></div>
       </div>
 
       {/* Government Contributions */}
@@ -422,15 +463,10 @@ const EmployeeForm = memo(function EmployeeForm({
 
       {/* Schedule Settings */}
       <div className="pt-4 border-t">
-        <div className="flex items-center justify-between mb-3">
-          <h4 className="font-semibold text-gray-700">Schedule Settings</h4>
-          <span className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded">
-            For part-time / contractual employees
-          </span>
-        </div>
+        <h4 className="font-semibold text-gray-700 mb-3">Schedule Settings</h4>
         <div className="grid grid-cols-4 gap-4">
           <div>
-            <label className="form-label">Call Time (Start)</label>
+            <label className="form-label">Call Time</label>
             <input
               type="time"
               value={formData.call_time}
@@ -439,27 +475,13 @@ const EmployeeForm = memo(function EmployeeForm({
             />
           </div>
           <div>
-            <label className="form-label">Time Out (End)</label>
+            <label className="form-label">Time Out</label>
             <input
               type="time"
               value={formData.time_out}
               onChange={(e) => handleFieldChange('time_out', e.target.value)}
               className="form-input"
             />
-          </div>
-          <div>
-            <label className="form-label">Work Hours/Day</label>
-            <input
-              type="number"
-              step="0.5"
-              min="1"
-              max="24"
-              value={formData.work_hours_per_day}
-              onChange={(e) => handleFieldChange('work_hours_per_day', e.target.value)}
-              className="form-input"
-              placeholder="8"
-            />
-            <p className="text-xs text-gray-400 mt-1">Part-time: 4, Full-time: 8</p>
           </div>
           <div>
             <label className="form-label">Buffer (mins)</label>
@@ -472,38 +494,43 @@ const EmployeeForm = memo(function EmployeeForm({
               className="form-input"
               placeholder="10"
             />
-            <p className="text-xs text-gray-400 mt-1">Grace period for late</p>
+          </div>
+          <div>
+            <label className="form-label">Flexible Schedule</label>
+            <div className="flex items-center h-10">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={formData.is_flexible}
+                  onChange={(e) => setFormData(prev => ({ ...prev, is_flexible: e.target.checked }))}
+                  className="w-4 h-4 text-primary-600 border-gray-300 rounded focus:ring-primary-500"
+                />
+                <span className="text-sm text-gray-700">Yes</span>
+              </label>
+            </div>
           </div>
         </div>
-        <div className="mt-3">
-          <label className="flex items-center gap-2 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={formData.is_flexible}
-              onChange={(e) => setFormData(prev => ({ ...prev, is_flexible: e.target.checked }))}
-              className="w-4 h-4 text-primary-600 border-gray-300 rounded focus:ring-primary-500"
-            />
-            <span className="text-sm text-gray-700">Flexible Schedule</span>
-          </label>
-          <p className="text-xs text-gray-400 mt-1">If flexible, use Adjusted Call Time instead of Call Time</p>
-        </div>
         {formData.is_flexible && (
-          <div className="mt-3">
-            <label className="form-label">Adjusted Call Time</label>
-            <input
-              type="time"
-              value={formData.adjusted_call_time}
-              onChange={(e) => setFormData(prev => ({ ...prev, adjusted_call_time: e.target.value }))}
-              className="form-input w-32"
-            />
-            <p className="text-xs text-gray-400 mt-1">Actual expected arrival for flexible employees</p>
+          <div className="grid grid-cols-4 gap-4 mt-4">
+            <div>
+              <label className="form-label">Adjusted Call Time</label>
+              <input
+                type="time"
+                value={formData.adjusted_call_time}
+                onChange={(e) => setFormData(prev => ({ ...prev, adjusted_call_time: e.target.value }))}
+                className="form-input"
+              />
+            </div>
+            <div></div>
+            <div></div>
+            <div></div>
           </div>
         )}
       </div>
 
       {/* Working Days */}
       <div className="border-t pt-4">
-        <h3 className="font-medium text-gray-700 mb-3">Working Days</h3>
+        <h4 className="font-semibold text-gray-700 mb-3">Working Days</h4>
         <div className="grid grid-cols-7 gap-2">
           {[
             { key: 'work_monday', label: 'Mon' },
@@ -514,7 +541,7 @@ const EmployeeForm = memo(function EmployeeForm({
             { key: 'work_saturday', label: 'Sat' },
             { key: 'work_sunday', label: 'Sun' },
           ].map(day => (
-            <label key={day.key} className="flex flex-col items-center gap-1 cursor-pointer">
+            <label key={day.key} className="flex flex-col items-center gap-1 cursor-pointer p-2 border rounded hover:bg-gray-50">
               <input
                 type="checkbox"
                 checked={formData[day.key as keyof EmployeeFormData] as boolean}
@@ -525,9 +552,6 @@ const EmployeeForm = memo(function EmployeeForm({
             </label>
           ))}
         </div>
-        <p className="text-xs text-gray-400 mt-2">
-          Select the days this employee works. Absences will only count on working days.
-        </p>
       </div>
 
       <div className="flex gap-2 justify-end pt-4">
@@ -606,7 +630,13 @@ export function EmployeesPage() {
         sort_order: sortOrder,
       };
       if (search) params.search = search;
-      if (statusFilter !== 'all') params.status = statusFilter;
+      if (statusFilter !== 'all') {
+        params.status = statusFilter;
+        // inactive employees have is_active=false
+        if (statusFilter === 'inactive') {
+          params.is_active = false;
+        }
+      }
 
       const response = await employeesApi.list(params);
       setEmployees(response.items);
@@ -678,6 +708,7 @@ export function EmployeesPage() {
       position: emp.position || '',
       employment_type: emp.employment_type || 'regular',
       hire_date: emp.hire_date || '',
+      end_date: emp.end_date || '',
       basic_salary: emp.basic_salary || '',
       daily_rate: emp.daily_rate || '',
       hourly_rate: emp.hourly_rate || '',
@@ -803,6 +834,58 @@ export function EmployeesPage() {
     }
   };
 
+  // Bulk action: Reactivate selected (for terminated/inactive)
+  const handleBulkReactivate = async () => {
+    if (selectedIds.size === 0) return;
+    if (!confirm(`Reactivate ${selectedIds.size} selected employee(s)?\n\nThis will set them back to active status.`)) return;
+
+    setBulkActionLoading(true);
+    try {
+      const ids = Array.from(selectedIds).join(',');
+      const response = await api.post(`/employees/bulk-action?action=reactivate&employee_ids=${ids}`);
+      alert(response.data.message);
+      clearSelection();
+      loadEmployees();
+    } catch (e: any) {
+      console.error('Failed to reactivate employees:', e);
+      alert(e.response?.data?.detail || 'Failed to reactivate employees');
+    } finally {
+      setBulkActionLoading(false);
+    }
+  };
+
+  // Bulk action: Move to inactive
+  const handleBulkMoveToInactive = async () => {
+    if (selectedIds.size === 0) return;
+    if (!confirm(`Move ${selectedIds.size} selected employee(s) to inactive?\n\nThis will permanently deactivate them.`)) return;
+
+    setBulkActionLoading(true);
+    try {
+      const ids = Array.from(selectedIds).join(',');
+      const response = await api.post(`/employees/bulk-action?action=move_to_inactive&employee_ids=${ids}`);
+      alert(response.data.message);
+      clearSelection();
+      loadEmployees();
+    } catch (e: any) {
+      console.error('Failed to move employees to inactive:', e);
+      alert(e.response?.data?.detail || 'Failed to move employees to inactive');
+    } finally {
+      setBulkActionLoading(false);
+    }
+  };
+
+  // Set individual employee status
+  const handleSetStatus = async (employeeId: number, newStatus: string) => {
+    if (!newStatus) return;
+    try {
+      await api.post(`/employees/${employeeId}/set-status?new_status=${newStatus}`);
+      loadEmployees();
+    } catch (e: any) {
+      console.error('Failed to set status:', e);
+      alert(e.response?.data?.detail || 'Failed to set status');
+    }
+  };
+
   const isAllSelected = employees.length > 0 && selectedIds.size === employees.length;
   const isSomeSelected = selectedIds.size > 0 && selectedIds.size < employees.length;
 
@@ -837,6 +920,7 @@ export function EmployeesPage() {
         position: formData.position || undefined,
         employment_type: formData.employment_type as any,
         hire_date: formData.hire_date || undefined,
+        end_date: formData.end_date || undefined,
         basic_salary: formData.basic_salary || undefined,
         daily_rate: formData.daily_rate || undefined,
         hourly_rate: formData.hourly_rate || undefined,
@@ -892,6 +976,7 @@ export function EmployeesPage() {
         position: formData.position || undefined,
         employment_type: formData.employment_type as any,
         hire_date: formData.hire_date || undefined,
+        end_date: formData.end_date || undefined,
         basic_salary: formData.basic_salary || undefined,
         daily_rate: formData.daily_rate || undefined,
         hourly_rate: formData.hourly_rate || undefined,
@@ -937,11 +1022,14 @@ export function EmployeesPage() {
   };
 
   const getStatusBadge = (status: EmployeeStatus | undefined, isActive: boolean) => {
-    if (!isActive) {
+    if (status === 'inactive' || !isActive) {
       return <span className="px-2 py-1 text-xs font-medium rounded bg-gray-100 text-gray-800">Inactive</span>;
     }
     if (status === 'pending') {
       return <span className="px-2 py-1 text-xs font-medium rounded bg-yellow-100 text-yellow-800">Pending</span>;
+    }
+    if (status === 'terminated') {
+      return <span className="px-2 py-1 text-xs font-medium rounded bg-red-100 text-red-800">Terminated</span>;
     }
     return <span className="px-2 py-1 text-xs font-medium rounded bg-green-100 text-green-800">Active</span>;
   };
@@ -978,6 +1066,7 @@ export function EmployeesPage() {
           { key: 'all', label: 'All' },
           { key: 'pending', label: 'Pending' },
           { key: 'active', label: 'Active' },
+          { key: 'terminated', label: 'Terminated' },
           { key: 'inactive', label: 'Inactive' },
         ].map((tab) => (
           <button
@@ -1069,13 +1158,33 @@ export function EmployeesPage() {
                 {bulkActionLoading ? 'Processing...' : 'Verify Selected'}
               </button>
             )}
-            <button
-              onClick={handleBulkDelete}
-              disabled={bulkActionLoading}
-              className="px-3 py-1.5 bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50 text-sm font-medium"
-            >
-              {bulkActionLoading ? 'Processing...' : 'Delete Selected'}
-            </button>
+            {(statusFilter === 'terminated' || statusFilter === 'inactive') && (
+              <button
+                onClick={handleBulkReactivate}
+                disabled={bulkActionLoading}
+                className="px-3 py-1.5 bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50 text-sm font-medium"
+              >
+                {bulkActionLoading ? 'Processing...' : 'Reactivate Selected'}
+              </button>
+            )}
+            {statusFilter === 'terminated' && (
+              <button
+                onClick={handleBulkMoveToInactive}
+                disabled={bulkActionLoading}
+                className="px-3 py-1.5 bg-gray-600 text-white rounded hover:bg-gray-700 disabled:opacity-50 text-sm font-medium"
+              >
+                {bulkActionLoading ? 'Processing...' : 'Move to Inactive'}
+              </button>
+            )}
+            {statusFilter !== 'inactive' && (
+              <button
+                onClick={handleBulkDelete}
+                disabled={bulkActionLoading}
+                className="px-3 py-1.5 bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50 text-sm font-medium"
+              >
+                {bulkActionLoading ? 'Processing...' : 'Delete Selected'}
+              </button>
+            )}
           </div>
         </div>
       )}
@@ -1090,6 +1199,10 @@ export function EmployeesPage() {
           <div className="text-center py-12 text-gray-500">
             {statusFilter === 'pending'
               ? 'No pending employees. Import attendance data to auto-create employees.'
+              : statusFilter === 'terminated'
+              ? 'No terminated employees.'
+              : statusFilter === 'inactive'
+              ? 'No inactive employees.'
               : 'No employees found. Add your first employee or import attendance data.'}
           </div>
         ) : (
@@ -1180,7 +1293,18 @@ export function EmployeesPage() {
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
                 {employees.map((emp) => (
-                  <tr key={emp.id} className={`hover:bg-gray-50 ${emp.status === 'pending' ? 'bg-yellow-50' : ''} ${selectedIds.has(emp.id) ? 'bg-primary-50' : ''}`}>
+                  <tr
+                    key={emp.id}
+                    style={{
+                      backgroundColor:
+                        emp.status === 'active' ? '#bbf7d0' :
+                        emp.status === 'pending' ? '#fef08a' :
+                        emp.status === 'terminated' ? '#fecaca' :
+                        emp.status === 'inactive' ? '#d1d5db' : '#ffffff'
+                    }}
+                    className={`hover:brightness-95 ${
+                      selectedIds.has(emp.id) ? 'ring-2 ring-primary-500 ring-inset' : ''
+                    }`}>
                     <td className="px-3 py-4">
                       <input
                         type="checkbox"
@@ -1200,7 +1324,7 @@ export function EmployeesPage() {
                       {getStatusBadge(emp.status, emp.is_active)}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="flex gap-2">
+                      <div className="flex gap-2 items-center">
                         {emp.status === 'pending' && (
                           <button
                             onClick={() => handleVerifyEmployee(emp)}
@@ -1208,6 +1332,17 @@ export function EmployeesPage() {
                           >
                             Verify
                           </button>
+                        )}
+                        {emp.status === 'terminated' && (
+                          <>
+                            <button
+                              onClick={() => handleSetStatus(emp.id, 'active')}
+                              className="text-green-600 hover:text-green-800 text-sm font-medium"
+                            >
+                              Reactivate
+                            </button>
+                            <span className="text-gray-300">|</span>
+                          </>
                         )}
                         <button
                           onClick={() => handleViewEmployee(emp)}
@@ -1221,12 +1356,26 @@ export function EmployeesPage() {
                         >
                           Edit
                         </button>
-                        <button
-                          onClick={() => handleDeleteEmployee(emp)}
-                          className="text-red-600 hover:text-red-800 text-sm font-medium"
+                        {emp.status !== 'inactive' && (
+                          <button
+                            onClick={() => handleDeleteEmployee(emp)}
+                            className="text-red-600 hover:text-red-800 text-sm font-medium"
+                          >
+                            Delete
+                          </button>
+                        )}
+                        {/* Status dropdown for manual changes */}
+                        <select
+                          className="text-xs border border-gray-300 rounded px-1 py-0.5 text-gray-600"
+                          value=""
+                          onChange={(e) => handleSetStatus(emp.id, e.target.value)}
                         >
-                          Delete
-                        </button>
+                          <option value="">Set Status...</option>
+                          <option value="active">Active</option>
+                          <option value="pending">Pending</option>
+                          <option value="terminated">Terminated</option>
+                          <option value="inactive">Inactive</option>
+                        </select>
                       </div>
                     </td>
                   </tr>

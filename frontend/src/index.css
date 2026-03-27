@@ -251,7 +251,7 @@ body {
 /* Maximalist Tables */
 table {
   @apply w-full;
-  background: var(--bg-card);
+  background: var(--bg-card) !important;
   border-radius: 16px;
   overflow: hidden;
   border: 2px solid var(--border);
@@ -259,20 +259,26 @@ table {
 }
 
 table thead {
-  background: linear-gradient(135deg, #faf9f6 0%, #f0efe9 100%);
+  background: linear-gradient(135deg, #faf9f6 0%, #f0efe9 100%) !important;
   border-bottom: 2px solid var(--border);
 }
 
 table thead th {
   @apply text-xs font-bold uppercase tracking-wider;
-  color: var(--text-primary);
+  color: var(--text-primary) !important;
+  background: transparent !important;
   padding: 16px 20px;
   letter-spacing: 0.1em;
+}
+
+table thead th:hover {
+  background: rgba(79, 70, 229, 0.05) !important;
 }
 
 table tbody tr {
   @apply transition-all duration-200;
   border-bottom: 1px solid var(--border);
+  /* Removed !important to allow status-based row colors via inline styles */
 }
 
 table tbody tr:last-child {
@@ -280,23 +286,25 @@ table tbody tr:last-child {
 }
 
 table tbody tr:hover {
-  background: linear-gradient(90deg, var(--bg-hover) 0%, var(--bg-accent) 100%);
+  /* Use brightness filter to darken row on hover while preserving status color */
+  filter: brightness(0.95);
   transform: scale(1.005);
 }
 
 table tbody td {
   padding: 16px 20px;
-  color: var(--text-primary);
+  color: var(--text-primary) !important;
   font-weight: 500;
 }
 
-table tbody tr:nth-child(even) {
-  background: var(--bg-accent);
+/* Alternating row colors disabled for status-based coloring */
+/* table tbody tr:nth-child(even) {
+  background: var(--bg-accent) !important;
 }
 
 table tbody tr:nth-child(even):hover {
-  background: linear-gradient(90deg, var(--bg-hover) 0%, var(--bg-accent) 100%);
-}
+  background: linear-gradient(90deg, var(--bg-hover) 0%, var(--bg-accent) 100%) !important;
+} */
 
 /* Scrollbar - Elegant */
 ::-webkit-scrollbar {
