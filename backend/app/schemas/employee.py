@@ -47,7 +47,7 @@ class EmployeeBase(BaseModel):
     last_name: str = Field(..., min_length=1, max_length=100)
     middle_name: Optional[str] = Field(None, max_length=100)
     email: Optional[EmailStr] = None
-    phone: Optional[str] = Field(None, max_length=20)
+    phone: Optional[str] = Field(None, max_length=100)
 
 
 class EmployeeCreate(EmployeeBase):
@@ -94,7 +94,7 @@ class EmployeeUpdate(BaseModel):
     last_name: Optional[str] = Field(None, min_length=1, max_length=100)
     middle_name: Optional[str] = Field(None, max_length=100)
     email: Optional[EmailStr] = None
-    phone: Optional[str] = Field(None, max_length=20)
+    phone: Optional[str] = Field(None, max_length=100)
     department_id: Optional[int] = None
     position: Optional[str] = None
     employment_type: Optional[str] = None

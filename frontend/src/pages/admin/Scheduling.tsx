@@ -2,6 +2,85 @@ import { useState, useEffect } from 'react';
 import { employeesApi } from '../../api/client';
 import type { Employee } from '../../types';
 
+// Helper function to convert 24-hour time to 12-hour format
+const formatTime12Hour = (time24: string): string => {
+  if (!time24) return '';
+  const [hours, minutes] = time24.split(':');
+  const hour = parseInt(hours, 10);
+  const ampm = hour >= 12 ? 'PM' : 'AM';
+  const hour12 = hour % 12 || 12;
+  return `${hour12}:${minutes} ${ampm}`;
+};
+
+// Helper function to convert 12-hour time to 24-hour format
+const convertTo24Hour = (hour: string, minute: string, ampm: string): string => {
+  let h = parseInt(hour, 10);
+  if (ampm === 'PM' && h !== 12) h += 12;
+  if (ampm === 'AM' && h === 12) h = 0;
+  return `${h.toString().padStart(2, '0')}:${minute}`;
+};
+
+// Helper function to parse 24-hour time into components
+const parseTime = (time24: string): { hour: string; minute: string; ampm: string } => {
+  if (!time24) return { hour: '08', minute: '00', ampm: 'AM' };
+  const [hours, minutes] = time24.split(':');
+  const hour = parseInt(hours, 10);
+  const ampm = hour >= 12 ? 'PM' : 'AM';
+  const hour12 = hour % 12 || 12;
+  return { hour: hour12.toString().padStart(2, '0'), minute: minutes || '00', ampm };
+};
+
+// Custom 12-hour time picker component
+const TimePicker12Hour = ({
+  value,
+  onChange,
+  className = ''
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  className?: string;
+}) => {
+  const { hour, minute, ampm } = parseTime(value);
+
+  const handleChange = (newHour: string, newMinute: string, newAmpm: string) => {
+    onChange(convertTo24Hour(newHour, newMinute, newAmpm));
+  };
+
+  return (
+    <div className={`flex items-center gap-1 ${className}`}>
+      <select
+        value={hour}
+        onChange={(e) => handleChange(e.target.value, minute, ampm)}
+        className="form-input w-14 text-center px-1 text-sm"
+      >
+        {Array.from({ length: 12 }, (_, i) => {
+          const h = (i + 1).toString().padStart(2, '0');
+          return <option key={h} value={h}>{h}</option>;
+        })}
+      </select>
+      <span className="text-gray-500">:</span>
+      <select
+        value={minute}
+        onChange={(e) => handleChange(hour, e.target.value, ampm)}
+        className="form-input w-14 text-center px-1 text-sm"
+      >
+        {Array.from({ length: 60 }, (_, i) => {
+          const m = i.toString().padStart(2, '0');
+          return <option key={m} value={m}>{m}</option>;
+        })}
+      </select>
+      <select
+        value={ampm}
+        onChange={(e) => handleChange(hour, minute, e.target.value)}
+        className="form-input w-14 text-center px-1 text-sm"
+      >
+        <option value="AM">AM</option>
+        <option value="PM">PM</option>
+      </select>
+    </div>
+  );
+};
+
 const DAYS = [
   { key: 'work_monday', short: 'Mon', full: 'Monday' },
   { key: 'work_tuesday', short: 'Tue', full: 'Tuesday' },
@@ -260,19 +339,15 @@ export default function SchedulingPage() {
                     {editingEmployee?.id === emp.id ? (
                       <>
                         <td className="px-4 py-3 text-center">
-                          <input
-                            type="time"
+                          <TimePicker12Hour
                             value={editingEmployee.call_time || '08:00'}
-                            onChange={(e) => setEditingEmployee({ ...editingEmployee, call_time: e.target.value })}
-                            className="form-input w-24 text-sm"
+                            onChange={(value) => setEditingEmployee({ ...editingEmployee, call_time: value })}
                           />
                         </td>
                         <td className="px-4 py-3 text-center">
-                          <input
-                            type="time"
+                          <TimePicker12Hour
                             value={editingEmployee.time_out || '17:00'}
-                            onChange={(e) => setEditingEmployee({ ...editingEmployee, time_out: e.target.value })}
-                            className="form-input w-24 text-sm"
+                            onChange={(value) => setEditingEmployee({ ...editingEmployee, time_out: value })}
                           />
                         </td>
                         <td className="px-4 py-3 text-center">
@@ -330,8 +405,8 @@ export default function SchedulingPage() {
                       </>
                     ) : (
                       <>
-                        <td className="px-4 py-3 text-center text-sm font-medium" style={{ color: 'var(--text-primary)' }}>{emp.call_time || '08:00'}</td>
-                        <td className="px-4 py-3 text-center text-sm font-medium" style={{ color: 'var(--text-primary)' }}>{emp.time_out || '17:00'}</td>
+                        <td className="px-4 py-3 text-center text-sm font-medium" style={{ color: 'var(--text-primary)' }}>{formatTime12Hour(emp.call_time || '08:00')}</td>
+                        <td className="px-4 py-3 text-center text-sm font-medium" style={{ color: 'var(--text-primary)' }}>{formatTime12Hour(emp.time_out || '17:00')}</td>
                         <td className="px-4 py-3 text-center text-sm" style={{ color: 'var(--text-secondary)' }}>{emp.buffer_minutes ?? 10}m</td>
                         <td className="px-4 py-3 text-center">
                           {emp.is_flexible ? (
@@ -392,20 +467,16 @@ export default function SchedulingPage() {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="form-label">Call Time</label>
-                  <input
-                    type="time"
+                  <TimePicker12Hour
                     value={bulkSchedule.call_time}
-                    onChange={(e) => setBulkSchedule({ ...bulkSchedule, call_time: e.target.value })}
-                    className="form-input"
+                    onChange={(value) => setBulkSchedule({ ...bulkSchedule, call_time: value })}
                   />
                 </div>
                 <div>
                   <label className="form-label">Time Out</label>
-                  <input
-                    type="time"
+                  <TimePicker12Hour
                     value={bulkSchedule.time_out}
-                    onChange={(e) => setBulkSchedule({ ...bulkSchedule, time_out: e.target.value })}
-                    className="form-input"
+                    onChange={(value) => setBulkSchedule({ ...bulkSchedule, time_out: value })}
                   />
                 </div>
               </div>

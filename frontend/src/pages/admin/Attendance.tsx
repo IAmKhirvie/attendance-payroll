@@ -99,6 +99,18 @@ export function AttendancePage() {
   const [syncingUsers, setSyncingUsers] = useState(false);
   const [syncResult, setSyncResult] = useState<{ message: string; created: number; temp_password: string } | null>(null);
 
+  // Payroll generation state
+  const [generatingPayroll, setGeneratingPayroll] = useState(false);
+  const [payrollGenerated, setPayrollGenerated] = useState<{
+    success: boolean;
+    payroll_run_id: number;
+    employee_count: number;
+    total_net: number;
+    period_start: string;
+    period_end: string;
+    cutoff: number;
+  } | null>(null);
+
   const loadEmployeeList = async () => {
     try {
       const data = await employeesApi.getWithoutUsers();
@@ -125,6 +137,143 @@ export function AttendancePage() {
       alert(error.response?.data?.detail || 'Failed to sync users');
     } finally {
       setSyncingUsers(false);
+    }
+  };
+
+  // Generate payroll from imported attendance
+  const handleGeneratePayroll = async () => {
+    // Try to get period from payroll info, or calculate from records
+    let periodStart = importResult?.payroll?.period_start;
+    let periodEnd = importResult?.payroll?.period_end;
+    let cutoff = importResult?.payroll?.cutoff || 1;
+
+    // If no payroll info, calculate from records
+    if (!periodStart || !periodEnd) {
+      if (!importResult?.records || importResult.records.length === 0) {
+        alert('No attendance records found. Please import attendance first.');
+        return;
+      }
+
+      // Get min and max dates from records
+      const dates = importResult.records
+        .map(r => r.date)
+        .filter(d => d)
+        .sort();
+
+      if (dates.length === 0) {
+        alert('No valid dates in attendance records.');
+        return;
+      }
+
+      periodStart = dates[0];
+      periodEnd = dates[dates.length - 1];
+
+      // Determine cutoff based on end date
+      const endDay = parseInt(periodEnd.split('-')[2]);
+      cutoff = endDay <= 15 ? 1 : 2;
+    }
+
+    if (!confirm(`Generate payroll for ${cutoff === 1 ? '1st' : '2nd'} cutoff?\n\nPeriod: ${periodStart} to ${periodEnd}\n\nThis will create payslips based on imported attendance and employee salary info.`)) {
+      return;
+    }
+
+    setGeneratingPayroll(true);
+    setPayrollGenerated(null);
+
+    try {
+      // Import payrollApi
+      const { payrollApi } = await import('../../api/client');
+
+      // Create payroll run
+      const run = await payrollApi.createRun(periodStart, periodEnd, cutoff);
+
+      // Process the payroll run
+      await payrollApi.processRun(run.id);
+
+      // Get updated run info
+      const runs = await payrollApi.listRuns({ page: 1 });
+      const updatedRun = runs.items.find(r => r.id === run.id);
+
+      setPayrollGenerated({
+        success: true,
+        payroll_run_id: run.id,
+        employee_count: updatedRun?.employee_count || 0,
+        total_net: updatedRun?.total_net || 0,
+        period_start: periodStart,
+        period_end: periodEnd,
+        cutoff: cutoff
+      });
+
+      alert(`Payroll generated successfully!\n\n${updatedRun?.employee_count || 0} employees processed.\nTotal Net: ₱${(updatedRun?.total_net || 0).toLocaleString()}`);
+    } catch (error: any) {
+      console.error('Failed to generate payroll:', error);
+      alert(error.response?.data?.detail || 'Failed to generate payroll. Please try again or create manually in Payroll section.');
+    } finally {
+      setGeneratingPayroll(false);
+    }
+  };
+
+  // Generate payroll from history import
+  const handleGeneratePayrollFromHistory = async () => {
+    if (!selectedImport?.records || selectedImport.records.length === 0) {
+      alert('No attendance records found in this import.');
+      return;
+    }
+
+    // Get min and max dates from records
+    const dates = selectedImport.records
+      .map(r => r.date)
+      .filter(d => d)
+      .sort();
+
+    if (dates.length === 0) {
+      alert('No valid dates in attendance records.');
+      return;
+    }
+
+    const periodStart = dates[0];
+    const periodEnd = dates[dates.length - 1];
+
+    // Determine cutoff based on end date
+    const endDay = parseInt(periodEnd.split('-')[2]);
+    const cutoff = endDay <= 15 ? 1 : 2;
+
+    if (!confirm(`Generate payroll for ${cutoff === 1 ? '1st' : '2nd'} cutoff?\n\nPeriod: ${periodStart} to ${periodEnd}\n\nThis will create payslips based on attendance and employee salary info.`)) {
+      return;
+    }
+
+    setGeneratingPayroll(true);
+    setPayrollGenerated(null);
+
+    try {
+      const { payrollApi } = await import('../../api/client');
+
+      // Create payroll run
+      const run = await payrollApi.createRun(periodStart, periodEnd, cutoff);
+
+      // Process the payroll run
+      await payrollApi.processRun(run.id);
+
+      // Get updated run info
+      const runs = await payrollApi.listRuns({ page: 1 });
+      const updatedRun = runs.items.find(r => r.id === run.id);
+
+      setPayrollGenerated({
+        success: true,
+        payroll_run_id: run.id,
+        employee_count: updatedRun?.employee_count || 0,
+        total_net: updatedRun?.total_net || 0,
+        period_start: periodStart,
+        period_end: periodEnd,
+        cutoff: cutoff
+      });
+
+      alert(`Payroll generated successfully!\n\n${updatedRun?.employee_count || 0} employees processed.\nTotal Net: ₱${(updatedRun?.total_net || 0).toLocaleString()}`);
+    } catch (error: any) {
+      console.error('Failed to generate payroll:', error);
+      alert(error.response?.data?.detail || 'Failed to generate payroll. Please try again or create manually in Payroll section.');
+    } finally {
+      setGeneratingPayroll(false);
     }
   };
 
@@ -568,12 +717,61 @@ export function AttendancePage() {
                 </div>
               )}
 
-              {importResult.payroll?.error && (
-                <div className="card bg-yellow-50 border-yellow-200">
-                  <p className="text-yellow-800">
-                    <strong>Note:</strong> Payroll could not be auto-generated: {importResult.payroll.error}
-                  </p>
-                  <p className="text-sm text-yellow-700 mt-1">You can create payroll manually in the Payroll section.</p>
+              {/* Show Generate Payroll button when payroll wasn't auto-generated or had error */}
+              {(importResult.payroll?.error || (!importResult.payroll?.employee_count && importResult.payroll?.period_start)) && !payrollGenerated && (
+                <div className="card bg-gradient-to-r from-yellow-50 to-orange-50 border-yellow-200">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h3 className="font-semibold text-gray-900 flex items-center gap-2">
+                        <svg className="w-5 h-5 text-yellow-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                        </svg>
+                        Generate Payroll
+                      </h3>
+                      <p className="text-sm text-gray-600 mt-1">
+                        {importResult.payroll?.error || 'Payroll not generated yet.'} Click to create payroll for this period.
+                      </p>
+                      <p className="text-xs text-gray-500 mt-1">
+                        {importResult.payroll.cutoff === 1 ? '1st Cutoff' : '2nd Cutoff'} • {importResult.payroll.period_start} to {importResult.payroll.period_end}
+                      </p>
+                    </div>
+                    <button
+                      onClick={handleGeneratePayroll}
+                      disabled={generatingPayroll}
+                      className="bg-yellow-600 hover:bg-yellow-700 disabled:bg-yellow-400 text-white font-semibold px-6 py-3 rounded-lg shadow-md transition-colors"
+                    >
+                      {generatingPayroll ? 'Generating...' : 'Generate Payroll'}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Show success when payroll was manually generated */}
+              {payrollGenerated && (
+                <div className="card bg-gradient-to-r from-green-50 to-emerald-50 border-green-200">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h3 className="font-semibold text-gray-900 flex items-center gap-2">
+                        <svg className="w-5 h-5 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        Payroll Generated
+                      </h3>
+                      <p className="text-sm text-gray-600 mt-1">
+                        {payrollGenerated.cutoff === 1 ? '1st Cutoff' : '2nd Cutoff'} • {payrollGenerated.period_start} to {payrollGenerated.period_end}
+                      </p>
+                      <div className="flex gap-4 mt-2 text-sm">
+                        <span><strong>{payrollGenerated.employee_count}</strong> employees</span>
+                        <span>Total Net: <strong className="text-green-700">₱{payrollGenerated.total_net?.toLocaleString()}</strong></span>
+                      </div>
+                    </div>
+                    <a
+                      href="/admin/payroll"
+                      className="bg-green-600 hover:bg-green-700 text-white font-semibold px-6 py-3 rounded-lg shadow-md transition-colors"
+                    >
+                      Review Payroll →
+                    </a>
+                  </div>
                 </div>
               )}
 
@@ -645,6 +843,13 @@ export function AttendancePage() {
                     </button>
                     <button onClick={collapseAll} className="btn-secondary text-sm">
                       Collapse All
+                    </button>
+                    <button
+                      onClick={handleGeneratePayroll}
+                      disabled={generatingPayroll}
+                      className="bg-green-600 hover:bg-green-700 disabled:bg-green-400 text-white text-sm font-medium px-4 py-2 rounded-lg"
+                    >
+                      {generatingPayroll ? 'Generating...' : '💰 Generate Payroll'}
                     </button>
                     <button onClick={clearResult} className="text-sm text-red-600 hover:text-red-800 px-3">
                       Clear
@@ -821,6 +1026,13 @@ export function AttendancePage() {
                     </button>
                     <button onClick={historyCollapseAll} className="btn-secondary text-sm">
                       Collapse All
+                    </button>
+                    <button
+                      onClick={() => handleGeneratePayrollFromHistory()}
+                      disabled={generatingPayroll}
+                      className="bg-green-600 hover:bg-green-700 disabled:bg-green-400 text-white text-sm font-medium px-4 py-2 rounded-lg"
+                    >
+                      {generatingPayroll ? 'Generating...' : '💰 Generate Payroll'}
                     </button>
                   </div>
                 </div>

@@ -201,10 +201,11 @@ async def create_payroll_run(
     db: Session = Depends(get_db)
 ):
     """Create a new payroll run (Admin only)."""
-    # Check for overlapping period
+    # Check for overlapping period (exclude soft-deleted runs)
     existing = db.query(PayrollRun).filter(
         PayrollRun.period_start <= run_data.period_end,
-        PayrollRun.period_end >= run_data.period_start
+        PayrollRun.period_end >= run_data.period_start,
+        PayrollRun.is_deleted == False
     ).first()
     if existing:
         raise HTTPException(
@@ -753,7 +754,7 @@ async def recalculate_payroll_run(
         payslip.total_deductions = ded_total
 
         # Calculate net pay
-        payslip.net_pay = payslip.total_earnings - payslip.total_deductions
+        payslip.net_pay = selectedPayslip.earnings.basic_semi - payslip.total_deductions
 
         total_gross += payslip.total_earnings
         total_deductions += payslip.total_deductions
@@ -1100,7 +1101,7 @@ async def update_payslip_earnings(
     payslip.total_earnings = total
 
     # Recalculate net pay
-    payslip.net_pay = payslip.total_earnings - (payslip.total_deductions or Decimal('0'))
+    payslip.net_pay = selectedPayslip.earnings.basic_semi - (payslip.total_deductions or Decimal('0'))
 
     db.commit()
     return {"message": "Earnings updated", "total_earnings": float(total), "net_pay": float(payslip.net_pay)}
@@ -1148,7 +1149,7 @@ async def update_payslip_deductions(
     payslip.total_deductions = total
 
     # Recalculate net pay
-    payslip.net_pay = (payslip.total_earnings or Decimal('0')) - payslip.total_deductions
+    payslip.net_pay = (selectedPayslip.earnings.basic_semi or Decimal('0')) - payslip.total_deductions
 
     db.commit()
     return {"message": "Deductions updated", "total_deductions": float(total), "net_pay": float(payslip.net_pay)}
@@ -1255,7 +1256,7 @@ async def update_payslip_attendance(
                         except:
                             pass
                 payslip.total_deductions = total
-                payslip.net_pay = (payslip.total_earnings or Decimal('0')) - payslip.total_deductions
+                payslip.net_pay = (selectedPayslip.earnings.basic_semi or Decimal('0')) - payslip.total_deductions
 
     # Auto-save settings as employee's defaults for future payrolls
     # This is the "preset" feature - when you edit an employee's settings,
@@ -1313,6 +1314,41 @@ async def update_payslip_attendance(
         response["preset_message"] = f"Defaults saved for future payrolls: {', '.join(preset_fields)}"
 
     return response
+
+
+@router.patch("/payslips/{payslip_id}/additional")
+async def update_payslip_additional(
+    payslip_id: int,
+    additional: dict,
+    current_admin: User = Depends(get_current_admin),
+    db: Session = Depends(get_db)
+):
+    """
+    Update payslip additional amount and notes (Admin only).
+    Hidden fields for admin adjustments.
+    """
+    payslip = db.query(Payslip).filter(Payslip.id == payslip_id).first()
+    if not payslip:
+        raise HTTPException(status_code=404, detail="Payslip not found")
+
+    # Check if locked
+    run = db.query(PayrollRun).filter(PayrollRun.id == payslip.payroll_run_id).first()
+    if run and run.status == PayrollStatus.LOCKED:
+        raise HTTPException(status_code=400, detail="Cannot modify locked payroll")
+
+    # Update additional fields
+    if 'additional_amount' in additional:
+        payslip.additional_amount = Decimal(str(additional['additional_amount'] or 0))
+    if 'additional_notes' in additional:
+        payslip.additional_notes = additional['additional_notes']
+
+    db.commit()
+
+    return {
+        "message": "Additional updated",
+        "additional_amount": float(payslip.additional_amount or 0),
+        "additional_notes": payslip.additional_notes
+    }
 
 
 @router.delete("/payslips/{payslip_id}")
@@ -2420,34 +2456,20 @@ async def download_payroll_template(
 
 
 @router.post("/import")
-async def import_payroll_from_file(
+async def import_payslips(
     file: UploadFile = File(...),
-    period_start: Optional[date] = Form(None),
-    period_end: Optional[date] = Form(None),
-    cutoff: Optional[int] = Form(None),
-    auto_create_employees: bool = Form(True),
     current_admin: User = Depends(get_current_admin),
     db: Session = Depends(get_db)
 ):
     """
-    Import payroll data from Excel file and create payslips.
+    Import payslips from Excel file.
 
-    Supports two formats:
-    1. I CAN LANGUAGE CENTER payslip format - auto-detects period from file
-    2. Tabular format with column headers
-
-    If period_start/period_end not provided, auto-detects from file.
-    If auto_create_employees=True, creates employees that don't exist.
-
-    The system automatically:
-    - Reads all values (basic salary, allowances, SSS, PhilHealth, etc.)
-    - Creates payslips with the exact values from the file
-    - Updates employee rates if they're missing
-    - Creates new employees if not found (optional)
-
-    Admin just needs to review for accuracy - no manual computation needed!
+    Just upload the 'Payroll List' Excel file - that's it!
+    - Matches employees by full name
+    - Updates their Employee record (basic salary, allowance, deductions, etc.)
+    - Overwrites existing data when reimporting
     """
-    from app.services.payroll_import import import_payroll_from_file as do_import
+    from app.services.payroll_import import import_payslip_file
 
     # Validate file type
     if not file.filename:
@@ -2457,10 +2479,6 @@ async def import_payroll_from_file(
     if file_ext not in ['.xls', '.xlsx']:
         raise HTTPException(status_code=400, detail="File must be .xls or .xlsx")
 
-    # Validate dates if both provided
-    if period_start and period_end and period_start > period_end:
-        raise HTTPException(status_code=400, detail="Period start must be before period end")
-
     # Save uploaded file temporarily
     try:
         with tempfile.NamedTemporaryFile(delete=False, suffix=file_ext) as tmp:
@@ -2468,20 +2486,18 @@ async def import_payroll_from_file(
             tmp.write(content)
             tmp_path = tmp.name
 
-        # Process the file
-        result = do_import(
+        # Process the file - simple import, no period/cutoff needed
+        result = import_payslip_file(
             db=db,
             file_path=tmp_path,
-            period_start=period_start,
-            period_end=period_end,
-            cutoff=cutoff,
-            created_by=current_admin.id,
-            auto_create_employees=auto_create_employees
+            sheet_name='Payroll List '
         )
 
         return result
 
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Import failed: {str(e)}")
 
     finally:

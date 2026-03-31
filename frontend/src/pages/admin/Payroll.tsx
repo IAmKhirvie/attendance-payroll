@@ -3,6 +3,16 @@ import { payrollApi, payrollRunsApi } from '../../api/client';
 import type { PayrollRun } from '../../types';
 import dayjs from 'dayjs';
 
+// Helper function to convert 24-hour time to 12-hour format
+const formatTime12Hour = (time24: string): string => {
+  if (!time24) return '';
+  const [hours, minutes] = time24.split(':');
+  const hour = parseInt(hours, 10);
+  const ampm = hour >= 12 ? 'PM' : 'AM';
+  const hour12 = hour % 12 || 12;
+  return `${hour12}:${minutes} ${ampm}`;
+};
+
 interface PayrollSettings {
   id: number;
   default_basic_salary?: number;
@@ -90,9 +100,6 @@ export function PayrollPage() {
 
   // Payroll Import state
   const [importFile, setImportFile] = useState<File | null>(null);
-  const [importPeriodStart, setImportPeriodStart] = useState('');
-  const [importPeriodEnd, setImportPeriodEnd] = useState('');
-  const [importCutoff, setImportCutoff] = useState(1);
   const [importPreview, setImportPreview] = useState<{
     success: boolean;
     message: string;
@@ -104,9 +111,9 @@ export function PayrollPage() {
   const [importResult, setImportResult] = useState<{
     success: boolean;
     message: string;
-    payslips_created: number;
-    not_found: Array<any>;
-    totals: { gross: number; deductions: number; net: number };
+    total: number;
+    imported: number;
+    not_found: string[];
   } | null>(null);
   const [previewing, setPreviewing] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -377,28 +384,18 @@ export function PayrollPage() {
       return;
     }
 
-    const periodMsg = importPeriodStart && importPeriodEnd
-      ? `Period: ${importPeriodStart} to ${importPeriodEnd}`
-      : 'Period will be auto-detected from file';
-
-    if (!confirm(`This will create payslips for all matched employees.\n${periodMsg}\n\nContinue?`)) {
+    if (!confirm('This will update employee salary and deduction info from the file.\n\nContinue?')) {
       return;
     }
 
     setImporting(true);
     try {
-      const result = await payrollApi.importPayroll(
-        importFile,
-        importPeriodStart || undefined,
-        importPeriodEnd || undefined,
-        importCutoff || undefined,
-        true // auto-create employees
-      );
+      const result = await payrollApi.importPayroll(importFile);
       setImportResult(result);
       setImportPreview(null);
 
       if (result.success) {
-        alert(`${result.message}\n\nTotal Net Pay: ${formatCurrency(result.totals.net)}`);
+        alert(`${result.message}\n\nEmployees Updated: ${result.imported || 0}`);
         loadPayrollRuns(); // Refresh runs list
       }
     } catch (error: any) {
@@ -412,9 +409,6 @@ export function PayrollPage() {
     setImportFile(null);
     setImportPreview(null);
     setImportResult(null);
-    setImportPeriodStart('');
-    setImportPeriodEnd('');
-    setImportCutoff(1);
   };
 
   const handleSaveSettings = async () => {
@@ -1018,7 +1012,7 @@ export function PayrollPage() {
                           <span>Schedule</span>
                         </span>
                       ) : (
-                        <span>Schedule: {callTime} - {timeOut}</span>
+                        <span>Schedule: {formatTime12Hour(callTime)} - {formatTime12Hour(timeOut)}</span>
                       )}
                     </p>
                   );
@@ -1049,7 +1043,7 @@ export function PayrollPage() {
                 </span>
               )}
             </div>
-            <div className="grid grid-cols-6 gap-3">
+            <div className="grid grid-cols-5 gap-3">
               <div className="text-center p-3 bg-gray-50 rounded" title="Set in Employee Management">
                 <p className="text-2xl font-bold text-purple-600">{selectedPayslip.deductions?.work_hours_per_day_used || 8}</p>
                 <p className="text-xs text-gray-500">Work Hrs/Day</p>
@@ -1541,7 +1535,7 @@ export function PayrollPage() {
               <span className="text-2xl font-bold text-primary-600">{formatCurrency(selectedPayslip.net_pay)}</span>
             </div>
             <p className="text-xs text-gray-600 text-right mt-2">
-              = {formatCurrency(selectedPayslip.total_earnings)} (Earnings) - {formatCurrency(selectedPayslip.total_deductions)} (Deductions)
+              = {formatCurrency(selectedPayslip.earnings.basic_semi)} (Earnings) - {formatCurrency(selectedPayslip.total_deductions)} (Deductions)
             </p>
           </div>
 
@@ -1608,7 +1602,7 @@ export function PayrollPage() {
                     const result = await payrollApi.recalculatePayslip(selectedPayslip.id);
                     // Reload the payslip details
                     const detailResponse = await payrollApi.getPayslip(selectedPayslip.id);
-                    setSelectedPayslip(detailResponse);
+                    setSelectedPayslip(detailResponse as PayslipData);
                     alert(`Recalculated!\n\n` +
                       `Monthly: ₱${result.monthly_basic.toLocaleString()}\n` +
                       `Basic Semi: ₱${result.basic_semi.toLocaleString()}\n` +
@@ -1856,7 +1850,7 @@ export function PayrollPage() {
                             <span className="ml-2 bg-green-100 text-green-700 px-1.5 py-0.5 rounded text-xs font-medium">Flex</span>
                           ) : (
                             <span className="ml-2 text-xs text-gray-400">
-                              {(payslip as any).call_time || '08:00'}-{(payslip as any).time_out || '17:00'}
+                              {formatTime12Hour((payslip as any).call_time || '08:00')} - {formatTime12Hour((payslip as any).time_out || '17:00')}
                             </span>
                           )}
                         </div>
@@ -2087,58 +2081,9 @@ export function PayrollPage() {
             </div>
 
             {/* Period Selection (Optional) */}
-            <div className="mb-4">
-              <div className="flex items-center gap-2 mb-2">
-                <span className="text-sm font-medium text-gray-700">Period (Optional)</span>
-                <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded">Auto-detected from file</span>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div>
-                  <label className="form-label text-gray-500">Period Start</label>
-                  <input
-                    type="date"
-                    value={importPeriodStart}
-                    onChange={(e) => setImportPeriodStart(e.target.value)}
-                    className="form-input"
-                    placeholder="Auto-detect"
-                  />
-                </div>
-                <div>
-                  <label className="form-label text-gray-500">Period End</label>
-                  <input
-                    type="date"
-                    value={importPeriodEnd}
-                    onChange={(e) => setImportPeriodEnd(e.target.value)}
-                    className="form-input"
-                    placeholder="Auto-detect"
-                  />
-                </div>
-                <div>
-                  <label className="form-label text-gray-500">Cutoff</label>
-                  <select
-                    value={importCutoff}
-                    onChange={(e) => setImportCutoff(parseInt(e.target.value))}
-                    className="form-input"
-                  >
-                    <option value={0}>Auto-detect</option>
-                    <option value={1}>1st Cutoff (1-15)</option>
-                    <option value={2}>2nd Cutoff (16-End)</option>
-                  </select>
-                </div>
-              </div>
-            </div>
-
-            {/* Options */}
-            <div className="mb-4 p-3 bg-gray-50 rounded">
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={true}
-                  className="w-4 h-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
-                  readOnly
-                />
-                <span className="text-sm text-gray-700">Auto-create employees if not found in system</span>
-              </label>
+            {/* Info */}
+            <div className="mb-4 p-3 bg-blue-50 rounded text-sm text-blue-700">
+              Import will update employee salary and deduction info from the Payroll List sheet.
             </div>
 
             {/* Import Button */}
@@ -2232,16 +2177,16 @@ export function PayrollPage() {
               {importResult.success && (
                 <div className="grid grid-cols-3 gap-4 mb-4">
                   <div className="text-center p-3 bg-white rounded">
-                    <p className="text-xl font-bold text-green-600">{formatCurrency(importResult.totals.gross)}</p>
-                    <p className="text-sm text-gray-500">Total Gross</p>
+                    <p className="text-xl font-bold text-gray-600">{importResult.total || 0}</p>
+                    <p className="text-sm text-gray-500">Total in File</p>
                   </div>
                   <div className="text-center p-3 bg-white rounded">
-                    <p className="text-xl font-bold text-red-600">{formatCurrency(importResult.totals.deductions)}</p>
-                    <p className="text-sm text-gray-500">Total Deductions</p>
+                    <p className="text-xl font-bold text-green-600">{importResult.imported || 0}</p>
+                    <p className="text-sm text-gray-500">Employees Updated</p>
                   </div>
                   <div className="text-center p-3 bg-white rounded">
-                    <p className="text-xl font-bold text-blue-600">{formatCurrency(importResult.totals.net)}</p>
-                    <p className="text-sm text-gray-500">Total Net Pay</p>
+                    <p className="text-xl font-bold text-red-600">{importResult.not_found?.length || 0}</p>
+                    <p className="text-sm text-gray-500">Not Found</p>
                   </div>
                 </div>
               )}
@@ -2250,8 +2195,8 @@ export function PayrollPage() {
                 <div className="mt-4">
                   <p className="font-medium text-gray-700 mb-2">Employees Not Found ({importResult.not_found.length}):</p>
                   <ul className="text-sm text-gray-600 list-disc list-inside">
-                    {importResult.not_found.slice(0, 10).map((nf: any, idx: number) => (
-                      <li key={idx}>Row {nf.row}: {nf.employee_no || nf.employee_name}</li>
+                    {importResult.not_found.slice(0, 10).map((name: string, idx: number) => (
+                      <li key={idx}>{name}</li>
                     ))}
                     {importResult.not_found.length > 10 && (
                       <li>...and {importResult.not_found.length - 10} more</li>

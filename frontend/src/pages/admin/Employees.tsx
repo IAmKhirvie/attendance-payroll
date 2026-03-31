@@ -4,6 +4,85 @@ import type { Employee, Department, EmployeeStatus } from '../../types';
 import api from '../../api/client';
 import { CreatableSelect } from '../../components/CreatableSelect';
 
+// Helper function to convert 24-hour time to 12-hour format
+const formatTime12Hour = (time24: string): string => {
+  if (!time24) return '';
+  const [hours, minutes] = time24.split(':');
+  const hour = parseInt(hours, 10);
+  const ampm = hour >= 12 ? 'PM' : 'AM';
+  const hour12 = hour % 12 || 12;
+  return `${hour12}:${minutes} ${ampm}`;
+};
+
+// Helper function to convert 12-hour time to 24-hour format
+const convertTo24Hour = (hour: string, minute: string, ampm: string): string => {
+  let h = parseInt(hour, 10);
+  if (ampm === 'PM' && h !== 12) h += 12;
+  if (ampm === 'AM' && h === 12) h = 0;
+  return `${h.toString().padStart(2, '0')}:${minute}`;
+};
+
+// Helper function to parse 24-hour time into components
+const parseTime = (time24: string): { hour: string; minute: string; ampm: string } => {
+  if (!time24) return { hour: '08', minute: '00', ampm: 'AM' };
+  const [hours, minutes] = time24.split(':');
+  const hour = parseInt(hours, 10);
+  const ampm = hour >= 12 ? 'PM' : 'AM';
+  const hour12 = hour % 12 || 12;
+  return { hour: hour12.toString().padStart(2, '0'), minute: minutes || '00', ampm };
+};
+
+// Custom 12-hour time picker component
+const TimePicker12Hour = ({
+  value,
+  onChange,
+  className = ''
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  className?: string;
+}) => {
+  const { hour, minute, ampm } = parseTime(value);
+
+  const handleChange = (newHour: string, newMinute: string, newAmpm: string) => {
+    onChange(convertTo24Hour(newHour, newMinute, newAmpm));
+  };
+
+  return (
+    <div className={`flex items-center gap-1 ${className}`}>
+      <select
+        value={hour}
+        onChange={(e) => handleChange(e.target.value, minute, ampm)}
+        className="form-input w-16 text-center px-1"
+      >
+        {Array.from({ length: 12 }, (_, i) => {
+          const h = (i + 1).toString().padStart(2, '0');
+          return <option key={h} value={h}>{h}</option>;
+        })}
+      </select>
+      <span className="text-gray-500">:</span>
+      <select
+        value={minute}
+        onChange={(e) => handleChange(hour, e.target.value, ampm)}
+        className="form-input w-16 text-center px-1"
+      >
+        {Array.from({ length: 60 }, (_, i) => {
+          const m = i.toString().padStart(2, '0');
+          return <option key={m} value={m}>{m}</option>;
+        })}
+      </select>
+      <select
+        value={ampm}
+        onChange={(e) => handleChange(hour, minute, e.target.value)}
+        className="form-input w-16 text-center px-1"
+      >
+        <option value="AM">AM</option>
+        <option value="PM">PM</option>
+      </select>
+    </div>
+  );
+};
+
 interface EmployeeFormData {
   employee_no: string;
   first_name: string;
@@ -373,7 +452,7 @@ const EmployeeForm = memo(function EmployeeForm({
       </div>
 
       {/* Incentives */}
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-3 gap-4">
         <div>
           <label className="form-label">Allowance (Monthly)</label>
           <input
@@ -407,7 +486,6 @@ const EmployeeForm = memo(function EmployeeForm({
             placeholder="0.00"
           />
         </div>
-        <div></div>
       </div>
 
       {/* Government Contributions */}
@@ -467,20 +545,16 @@ const EmployeeForm = memo(function EmployeeForm({
         <div className="grid grid-cols-4 gap-4">
           <div>
             <label className="form-label">Call Time</label>
-            <input
-              type="time"
+            <TimePicker12Hour
               value={formData.call_time}
-              onChange={(e) => handleFieldChange('call_time', e.target.value)}
-              className="form-input"
+              onChange={(value) => handleFieldChange('call_time', value)}
             />
           </div>
           <div>
             <label className="form-label">Time Out</label>
-            <input
-              type="time"
+            <TimePicker12Hour
               value={formData.time_out}
-              onChange={(e) => handleFieldChange('time_out', e.target.value)}
-              className="form-input"
+              onChange={(value) => handleFieldChange('time_out', value)}
             />
           </div>
           <div>
@@ -511,19 +585,14 @@ const EmployeeForm = memo(function EmployeeForm({
           </div>
         </div>
         {formData.is_flexible && (
-          <div className="grid grid-cols-4 gap-4 mt-4">
-            <div>
+          <div className="mt-4">
+            <div className="w-1/3">
               <label className="form-label">Adjusted Call Time</label>
-              <input
-                type="time"
+              <TimePicker12Hour
                 value={formData.adjusted_call_time}
-                onChange={(e) => setFormData(prev => ({ ...prev, adjusted_call_time: e.target.value }))}
-                className="form-input"
+                onChange={(value) => setFormData(prev => ({ ...prev, adjusted_call_time: value }))}
               />
             </div>
-            <div></div>
-            <div></div>
-            <div></div>
           </div>
         )}
       </div>
@@ -696,6 +765,8 @@ export function EmployeesPage() {
   };
 
   const handleEditEmployee = (emp: Employee) => {
+    // Debug: log employee data to check is_flexible value
+    console.log('handleEditEmployee - emp.is_flexible:', emp.is_flexible, 'type:', typeof emp.is_flexible);
     setSelectedEmployee(emp);
     setFormData({
       employee_no: emp.employee_no || '',
@@ -721,20 +792,20 @@ export function EmployeesPage() {
       pagibig_contribution: emp.pagibig_contribution || '',
       tax_amount: emp.tax_amount || '',
       // Schedule settings
-      call_time: (emp as any).call_time || '08:00',
-      time_out: (emp as any).time_out || '17:00',
-      work_hours_per_day: (emp as any).work_hours_per_day?.toString() || '8',
-      buffer_minutes: (emp as any).buffer_minutes?.toString() || '10',
-      is_flexible: (emp as any).is_flexible || false,
-      adjusted_call_time: (emp as any).adjusted_call_time || '',
+      call_time: emp.call_time || '08:00',
+      time_out: emp.time_out || '17:00',
+      work_hours_per_day: emp.work_hours_per_day?.toString() || '8',
+      buffer_minutes: emp.buffer_minutes?.toString() || '10',
+      is_flexible: emp.is_flexible === true,  // Explicit boolean check
+      adjusted_call_time: emp.adjusted_call_time || '',
       // Working days
-      work_monday: (emp as any).work_monday ?? true,
-      work_tuesday: (emp as any).work_tuesday ?? true,
-      work_wednesday: (emp as any).work_wednesday ?? true,
-      work_thursday: (emp as any).work_thursday ?? true,
-      work_friday: (emp as any).work_friday ?? true,
-      work_saturday: (emp as any).work_saturday ?? false,
-      work_sunday: (emp as any).work_sunday ?? false,
+      work_monday: emp.work_monday ?? true,
+      work_tuesday: emp.work_tuesday ?? true,
+      work_wednesday: emp.work_wednesday ?? true,
+      work_thursday: emp.work_thursday ?? true,
+      work_friday: emp.work_friday ?? true,
+      work_saturday: emp.work_saturday ?? false,
+      work_sunday: emp.work_sunday ?? false,
     });
     setError('');
     setShowEditModal(true);
@@ -1005,7 +1076,7 @@ export function EmployeesPage() {
         work_sunday: formData.work_sunday,
       } as any);
       setShowEditModal(false);
-      loadEmployees();
+      await loadEmployees();
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Failed to update employee');
     } finally {
@@ -1366,11 +1437,10 @@ export function EmployeesPage() {
                         )}
                         {/* Status dropdown for manual changes */}
                         <select
-                          className="text-xs border border-gray-300 rounded px-1 py-0.5 text-gray-600"
-                          value=""
+                          className="text-xs border border-gray-300 rounded px-1 py-0.5 text-gray-600 capitalize"
+                          value={emp.status || 'active'}
                           onChange={(e) => handleSetStatus(emp.id, e.target.value)}
                         >
-                          <option value="">Set Status...</option>
                           <option value="active">Active</option>
                           <option value="pending">Pending</option>
                           <option value="terminated">Terminated</option>
@@ -1589,11 +1659,11 @@ export function EmployeesPage() {
                 <div className="grid grid-cols-4 gap-4">
                   <div className="p-3 bg-gray-50 rounded">
                     <p className="text-sm text-gray-500">Call Time</p>
-                    <p className="font-medium">{(selectedEmployee as any).call_time || '08:00'}</p>
+                    <p className="font-medium">{formatTime12Hour((selectedEmployee as any).call_time || '08:00')}</p>
                   </div>
                   <div className="p-3 bg-gray-50 rounded">
                     <p className="text-sm text-gray-500">Time Out</p>
-                    <p className="font-medium">{(selectedEmployee as any).time_out || '17:00'}</p>
+                    <p className="font-medium">{formatTime12Hour((selectedEmployee as any).time_out || '17:00')}</p>
                   </div>
                   <div className="p-3 bg-gray-50 rounded">
                     <p className="text-sm text-gray-500">Work Hours/Day</p>

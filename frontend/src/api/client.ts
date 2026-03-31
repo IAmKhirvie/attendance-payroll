@@ -330,6 +330,7 @@ export const payrollApi = {
   // Payslips
   listPayslips: async (params?: {
     page?: number;
+    page_size?: number;
     payroll_run_id?: number;
     employee_id?: number;
   }): Promise<PaginatedResponse<Payslip>> => {
@@ -394,6 +395,31 @@ export const payrollApi = {
 
   updatePayslipAttendance: async (id: number, attendance: { days_worked?: number; days_absent?: number; late_count?: number; total_late_minutes?: number; overtime_hours?: number; recalculate_deductions?: boolean }): Promise<{ message: string; days_worked: number; days_absent: number; total_deductions: number; net_pay: number; preset_saved?: boolean; preset_message?: string }> => {
     const response = await api.patch(`/payroll/payslips/${id}/attendance`, attendance);
+    return response.data;
+  },
+
+  updatePayslipAdditional: async (id: number, additional: { additional_amount?: number; additional_notes?: string }): Promise<{ message: string }> => {
+    const response = await api.patch(`/payroll/payslips/${id}/additional`, additional);
+    return response.data;
+  },
+
+  recalculatePayslip: async (id: number): Promise<{
+    message: string;
+    monthly_basic: number;
+    basic_semi: number;
+    allowance_semi: number;
+    work_hours: number;
+    daily_rate: number;
+    minute_rate: number;
+    days_absent: number;
+    absent_deduction: number;
+    late_minutes: number;
+    late_deduction: number;
+    total_earnings: number;
+    total_deductions: number;
+    net_pay: number;
+  }> => {
+    const response = await api.post(`/payroll/payslips/${id}/recalculate`);
     return response.data;
   },
 
@@ -536,6 +562,24 @@ export const payrollApi = {
     window.URL.revokeObjectURL(url);
   },
 
+  downloadAllPayslipsPdf: async (runId: number): Promise<void> => {
+    const response = await api.get(`/payroll/runs/${runId}/all-payslips-pdf`, {
+      responseType: 'blob',
+    });
+    const contentDisposition = response.headers['content-disposition'];
+    const filenameMatch = contentDisposition?.match(/filename=(.+)/);
+    const filename = filenameMatch ? filenameMatch[1] : `PAYSLIPS-RUN-${runId}.pdf`;
+
+    const url = window.URL.createObjectURL(new Blob([response.data]));
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', filename);
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.URL.revokeObjectURL(url);
+  },
+
   downloadPayslipPng: async (payslipId: number): Promise<void> => {
     const response = await api.get(`/payroll/payslips/${payslipId}/png`, {
       responseType: 'blob',
@@ -640,29 +684,17 @@ export const payrollApi = {
     return response.data;
   },
 
-  importPayroll: async (
-    file: File,
-    periodStart?: string,
-    periodEnd?: string,
-    cutoff?: number,
-    autoCreateEmployees: boolean = true
-  ): Promise<{
+  importPayroll: async (file: File): Promise<{
     success: boolean;
     message: string;
-    payroll_run_id: number;
-    payslips_created: number;
-    not_found: Array<{ row: number; employee_no: string; employee_name: string }>;
-    errors: Array<{ row: number; employee_no: string; error: string }>;
-    warnings: string[];
-    totals: { gross: number; deductions: number; net: number };
+    total: number;
+    imported: number;
+    not_found: string[];
+    errors: string[];
+    employees_updated: Array<{ name: string; employee_no: string; basic_monthly: number; sss: number; philhealth: number; pagibig: number }>;
   }> => {
     const formData = new FormData();
     formData.append('file', file);
-    // Only append period if provided (otherwise auto-detect from file)
-    if (periodStart) formData.append('period_start', periodStart);
-    if (periodEnd) formData.append('period_end', periodEnd);
-    if (cutoff && cutoff > 0) formData.append('cutoff', cutoff.toString());
-    formData.append('auto_create_employees', autoCreateEmployees.toString());
 
     const response = await api.post('/payroll/import', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
@@ -1269,6 +1301,8 @@ export const loansApi = {
     loan_type_id?: number;
     status?: string;
     include_paid?: boolean;
+    page?: number;
+    page_size?: number;
   }): Promise<{
     items: Array<{
       id: number;
@@ -1601,6 +1635,8 @@ export const leaveApi = {
     status?: string;
     date_from?: string;
     date_to?: string;
+    page?: number;
+    page_size?: number;
   }): Promise<{
     items: Array<{
       id: number;

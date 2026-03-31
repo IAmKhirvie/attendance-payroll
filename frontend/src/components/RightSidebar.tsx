@@ -55,24 +55,38 @@ export function RightSidebar() {
   });
 
   useEffect(() => {
+    const controller = new AbortController();
+
+    const fetchHolidays = async () => {
+      try {
+        // Fetch upcoming holidays
+        const upcomingData = await holidaysApi.getUpcoming(5);
+        if (!controller.signal.aborted) {
+          setHolidaysData(upcomingData);
+        }
+
+        // Fetch all holidays for the current year to show in calendar
+        const yearData = await holidaysApi.list({ year });
+        if (!controller.signal.aborted) {
+          setMonthlyHolidays(yearData.items || []);
+        }
+      } catch (error: any) {
+        if (error.name !== 'CanceledError' && error.code !== 'ERR_CANCELED') {
+          console.error('Failed to fetch holidays:', error);
+        }
+      } finally {
+        if (!controller.signal.aborted) {
+          setLoading(false);
+        }
+      }
+    };
+
     fetchHolidays();
-  }, []);
 
-  const fetchHolidays = async () => {
-    try {
-      // Fetch upcoming holidays
-      const upcomingData = await holidaysApi.getUpcoming(5);
-      setHolidaysData(upcomingData);
-
-      // Fetch all holidays for the current year to show in calendar
-      const yearData = await holidaysApi.list({ year });
-      setMonthlyHolidays(yearData.items || []);
-    } catch (error) {
-      console.error('Failed to fetch holidays:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
+    return () => {
+      controller.abort();
+    };
+  }, [year]);
 
   const formatHolidayDate = (dateStr: string) => {
     const date = new Date(dateStr);
@@ -104,19 +118,6 @@ export function RightSidebar() {
         return 'bg-amber-500';
       default:
         return 'bg-gray-500';
-    }
-  };
-
-  const getHolidayRingColor = (type: string) => {
-    switch (type) {
-      case 'regular':
-        return 'ring-2 ring-red-400';
-      case 'special':
-        return 'ring-2 ring-blue-400';
-      case 'special_working':
-        return 'ring-2 ring-amber-400';
-      default:
-        return '';
     }
   };
 

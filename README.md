@@ -209,8 +209,96 @@ attendance-payroll/
 │   └── vite.config.ts
 ├── start-servers.sh
 ├── stop-servers.sh
+├── backup-321.sh              # 3-2-1 backup script
+├── setup-backup-schedule.sh   # Automated backup setup
 └── README.md
 ```
+
+## Backup System (3-2-1 Rule)
+
+This project includes an automated backup system following the **3-2-1 backup rule**:
+- **3 copies** of your data (1 primary + 2 backups)
+- **2 different media** (local disk + external/cloud)
+- **1 offsite copy** (cloud storage)
+
+### Quick Start
+
+```bash
+# Run manual backup
+./backup-321.sh
+
+# Setup automated daily backups (2:00 AM)
+./setup-backup-schedule.sh
+
+# Remove automated backups
+./uninstall-backup-schedule.sh
+```
+
+### Backup Configuration
+
+Edit `backup.conf` to customize:
+
+```bash
+# External backup drive (REQUIRED for true 3-2-1)
+EXTERNAL_BACKUP_DIR="/Volumes/YourExternalDrive/Backups/attendance-payroll"
+
+# Enable cloud backup
+CLOUD_BACKUP_ENABLED=true
+
+# Retention policy
+RETENTION_LOCAL=7      # Days to keep local backups
+RETENTION_DAYS=30      # Days to keep external/cloud backups
+```
+
+### Backup Locations
+
+| Copy | Location | Description |
+|------|----------|-------------|
+| 1 (Primary) | `./backups/local/` | Local backups on same machine |
+| 2 (External) | `EXTERNAL_BACKUP_DIR` | External drive or different partition |
+| 3 (Offsite) | `./backups/cloud/` | Cloud-ready archive (upload to Google Drive, GitHub, etc.) |
+
+### What Gets Backed Up
+
+- ✅ SQLite database (`attendance_payroll.db`)
+- ✅ Environment configuration (`.env`)
+- ✅ Application source code
+- ✅ Database migrations
+- ✅ Backup manifest with checksums
+
+### Automated Scheduling
+
+The setup script configures:
+- **macOS**: launchd job (daily at 2:00 AM)
+- **Linux**: cron job (daily at 2:00 AM)
+
+Logs are stored in `./logs/backup-*.log`
+
+### Restoring from Backup
+
+```bash
+# 1. Stop the servers
+./stop-servers.sh
+
+# 2. Locate your backup
+ls -la backups/local/
+
+# 3. Extract and restore database
+cd backups/local/backup_YYYYMMDD_HHMMSS/
+gunzip -c database_*.db.gz > ../../backend/app/attendance_payroll.db
+
+# 4. Restart servers
+./start-servers.sh
+```
+
+### Recommended 3-2-1 Setup
+
+1. **Connect an external drive** and set `EXTERNAL_BACKUP_DIR` in `backup.conf`
+2. **Enable cloud backup** and upload `backups/cloud/*.tar.gz` to:
+   - Google Drive / Dropbox (manual or via rclone)
+   - GitHub private repository
+   - AWS S3 / Backblaze B2
+3. **Verify backups weekly** by checking backup logs and testing restores
 
 ## License
 

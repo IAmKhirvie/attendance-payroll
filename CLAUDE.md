@@ -36,8 +36,21 @@ The `work_time` field (e.g., 9.11 hours) includes lunch break. This is correct -
 ## Payroll Structure (Philippine)
 
 ### Semi-Monthly Cutoffs
-- **1st Cutoff (1-15):** Deducts only loans and tax
-- **2nd Cutoff (16-end):** Deducts SSS, PhilHealth, Pag-IBIG, and tax
+
+| Deduction Type | 1st Cutoff (1-15) | 2nd Cutoff (16-end) |
+|----------------|-------------------|---------------------|
+| Absences       | ✓                 | ✓                   |
+| Lates          | ✓                 | ✓                   |
+| Undertime      | ✓                 | ✓                   |
+| Loans          | ✓                 | ✗                   |
+| Tax            | ✓                 | ✓                   |
+| SSS            | ✗                 | ✓                   |
+| PhilHealth     | ✗                 | ✓                   |
+| Pag-IBIG       | ✗                 | ✓                   |
+
+**Summary:**
+- **1st Cutoff (1-15):** Absences, Lates, Loans, Tax
+- **2nd Cutoff (16-end):** Absences, Lates, Tax, SSS, PhilHealth, Pag-IBIG (NO loans)
 
 ### Earnings (all divided by 2 for semi-monthly)
 - Basic Salary / Basic Semi
@@ -47,12 +60,24 @@ The `work_time` field (e.g., 9.11 hours) includes lunch break. This is correct -
 - Regular Holiday, Regular Holiday OT
 - SNWH (Special Non-Working Holiday), SNWH OT
 - Overtime
-- Absences/Late deductions (hours & minutes with amount)
 
-### Government Deductions (2nd cutoff only)
-- SSS - Based on 2024 contribution table
-- PhilHealth - 5% of monthly basic, split 50/50
-- Pag-IBIG - 2% employee share, max PHP 200
+### Attendance Deductions (both cutoffs)
+- Absences (days × ICAN daily rate)
+- Late/Tardiness (minutes × ICAN minute rate)
+- Undertime (minutes × ICAN minute rate)
+
+### Government Contributions (2nd cutoff only)
+- SSS - Based on 2024 contribution table (monthly)
+- PhilHealth - 5% of monthly basic, split 50/50 (employee pays half)
+- Pag-IBIG - 2% employee share, max PHP 200/month
+
+### Loans (1st cutoff only)
+- Deducted from active employee loans
+- Monthly deduction amount set per loan
+
+### Tax (both cutoffs)
+- Withholding tax based on TRAIN Law
+- Semi-monthly amount (monthly tax ÷ 2)
 
 ### ICAN Salary & Attendance Deduction Formulas
 

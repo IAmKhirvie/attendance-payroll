@@ -4,7 +4,7 @@ Employees API Endpoints
 Employee management (Admin only for write operations).
 """
 
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, status, Query, Request
 from sqlalchemy.orm import Session
 from sqlalchemy import cast, Integer
 from typing import Optional
@@ -12,6 +12,7 @@ from typing import Optional
 from app.api.deps import get_db, get_current_admin, get_current_user
 from app.models.user import User, Role, UserStatus
 from app.models.employee import Employee, Department
+from app.models.audit import AuditLog, AuditAction
 from app.schemas.employee import (
     EmployeeCreate, EmployeeUpdate, EmployeeResponse,
     EmployeeListResponse, DepartmentCreate, DepartmentUpdate, DepartmentResponse
@@ -252,6 +253,7 @@ async def list_employees(
 @router.post("", response_model=EmployeeResponse, status_code=status.HTTP_201_CREATED)
 async def create_employee(
     employee_data: EmployeeCreate,
+    request: Request,
     current_admin: User = Depends(get_current_admin),
     db: Session = Depends(get_db)
 ):
@@ -265,6 +267,24 @@ async def create_employee(
     db.add(employee)
     db.commit()
     db.refresh(employee)
+
+    # Log employee creation
+    audit_log = AuditLog(
+        user_id=current_admin.id,
+        user_email=current_admin.email,
+        action=AuditAction.EMPLOYEE_CREATE,
+        resource_type="employee",
+        resource_id=str(employee.id),
+        new_value={
+            "employee_no": employee.employee_no,
+            "name": employee.full_name,
+            "basic_salary": float(employee.basic_salary) if employee.basic_salary else None
+        },
+        ip_address=request.client.host if request.client else None
+    )
+    db.add(audit_log)
+    db.commit()
+
     return EmployeeResponse.model_validate(employee)
 
 
@@ -327,6 +347,7 @@ async def get_employee(
 async def update_employee(
     employee_id: int,
     employee_data: EmployeeUpdate,
+    request: Request,
     current_admin: User = Depends(get_current_admin),
     db: Session = Depends(get_db)
 ):
@@ -335,18 +356,64 @@ async def update_employee(
     if not employee:
         raise HTTPException(status_code=404, detail="Employee not found")
 
+    # Capture old values for audit log
     update_data = employee_data.model_dump(exclude_unset=True)
-    for field, value in update_data.items():
-        setattr(employee, field, value)
+
+    # Debug: Log is_flexible values
+    print(f"[DEBUG] Employee {employee_id} update - is_flexible in update_data: {'is_flexible' in update_data}")
+    if 'is_flexible' in update_data:
+        print(f"[DEBUG] is_flexible value being set: {update_data['is_flexible']} (type: {type(update_data['is_flexible'])})")
+    print(f"[DEBUG] Current employee.is_flexible: {employee.is_flexible}")
+    old_values = {}
+    new_values = {}
+
+    # Track what's actually changing
+    for field, new_value in update_data.items():
+        old_value = getattr(employee, field, None)
+        # Convert Decimal to float for JSON serialization
+        if hasattr(old_value, '__float__'):
+            old_value = float(old_value)
+        if hasattr(new_value, '__float__'):
+            new_value = float(new_value)
+
+        if old_value != new_value:
+            old_values[field] = old_value
+            new_values[field] = new_value
+
+        setattr(employee, field, update_data[field])
 
     db.commit()
     db.refresh(employee)
+
+    # Debug: Log is_flexible after commit
+    print(f"[DEBUG] After commit - employee.is_flexible: {employee.is_flexible}")
+
+    # Log the changes if any
+    if old_values:
+        audit_log = AuditLog(
+            user_id=current_admin.id,
+            user_email=current_admin.email,
+            action=AuditAction.EMPLOYEE_UPDATE,
+            resource_type="employee",
+            resource_id=str(employee_id),
+            old_value=old_values,
+            new_value=new_values,
+            ip_address=request.client.host if request.client else None,
+            extra_data={
+                "employee_name": employee.full_name,
+                "employee_no": employee.employee_no
+            }
+        )
+        db.add(audit_log)
+        db.commit()
+
     return EmployeeResponse.model_validate(employee)
 
 
 @router.delete("/{employee_id}")
 async def delete_employee(
     employee_id: int,
+    request: Request,
     current_admin: User = Depends(get_current_admin),
     db: Session = Depends(get_db)
 ):
@@ -355,9 +422,29 @@ async def delete_employee(
     if not employee:
         raise HTTPException(status_code=404, detail="Employee not found")
 
+    old_status = employee.status
     employee.is_active = False
     employee.status = 'inactive'
     db.commit()
+
+    # Log employee deactivation
+    audit_log = AuditLog(
+        user_id=current_admin.id,
+        user_email=current_admin.email,
+        action=AuditAction.EMPLOYEE_DELETE,
+        resource_type="employee",
+        resource_id=str(employee_id),
+        old_value={"status": old_status, "is_active": True},
+        new_value={"status": "inactive", "is_active": False},
+        ip_address=request.client.host if request.client else None,
+        extra_data={
+            "employee_name": employee.full_name,
+            "employee_no": employee.employee_no
+        }
+    )
+    db.add(audit_log)
+    db.commit()
+
     return {"message": "Employee deactivated"}
 
 

@@ -125,21 +125,29 @@ export function Layout() {
 
   // Check for employees with passed end dates (admin only)
   useEffect(() => {
-    if (user?.role === 'admin') {
-      checkEndDateNotifications();
-    }
-  }, [user]);
+    if (user?.role !== 'admin') return;
 
-  const checkEndDateNotifications = async () => {
-    try {
-      const response = await employeesApi.getEndDateNotifications();
-      if (response.items && response.items.length > 0) {
-        setShowEndDateModal(true);
+    const controller = new AbortController();
+
+    const checkEndDateNotifications = async () => {
+      try {
+        const response = await employeesApi.getEndDateNotifications();
+        if (!controller.signal.aborted && response.items && response.items.length > 0) {
+          setShowEndDateModal(true);
+        }
+      } catch (error: any) {
+        if (error.name !== 'CanceledError' && error.code !== 'ERR_CANCELED') {
+          console.error('Failed to check end date notifications:', error);
+        }
       }
-    } catch (error) {
-      console.error('Failed to check end date notifications:', error);
-    }
-  };
+    };
+
+    checkEndDateNotifications();
+
+    return () => {
+      controller.abort();
+    };
+  }, [user]);
 
   const handleLogout = async () => {
     await logout();

@@ -547,8 +547,9 @@ async def import_attendance_file(
                 from app.services.payroll_calculator import process_payroll
                 from datetime import datetime
 
-                # Determine cutoff (1st half = 1-15, 2nd half = 16-end)
-                cutoff = 1 if date_from.day <= 15 else 2
+                # Determine cutoff based on end date (1st half = 1-15, 2nd half = 16-end)
+                # Use end date because files may span partial periods
+                cutoff = 1 if date_to.day <= 15 else 2
 
                 # Check if payroll run already exists for this period
                 existing_run = db.query(PayrollRun).filter(

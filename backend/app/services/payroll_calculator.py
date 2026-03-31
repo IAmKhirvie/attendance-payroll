@@ -9,8 +9,8 @@ ICAN Attendance Deduction Formulas (enabled by default):
 - Tardiness/Undertime: Minute Rate = Daily Rate ÷ Hours per day ÷ 60 minutes
 
 Cutoff Schedule:
-- 1st cutoff (1-15): Deduct loans, tax
-- 2nd cutoff (16-end): Deduct SSS, PhilHealth, Pag-IBIG, tax
+- 1st cutoff (1-15): Deduct absences, lates, loans, tax (NO government benefits)
+- 2nd cutoff (16-end): Deduct absences, lates, tax, SSS, PhilHealth, Pag-IBIG (NO loans)
 
 Semi-monthly = Monthly amount / 2
 
@@ -469,12 +469,26 @@ def get_attendance_summary(
                 total_undertime_minutes += record.undertime_minutes
     else:
         # Fall back to ImportRecord (from imported attendance files)
-        if employee and employee.biometric_id:
+        # Match by employee name instead of biometric_id
+        if employee:
+            # Build name patterns to search for
+            emp_full_name = f"{employee.first_name} {employee.last_name}".lower()
+            emp_name_parts = [employee.first_name.lower(), employee.last_name.lower()]
+
             import_records = db.query(ImportRecord).join(ImportBatch).filter(
-                ImportRecord.employee_biometric_id == employee.biometric_id,
                 ImportRecord.date >= period_start,
                 ImportRecord.date <= period_end
             ).all()
+
+            # Filter by name matching
+            matched_records = []
+            for rec in import_records:
+                if rec.employee_name:
+                    rec_name = rec.employee_name.lower()
+                    # Check if all name parts are in the record name
+                    if all(part in rec_name for part in emp_name_parts):
+                        matched_records.append(rec)
+            import_records = matched_records
 
             for record in import_records:
                 # Parse hours.minutes format to minutes
@@ -672,9 +686,11 @@ def generate_payslip(
     loan_info = get_employee_loan_deductions(db, employee.id)
     loan_deduction_total = loan_info['total']
 
-    # Government deductions based on cutoff
+    # Deductions based on cutoff
+    # 1st cutoff: absences, lates, loans, tax (NO government benefits)
+    # 2nd cutoff: absences, lates, tax, SSS, PhilHealth, Pag-IBIG (NO loans)
     if cutoff == 1:
-        # 1st cutoff: Only loans and tax
+        # 1st cutoff: absences, lates, loans, tax (NO gov benefits)
         if emp_tax is not None:
             tax_semi = round(emp_tax / 2, 2)
         elif default_tax > 0:
@@ -689,7 +705,7 @@ def generate_payslip(
         deductions['philhealth'] = 0
         deductions['pagibig'] = 0
     else:
-        # 2nd cutoff: SSS, PhilHealth, Pag-IBIG, tax
+        # 2nd cutoff: absences, lates, tax, SSS, PhilHealth, Pag-IBIG (NO loans)
         # Priority: 1) Employee-specific value, 2) Default from settings, 3) Auto-calculate
         # Note: We check "is not None" to allow explicit 0 values (meaning no deduction)
         if emp_sss is not None:
@@ -723,20 +739,33 @@ def generate_payslip(
         else:
             deductions['tax'] = round(calculate_tax(monthly_basic) / 2, 2)
 
-        deductions['loans'] = loan_deduction_total  # Auto-calculated from active loans
-        deductions['loans_breakdown'] = loan_info['loans']  # Detailed breakdown
+        # NO loans in 2nd cutoff
+        deductions['loans'] = 0
+        deductions['loans_breakdown'] = []
 
-    # Calculate totals
-    total_deductions = (
-        deductions['absences_amount'] +
-        deductions['late_amount'] +
-        deductions.get('undertime_amount', 0) +
-        deductions.get('sss', 0) +
-        deductions.get('philhealth', 0) +
-        deductions.get('pagibig', 0) +
-        deductions.get('tax', 0) +
-        deductions.get('loans', 0)
-    )
+    # Calculate totals based on cutoff
+    # 1st cutoff: absences, lates, loans, tax (NO government benefits)
+    # 2nd cutoff: absences, lates, tax, SSS, PhilHealth, Pag-IBIG (NO loans)
+    if cutoff == 1:
+        # 1st cutoff: absences, lates, undertime, loans, tax (NO gov benefits)
+        total_deductions = (
+            deductions['absences_amount'] +
+            deductions['late_amount'] +
+            deductions.get('undertime_amount', 0) +
+            deductions.get('tax', 0) +
+            deductions.get('loans', 0)
+        )
+    else:
+        # 2nd cutoff: absences, lates, undertime, tax, SSS, PhilHealth, Pag-IBIG (NO loans)
+        total_deductions = (
+            deductions['absences_amount'] +
+            deductions['late_amount'] +
+            deductions.get('undertime_amount', 0) +
+            deductions.get('sss', 0) +
+            deductions.get('philhealth', 0) +
+            deductions.get('pagibig', 0) +
+            deductions.get('tax', 0)
+        )
 
     net_pay = total_earnings - total_deductions
 
@@ -788,22 +817,23 @@ def process_payroll(db: Session, payroll_run: PayrollRun) -> Dict[str, Any]:
     ).distinct().all()
     processed_employee_ids = {e[0] for e in processed_ids}
 
-    # Get employee IDs from ImportRecord via biometric_id
-    import_records = db.query(ImportRecord.employee_biometric_id).join(ImportBatch).filter(
+    # Get employee IDs from ImportRecord via employee_name (not biometric_id)
+    import_records = db.query(ImportRecord.employee_name).join(ImportBatch).filter(
         ImportRecord.date >= payroll_run.period_start,
         ImportRecord.date <= payroll_run.period_end,
-        ImportRecord.employee_biometric_id.isnot(None),
-        ImportRecord.employee_biometric_id != ''
+        ImportRecord.employee_name.isnot(None),
+        ImportRecord.employee_name != ''
     ).distinct().all()
-    biometric_ids = {r[0] for r in import_records if r[0]}
+    import_names = {r[0] for r in import_records if r[0]}
 
-    # Map biometric_ids to employee_ids
+    # Map employee names to employee_ids using name matching
     import_employee_ids = set()
-    if biometric_ids:
-        biometric_employees = db.query(Employee.id).filter(
-            Employee.biometric_id.in_(biometric_ids)
-        ).all()
-        import_employee_ids = {e[0] for e in biometric_employees}
+    if import_names:
+        from app.services.attendance_import import find_employee_by_name
+        for emp_name in import_names:
+            employee = find_employee_by_name(db, emp_name)
+            if employee:
+                import_employee_ids.add(employee.id)
 
     # Combine: employees with ANY attendance record
     employees_with_attendance = processed_employee_ids | import_employee_ids
@@ -830,7 +860,7 @@ def process_payroll(db: Session, payroll_run: PayrollRun) -> Dict[str, Any]:
     db.query(Payslip).filter(Payslip.payroll_run_id == payroll_run.id).delete()
 
     for employee in employees:
-        # Get attendance summary (passes employee for biometric_id lookup in ImportRecord)
+        # Get attendance summary (passes employee for name matching in ImportRecord)
         attendance = get_attendance_summary(
             db,
             employee.id,

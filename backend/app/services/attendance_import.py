@@ -335,7 +335,14 @@ class TimeReportParser:
         return merged
 
     def _parse_time(self, time_str: str) -> Optional[time]:
-        """Parse time string like '10:36 AM' to time object."""
+        """
+        Parse time string like '10:36 AM' to time object.
+
+        BIOMETRIC CLOCK OFFSET FIX:
+        The biometric machine clock is 1 minute behind real time.
+        We add 1 minute to all parsed times to correct this offset.
+        Example: Machine shows 7:49 AM but actual time was 7:50 AM
+        """
         if not time_str or time_str == 'nan' or time_str == 'None':
             return None
 
@@ -344,7 +351,10 @@ class TimeReportParser:
 
         for fmt in formats:
             try:
-                return datetime.strptime(time_str, fmt).time()
+                parsed_dt = datetime.strptime(time_str, fmt)
+                # Add 1 minute to correct biometric clock offset
+                corrected_dt = parsed_dt + timedelta(minutes=1)
+                return corrected_dt.time()
             except ValueError:
                 continue
 
@@ -352,46 +362,98 @@ class TimeReportParser:
 
 
 def normalize_name(name: str) -> str:
-    """Normalize a name for comparison (lowercase, trim spaces)."""
-    return ' '.join(name.lower().split())
+    """Normalize a name for comparison (lowercase, trim spaces, handle special chars)."""
+    import unicodedata
+    # Lowercase and trim
+    name = ' '.join(name.lower().split())
+    # Replace ñ with n
+    name = name.replace('ñ', 'n')
+    # Remove accents (é -> e, etc)
+    name = unicodedata.normalize('NFD', name)
+    name = ''.join(c for c in name if unicodedata.category(c) != 'Mn')
+    return name
 
 
 def find_employee_by_name(db: Session, name: str) -> Optional[Employee]:
-    """Find employee by name with fuzzy matching."""
+    """
+    Find employee by name with fuzzy matching.
+    Prioritizes employees with salary data (basic_salary > 0).
+    Matches if all name parts from input are found in employee's full name.
+    """
     normalized = normalize_name(name)
     name_parts = normalized.split()
 
-    if len(name_parts) < 2:
-        return db.query(Employee).filter(
-            func.lower(Employee.first_name) == normalized
-        ).first()
+    if not name_parts:
+        return None
 
-    first_name = name_parts[0]
+    # Get all employees, prioritize those with salary
+    all_employees = db.query(Employee).order_by(
+        Employee.basic_salary.desc().nulls_last()
+    ).all()
+
     last_name = name_parts[-1]
 
-    employee = db.query(Employee).filter(
-        func.lower(Employee.first_name) == first_name,
-        func.lower(Employee.last_name) == last_name
-    ).first()
-
-    if employee:
-        return employee
-
-    if len(name_parts) > 2:
-        middle_name = ' '.join(name_parts[1:-1])
-        employee = db.query(Employee).filter(
-            func.lower(Employee.first_name) == first_name,
-            func.lower(Employee.middle_name) == middle_name,
-            func.lower(Employee.last_name) == last_name
-        ).first()
-        if employee:
-            return employee
-
-    all_employees = db.query(Employee).all()
+    # Strategy 1: Exact full name match
     for emp in all_employees:
         emp_full = normalize_name(emp.full_name)
         if emp_full == normalized:
             return emp
+
+    # Strategy 2: All input name parts found in employee's full name + same last name
+    for emp in all_employees:
+        emp_full = normalize_name(emp.full_name)
+        emp_full_nospace = emp_full.replace(' ', '')
+        emp_last = normalize_name(emp.last_name) if emp.last_name else ''
+
+        # Check last name (also try without spaces for "De Jesus" vs "Dejesus")
+        last_name_match = (emp_last == last_name or
+                          emp_last.replace(' ', '') == last_name or
+                          emp_last == last_name.replace(' ', ''))
+
+        if not last_name_match:
+            continue
+
+        # Check if all input parts are in the full name (also check without spaces)
+        all_parts_found = all(part in emp_full or part in emp_full_nospace for part in name_parts)
+        if all_parts_found:
+            return emp
+
+    # Strategy 3: First name + last name match (exact)
+    if len(name_parts) >= 2:
+        first_name = name_parts[0]
+        for emp in all_employees:
+            emp_first = normalize_name(emp.first_name) if emp.first_name else ''
+            emp_last = normalize_name(emp.last_name) if emp.last_name else ''
+            if emp_first == first_name and emp_last == last_name:
+                return emp
+
+    # Strategy 4: First name is substring of DB first name + last name match
+    if len(name_parts) >= 2:
+        first_name = name_parts[0]
+        for emp in all_employees:
+            emp_first = normalize_name(emp.first_name) if emp.first_name else ''
+            emp_first_nospace = emp_first.replace(' ', '')
+            emp_last = normalize_name(emp.last_name) if emp.last_name else ''
+
+            # Check last name match (with space variations)
+            last_match = (emp_last == last_name or
+                         emp_last.replace(' ', '') == last_name or
+                         emp_last == last_name.replace(' ', ''))
+
+            # Check if first name is substring (e.g., "greg" in "griego")
+            first_match = (first_name in emp_first or
+                          first_name in emp_first_nospace or
+                          emp_first.startswith(first_name))
+
+            if last_match and first_match:
+                return emp
+
+    # Strategy 5: Last name only match (if only one employee with that last name)
+    matching_last = [emp for emp in all_employees
+                     if normalize_name(emp.last_name or '') == last_name or
+                        normalize_name(emp.last_name or '').replace(' ', '') == last_name]
+    if len(matching_last) == 1:
+        return matching_last[0]
 
     return None
 
@@ -404,6 +466,9 @@ def import_time_report(
     """
     Import attendance data from a time report file.
     Automatically creates employees and fixes misaligned time entries.
+
+    Employee matching: By NAME only (fuzzy matching).
+    Creates new employee only if no name match found.
     """
     parser = TimeReportParser(file_path)
     records = parser.parse()
@@ -431,23 +496,21 @@ def import_time_report(
         if key not in unique_employees:
             unique_employees[key] = r['employee_name']
 
-    # Process each unique employee
+    # Process each unique employee - match by NAME only
     for (emp_name, bio_id), name in unique_employees.items():
         employee = None
 
-        if bio_id:
-            employee = db.query(Employee).filter(Employee.biometric_id == bio_id).first()
-
-        if not employee:
-            employee = find_employee_by_name(db, emp_name)
+        # Match by name (fuzzy matching)
+        employee = find_employee_by_name(db, emp_name)
 
         if employee:
+            # Update biometric_id if provided (for reference only)
+            if bio_id and not employee.biometric_id:
+                employee.biometric_id = str(bio_id)
             employee_map[(emp_name, bio_id)] = employee
             employees_existing += 1
-
-            if bio_id and not employee.biometric_id:
-                employee.biometric_id = bio_id
         else:
+            # 3. No match found - create new employee
             name_parts = emp_name.split()
             first_name = name_parts[0] if name_parts else emp_name
             last_name = name_parts[-1] if len(name_parts) > 1 else ''

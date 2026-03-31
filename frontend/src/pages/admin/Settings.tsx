@@ -36,7 +36,12 @@ interface AuditLogItem {
   user_id: number | null;
   user_email: string | null;
   action: string;
-  details: string | null;
+  resource_type: string | null;
+  resource_id: string | null;
+  old_value: Record<string, any> | null;
+  new_value: Record<string, any> | null;
+  reason: string | null;
+  extra_data: Record<string, any> | null;
   ip_address: string | null;
   user_agent: string | null;
   created_at: string;
@@ -77,31 +82,128 @@ export function SettingsPage() {
   const [auditTotal, setAuditTotal] = useState(0);
   const [auditFilter, setAuditFilter] = useState('');
 
+  // Notion Sync state
+  const [notionApiKey, setNotionApiKey] = useState('');
+  const [notionSyncing, setNotionSyncing] = useState(false);
+  const [notionPreview, setNotionPreview] = useState<any>(null);
+  const [notionResult, setNotionResult] = useState<any>(null);
+  const [showNotionApiKey, setShowNotionApiKey] = useState(false);
+
   useEffect(() => {
-    loadSettings();
-    loadBackups();
-    loadSessions();
-    loadAuditLogs();
+    const controller = new AbortController();
+
+    const loadInitialData = async () => {
+      // Load settings
+      try {
+        const data = await settingsApi.get();
+        if (!controller.signal.aborted) {
+          setSettings(data);
+        }
+      } catch (error: any) {
+        if (error.name !== 'CanceledError' && error.code !== 'ERR_CANCELED') {
+          console.error('Failed to load settings:', error);
+        }
+      } finally {
+        if (!controller.signal.aborted) {
+          setLoading(false);
+        }
+      }
+
+      // Load backups
+      try {
+        const [statusData, listData] = await Promise.all([
+          backupsApi.getStatus(),
+          backupsApi.list()
+        ]);
+        if (!controller.signal.aborted) {
+          setBackupStatus(statusData);
+          setBackups(listData.backups);
+        }
+      } catch (error: any) {
+        if (error.name !== 'CanceledError' && error.code !== 'ERR_CANCELED') {
+          console.error('Failed to load backups:', error);
+        }
+      } finally {
+        if (!controller.signal.aborted) {
+          setBackupLoading(false);
+        }
+      }
+    };
+
+    loadInitialData();
+
+    return () => {
+      controller.abort();
+    };
   }, []);
 
   useEffect(() => {
-    loadSessions();
+    const controller = new AbortController();
+
+    const fetchSessions = async () => {
+      setSessionsLoading(true);
+      try {
+        const response = await api.get('/settings/sessions', {
+          params: { page: sessionsPage, page_size: 10 },
+          signal: controller.signal
+        });
+        if (!controller.signal.aborted) {
+          setSessions(response.data.items);
+          setSessionsTotal(response.data.total);
+        }
+      } catch (error: any) {
+        if (error.name !== 'CanceledError' && error.code !== 'ERR_CANCELED') {
+          console.error('Failed to load sessions:', error);
+        }
+      } finally {
+        if (!controller.signal.aborted) {
+          setSessionsLoading(false);
+        }
+      }
+    };
+
+    fetchSessions();
+
+    return () => {
+      controller.abort();
+    };
   }, [sessionsPage]);
 
   useEffect(() => {
-    loadAuditLogs();
-  }, [auditPage, auditFilter]);
+    const controller = new AbortController();
 
-  const loadSettings = async () => {
-    try {
-      const data = await settingsApi.get();
-      setSettings(data);
-    } catch (error) {
-      console.error('Failed to load settings:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
+    const fetchAuditLogs = async () => {
+      setAuditLoading(true);
+      try {
+        const response = await api.get('/settings/audit-logs', {
+          params: {
+            page: auditPage,
+            page_size: 20,
+            action: auditFilter || undefined
+          },
+          signal: controller.signal
+        });
+        if (!controller.signal.aborted) {
+          setAuditLogs(response.data.items);
+          setAuditTotal(response.data.total);
+        }
+      } catch (error: any) {
+        if (error.name !== 'CanceledError' && error.code !== 'ERR_CANCELED') {
+          console.error('Failed to load audit logs:', error);
+        }
+      } finally {
+        if (!controller.signal.aborted) {
+          setAuditLoading(false);
+        }
+      }
+    };
+
+    fetchAuditLogs();
+
+    return () => {
+      controller.abort();
+    };
+  }, [auditPage, auditFilter]);
 
   const loadBackups = async () => {
     try {
@@ -111,25 +213,12 @@ export function SettingsPage() {
       ]);
       setBackupStatus(statusData);
       setBackups(listData.backups);
-    } catch (error) {
-      console.error('Failed to load backups:', error);
+    } catch (error: any) {
+      if (error.name !== 'CanceledError' && error.code !== 'ERR_CANCELED') {
+        console.error('Failed to load backups:', error);
+      }
     } finally {
       setBackupLoading(false);
-    }
-  };
-
-  const loadSessions = async () => {
-    setSessionsLoading(true);
-    try {
-      const response = await api.get('/settings/sessions', {
-        params: { page: sessionsPage, page_size: 10 }
-      });
-      setSessions(response.data.items);
-      setSessionsTotal(response.data.total);
-    } catch (error) {
-      console.error('Failed to load sessions:', error);
-    } finally {
-      setSessionsLoading(false);
     }
   };
 
@@ -145,8 +234,10 @@ export function SettingsPage() {
       });
       setAuditLogs(response.data.items);
       setAuditTotal(response.data.total);
-    } catch (error) {
-      console.error('Failed to load audit logs:', error);
+    } catch (error: any) {
+      if (error.name !== 'CanceledError' && error.code !== 'ERR_CANCELED') {
+        console.error('Failed to load audit logs:', error);
+      }
     } finally {
       setAuditLoading(false);
     }
@@ -617,26 +708,45 @@ export function SettingsPage() {
         <div className="flex justify-between items-start mb-4">
           <div>
             <h2 className="text-lg font-semibold text-gray-900">Activity Log</h2>
-            <p className="text-sm text-gray-500">Track all system activities and changes</p>
+            <p className="text-sm text-gray-500">Track all system activities and changes (cannot be deleted)</p>
           </div>
-          <select
-            value={auditFilter}
-            onChange={(e) => { setAuditFilter(e.target.value); setAuditPage(1); }}
-            className="form-input w-48"
-          >
-            <option value="">All Activities</option>
-            <option value="LOGIN">Login</option>
-            <option value="LOGOUT">Logout</option>
-            <option value="LOGIN_FAILED">Login Failed</option>
-            <option value="PASSWORD_CHANGE">Password Change</option>
-            <option value="EMPLOYEE_CREATE">Employee Create</option>
-            <option value="EMPLOYEE_UPDATE">Employee Update</option>
-            <option value="PAYROLL_GENERATE">Payroll Generate</option>
-            <option value="PAYROLL_RELEASE">Payroll Release</option>
-            <option value="ATTENDANCE_IMPORT">Attendance Import</option>
-            <option value="BACKUP_CREATE">Backup Create</option>
-            <option value="BACKUP_RESTORE">Backup Restore</option>
-          </select>
+          <div className="flex gap-2">
+            <select
+              value={auditFilter}
+              onChange={(e) => { setAuditFilter(e.target.value); setAuditPage(1); }}
+              className="form-input w-48"
+            >
+              <option value="">All Activities</option>
+              <option value="LOGIN">Login</option>
+              <option value="LOGOUT">Logout</option>
+              <option value="LOGIN_FAILED">Login Failed</option>
+              <option value="PASSWORD_CHANGE">Password Change</option>
+              <option value="EMPLOYEE_CREATE">Employee Create</option>
+              <option value="EMPLOYEE_UPDATE">Employee Update</option>
+              <option value="EMPLOYEE_DELETE">Employee Delete</option>
+              <option value="PAYROLL_RUN">Payroll Run</option>
+              <option value="PAYSLIP_RELEASE">Payslip Release</option>
+              <option value="ATTENDANCE_IMPORT">Attendance Import</option>
+              <option value="ATTENDANCE_EDIT">Attendance Edit</option>
+              <option value="LOAN_CREATE">Loan Create</option>
+              <option value="LOAN_CANCEL">Loan Cancel</option>
+              <option value="LEAVE_REQUEST">Leave Request</option>
+              <option value="LEAVE_APPROVE">Leave Approve</option>
+              <option value="SETTINGS_UPDATE">Settings Update</option>
+              <option value="BACKUP_CREATE">Backup Create</option>
+              <option value="BACKUP_RESTORE">Backup Restore</option>
+            </select>
+            <button
+              onClick={() => {
+                const params = new URLSearchParams();
+                if (auditFilter) params.append('action', auditFilter);
+                window.open(`/api/v1/settings/audit-logs/export?${params.toString()}`, '_blank');
+              }}
+              className="btn-secondary text-sm whitespace-nowrap"
+            >
+              Export CSV
+            </button>
+          </div>
         </div>
 
         {auditLoading ? (
@@ -685,8 +795,33 @@ export function SettingsPage() {
                             {log.action.replace(/_/g, ' ')}
                           </span>
                         </td>
-                        <td className="px-4 py-3 text-sm text-gray-600 max-w-xs truncate">
-                          {log.details || '-'}
+                        <td className="px-4 py-3 text-sm text-gray-600 max-w-md">
+                          <div className="space-y-1">
+                            {log.extra_data?.employee_name && (
+                              <div className="font-medium text-gray-800">{log.extra_data.employee_name}</div>
+                            )}
+                            {log.resource_type && log.resource_id && (
+                              <div className="text-xs text-gray-400">{log.resource_type} #{log.resource_id}</div>
+                            )}
+                            {log.old_value && log.new_value && Object.keys(log.new_value).length > 0 && (
+                              <div className="text-xs">
+                                {Object.keys(log.new_value).slice(0, 3).map(key => (
+                                  <div key={key} className="flex gap-1">
+                                    <span className="text-gray-500">{key.replace(/_/g, ' ')}:</span>
+                                    <span className="text-red-500 line-through">{String(log.old_value?.[key] ?? '-')}</span>
+                                    <span className="text-green-600">→ {String(log.new_value?.[key] ?? '-')}</span>
+                                  </div>
+                                ))}
+                                {Object.keys(log.new_value).length > 3 && (
+                                  <div className="text-gray-400">+{Object.keys(log.new_value).length - 3} more changes</div>
+                                )}
+                              </div>
+                            )}
+                            {log.reason && (
+                              <div className="text-xs text-gray-500 italic">Reason: {log.reason}</div>
+                            )}
+                            {!log.old_value && !log.new_value && !log.extra_data && '-'}
+                          </div>
                         </td>
                         <td className="px-4 py-3 text-sm text-gray-600 font-mono">
                           {log.ip_address || '-'}
@@ -724,6 +859,225 @@ export function SettingsPage() {
             )}
           </>
         )}
+      </div>
+
+      {/* Notion Integration */}
+      <div className="card">
+        <div className="flex justify-between items-start mb-4">
+          <div>
+            <h2 className="text-lg font-semibold text-gray-900">Notion Integration</h2>
+            <p className="text-sm text-gray-500">Sync employee data from Notion Teacher's Database (read-only)</p>
+          </div>
+        </div>
+
+        <div className="space-y-4">
+          {/* API Key Input */}
+          <div>
+            <label className="form-label">Notion API Key</label>
+            <div className="flex gap-2">
+              <div className="relative flex-1 max-w-md">
+                <input
+                  type={showNotionApiKey ? "text" : "password"}
+                  value={notionApiKey}
+                  onChange={(e) => setNotionApiKey(e.target.value)}
+                  placeholder="ntn_xxxxx or secret_xxxxx"
+                  className="form-input pr-10"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowNotionApiKey(!showNotionApiKey)}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700"
+                >
+                  {showNotionApiKey ? '🙈' : '👁️'}
+                </button>
+              </div>
+              <button
+                onClick={async () => {
+                  if (!notionApiKey) {
+                    setMessage({ type: 'error', text: 'Please enter Notion API key' });
+                    return;
+                  }
+                  setNotionSyncing(true);
+                  setNotionPreview(null);
+                  setNotionResult(null);
+                  try {
+                    const response = await api.post('/notion/preview', { api_key: notionApiKey });
+                    setNotionPreview(response.data);
+                  } catch (error: any) {
+                    setMessage({ type: 'error', text: error.response?.data?.detail || 'Failed to preview sync' });
+                  } finally {
+                    setNotionSyncing(false);
+                  }
+                }}
+                disabled={notionSyncing || !notionApiKey}
+                className="btn-secondary"
+              >
+                {notionSyncing ? 'Loading...' : 'Preview'}
+              </button>
+              <button
+                onClick={async () => {
+                  if (!notionApiKey) {
+                    setMessage({ type: 'error', text: 'Please enter Notion API key' });
+                    return;
+                  }
+                  if (!confirm('This will update employees in A&P based on Notion data. Continue?')) {
+                    return;
+                  }
+                  setNotionSyncing(true);
+                  setNotionResult(null);
+                  try {
+                    const response = await api.post('/notion/sync', { api_key: notionApiKey });
+                    setNotionResult(response.data);
+                    setMessage({ type: 'success', text: `Synced ${response.data.synced} employees from Notion` });
+                    loadAuditLogs(); // Refresh audit log to show sync entries
+                  } catch (error: any) {
+                    setMessage({ type: 'error', text: error.response?.data?.detail || 'Failed to sync from Notion' });
+                  } finally {
+                    setNotionSyncing(false);
+                  }
+                }}
+                disabled={notionSyncing || !notionApiKey}
+                className="btn-primary"
+              >
+                {notionSyncing ? 'Syncing...' : 'Sync Now'}
+              </button>
+            </div>
+            <p className="text-xs text-gray-500 mt-1">
+              Your API key is only used for this sync and is not stored.
+            </p>
+          </div>
+
+          {/* Preview Results */}
+          {notionPreview && (
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+              <h4 className="font-medium text-blue-800 mb-3">Sync Preview</h4>
+              <div className="grid grid-cols-4 gap-4 mb-4">
+                <div className="text-center">
+                  <p className="text-2xl font-bold text-blue-600">{notionPreview.total_teachers}</p>
+                  <p className="text-xs text-gray-500">Total in Notion</p>
+                </div>
+                <div className="text-center">
+                  <p className="text-2xl font-bold text-green-600">{notionPreview.would_sync}</p>
+                  <p className="text-xs text-gray-500">Would Update</p>
+                </div>
+                <div className="text-center">
+                  <p className="text-2xl font-bold text-gray-500">{notionPreview.would_skip}</p>
+                  <p className="text-xs text-gray-500">No Changes</p>
+                </div>
+                <div className="text-center">
+                  <p className="text-2xl font-bold text-red-500">{notionPreview.not_found}</p>
+                  <p className="text-xs text-gray-500">Not in A&P</p>
+                </div>
+              </div>
+
+              {/* Preview details */}
+              {notionPreview.teachers && notionPreview.teachers.length > 0 && (
+                <div className="max-h-60 overflow-y-auto">
+                  <table className="min-w-full text-sm">
+                    <thead className="bg-blue-100">
+                      <tr>
+                        <th className="px-2 py-1 text-left">Teacher</th>
+                        <th className="px-2 py-1 text-left">Status</th>
+                        <th className="px-2 py-1 text-left">Match</th>
+                        <th className="px-2 py-1 text-left">Changes</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-blue-100">
+                      {notionPreview.teachers.slice(0, 20).map((t: any, i: number) => (
+                        <tr key={i} className={t.matched_employee ? '' : 'bg-red-50'}>
+                          <td className="px-2 py-1">
+                            <div>{t.name}</div>
+                            <div className="text-xs text-gray-400">{t.teacher_id}</div>
+                          </td>
+                          <td className="px-2 py-1">
+                            <span className={`text-xs px-1.5 py-0.5 rounded ${
+                              t.status === 'Active' ? 'bg-green-100 text-green-700' :
+                              t.status === 'Inactive' ? 'bg-red-100 text-red-700' :
+                              'bg-gray-100 text-gray-700'
+                            }`}>
+                              {t.status || '-'}
+                            </span>
+                          </td>
+                          <td className="px-2 py-1">
+                            {t.matched_employee ? (
+                              <span className="text-xs text-green-600">{t.match_method}</span>
+                            ) : (
+                              <span className="text-xs text-red-600">Not found</span>
+                            )}
+                          </td>
+                          <td className="px-2 py-1">
+                            {t.would_change && t.would_change.length > 0 ? (
+                              <div className="text-xs">
+                                {t.would_change.map((c: string, j: number) => (
+                                  <div key={j} className="text-amber-600">{c}</div>
+                                ))}
+                              </div>
+                            ) : t.matched_employee ? (
+                              <span className="text-xs text-gray-400">No changes</span>
+                            ) : null}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {notionPreview.teachers.length > 20 && (
+                    <p className="text-xs text-gray-500 mt-2 text-center">
+                      Showing 20 of {notionPreview.teachers.length} teachers
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Sync Results */}
+          {notionResult && (
+            <div className={`border rounded-lg p-4 ${notionResult.errors?.length > 0 ? 'bg-yellow-50 border-yellow-200' : 'bg-green-50 border-green-200'}`}>
+              <h4 className={`font-medium mb-3 ${notionResult.errors?.length > 0 ? 'text-yellow-800' : 'text-green-800'}`}>
+                Sync Complete
+              </h4>
+              <div className="grid grid-cols-4 gap-4">
+                <div className="text-center">
+                  <p className="text-2xl font-bold text-green-600">{notionResult.synced}</p>
+                  <p className="text-xs text-gray-500">Updated</p>
+                </div>
+                <div className="text-center">
+                  <p className="text-2xl font-bold text-gray-500">{notionResult.skipped}</p>
+                  <p className="text-xs text-gray-500">Skipped</p>
+                </div>
+                <div className="text-center">
+                  <p className="text-2xl font-bold text-red-500">{notionResult.not_found}</p>
+                  <p className="text-xs text-gray-500">Not Found</p>
+                </div>
+                <div className="text-center">
+                  <p className="text-2xl font-bold text-red-600">{notionResult.errors?.length || 0}</p>
+                  <p className="text-xs text-gray-500">Errors</p>
+                </div>
+              </div>
+              {notionResult.errors && notionResult.errors.length > 0 && (
+                <div className="mt-3 text-sm text-red-600">
+                  {notionResult.errors.map((e: string, i: number) => (
+                    <div key={i}>{e}</div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Info */}
+          <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+            <h4 className="font-medium text-gray-800 mb-2">What gets synced?</h4>
+            <ul className="text-sm text-gray-600 space-y-1">
+              <li>• <strong>Status:</strong> Active/Inactive/Break → updates employee status</li>
+              <li>• <strong>Schedule:</strong> Start Time/End Time → updates call_time/time_out</li>
+              <li>• <strong>Contact:</strong> Email/Phone → fills in if empty in A&P</li>
+              <li>• <strong>Position:</strong> Teacher/Administrative → updates position</li>
+            </ul>
+            <p className="text-xs text-gray-500 mt-2">
+              Matching: By email → by name → by Teacher ID (ICN-XXX). Only updates existing employees.
+            </p>
+          </div>
+        </div>
       </div>
 
       {/* Backup Management - 3-2-1 Strategy */}

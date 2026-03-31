@@ -1,6 +1,6 @@
 """API v1 endpoints."""
 from fastapi import APIRouter
-from . import auth, users, employees, attendance, payroll, settings, holidays, loans, leave, reports, import_export, backups
+from . import auth, users, employees, attendance, payroll, settings, holidays, loans, leave, reports, import_export, backups, notion
 
 api_router = APIRouter()
 
@@ -17,3 +17,4 @@ api_router.include_router(leave.router, prefix="/leave", tags=["Leave"])
 api_router.include_router(reports.router, prefix="/reports", tags=["Reports"])
 api_router.include_router(import_export.router, prefix="/import-export", tags=["Import/Export"])
 api_router.include_router(backups.router, prefix="/backups", tags=["Backups"])
+api_router.include_router(notion.router, prefix="/notion", tags=["Notion Integration"])

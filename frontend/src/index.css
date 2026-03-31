@@ -245,7 +245,7 @@ body {
   width: 4px;
   height: 60%;
   background: var(--accent-gold);
-  border-radius: 0 4px 4px 0;
+  border-radius: 4px;
 }
 
 /* Maximalist Tables */

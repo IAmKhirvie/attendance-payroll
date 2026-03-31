@@ -1,0 +1,97 @@
+# =============================================================================
+# 3-2-1 Backup Configuration
+# Attendance & Payroll System
+# =============================================================================
+# Copy this file to backup.conf and customize for your environment
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# BACKUP LOCATIONS
+# -----------------------------------------------------------------------------
+
+# Primary backup directory (local)
+# Backups will be stored in: <BACKUP_DIR>/local, /external, /cloud
+BACKUP_DIR="./backups"
+
+# External backup directory (different physical drive or partition)
+# RECOMMENDED: Set this to an external drive for true 3-2-1 compliance
+# Example: /Volumes/ExternalDrive/Backups/attendance-payroll
+# Example: /mnt/external/backups/attendance-payroll
+EXTERNAL_BACKUP_DIR=""
+
+# -----------------------------------------------------------------------------
+# CLOUD BACKUP SETTINGS
+# -----------------------------------------------------------------------------
+
+# Enable cloud/offsite backup
+# Set to "true" to enable offsite backups
+CLOUD_BACKUP_ENABLED=false
+
+# GitHub backup repository (optional)
+# Format: https://github.com/username/repo.git
+# Leave empty to disable GitHub backup
+GITHUB_BACKUP_REPO=""
+
+# Rclone cloud storage (optional)
+# Requires rclone to be installed and configured
+# RCLONE_REMOTE=google-drive
+# RCLONE_BUCKET=attendance-payroll-backups
+
+# -----------------------------------------------------------------------------
+# DATABASE SETTINGS
+# -----------------------------------------------------------------------------
+
+# Primary database file location
+# Default: SQLite database in backend/app/
+DATABASE_PATH="./backend/app/attendance_payroll.db"
+
+# Environment file location
+ENV_FILE="./backend/.env"
+
+# -----------------------------------------------------------------------------
+# RETENTION POLICY
+# -----------------------------------------------------------------------------
+
+# How many days to keep local backups (primary location)
+# Recommended: 7 days for frequent local backups
+RETENTION_LOCAL=7
+
+# How many days to keep external and cloud backups
+# Recommended: 30+ days for offsite backups
+RETENTION_DAYS=30
+
+# -----------------------------------------------------------------------------
+# COMPRESSION SETTINGS
+# -----------------------------------------------------------------------------
+
+# Gzip compression level (1-9)
+# 1 = fastest, 9 = best compression
+# Recommended: 6 (good balance)
+COMPRESSION_LEVEL=6
+
+# -----------------------------------------------------------------------------
+# NOTIFICATION SETTINGS (Optional)
+# -----------------------------------------------------------------------------
+
+# Email notifications (requires mail command or custom script)
+EMAIL_NOTIFICATIONS=false
+EMAIL_TO=""
+
+# Slack webhook (optional)
+SLACK_WEBHOOK_URL=""
+
+# -----------------------------------------------------------------------------
+# ADVANCED SETTINGS
+# -----------------------------------------------------------------------------
+
+# Enable verbose output
+VERBOSE=false
+
+# Stop on error
+STOP_ON_ERROR=true
+
+# Pre-backup hook (command to run before backup)
+# PRE_BACKUP_HOOK=""
+
+# Post-backup hook (command to run after backup)
+# POST_BACKUP_HOOK=""

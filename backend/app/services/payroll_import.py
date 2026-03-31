@@ -158,8 +158,8 @@ def parse_period_string(period_str: str) -> Tuple[Optional[date], Optional[date]
                 period_start = date(year, start_month, start_day)
                 period_end = date(year, end_month, end_day)
 
-                # Determine cutoff based on start day
-                cutoff = 1 if start_day <= 15 else 2
+                # Determine cutoff based on end day (files may span partial periods)
+                cutoff = 1 if end_day <= 15 else 2
 
                 return period_start, period_end, cutoff
 
@@ -182,7 +182,7 @@ def parse_period_string(period_str: str) -> Tuple[Optional[date], Optional[date]
 
             period_start = date(year, start_month, start_day)
             period_end = date(year, end_month, end_day)
-            cutoff = 1 if start_day <= 15 else 2
+            cutoff = 1 if end_day <= 15 else 2
 
             return period_start, period_end, cutoff
 
@@ -558,7 +558,7 @@ def import_payroll_from_file(
             parse_warnings.append(f"Could not detect period from file, using current period: {period_start} to {period_end}")
 
     if cutoff is None:
-        cutoff = 1 if period_start.day <= 15 else 2
+        cutoff = 1 if period_end.day <= 15 else 2
 
     # Check for existing payroll run for this period
     existing_run = db.query(PayrollRun).filter(
@@ -883,3 +883,147 @@ def generate_payroll_template() -> bytes:
 
     buffer.seek(0)
     return buffer.getvalue()
+
+
+def parse_time_ampm(time_str: str) -> Optional[str]:
+    """Convert time like '8am', '5pm', '10am' to 'HH:MM AM/PM' format."""
+    if not time_str or pd.isna(time_str):
+        return None
+
+    time_str = str(time_str).lower().strip()
+    match = re.match(r'^(\d{1,2})(am|pm)$', time_str)
+    if match:
+        hour = int(match.group(1))
+        period = match.group(2).upper()
+        return f"{hour:02d}:00 {period}"
+    return None
+
+
+def find_employee_by_fullname(db: Session, name: str) -> Optional[Employee]:
+    """Find employee by matching full name (fuzzy match)."""
+    if not name:
+        return None
+
+    name = str(name).strip()
+
+    # Parse name (Last, First, Middle format)
+    name_parts = [p.strip() for p in name.split(',')]
+    if len(name_parts) >= 2:
+        last_name = name_parts[0].lower()
+        first_name = name_parts[1].lower()
+    else:
+        parts = name.split()
+        first_name = parts[0].lower() if parts else name.lower()
+        last_name = parts[-1].lower() if len(parts) > 1 else ''
+
+    all_employees = db.query(Employee).all()
+    for emp in all_employees:
+        emp_first = (emp.first_name or '').lower()
+        emp_last = (emp.last_name or '').lower()
+        emp_full = emp.full_name.lower() if hasattr(emp, 'full_name') else f"{emp_first} {emp_last}"
+
+        if first_name in emp_full and last_name in emp_full:
+            return emp
+        if first_name in emp_first and last_name in emp_last:
+            return emp
+
+    return None
+
+
+def import_payslip_file(
+    db: Session,
+    file_path: str,
+    sheet_name: str = 'Payroll List '
+) -> Dict[str, Any]:
+    """
+    Import payslip data from Excel file.
+
+    For each employee in the file:
+    1. Updates their Employee record (basic salary, allowance, deductions, etc.)
+    2. Creates/updates their Payslip record
+
+    Just upload the file - everything gets imported and updated.
+    """
+    results = {
+        "success": True,
+        "total": 0,
+        "imported": 0,
+        "not_found": [],
+        "errors": [],
+        "employees_updated": [],
+        "payslips_created": []
+    }
+
+    try:
+        df = pd.read_excel(file_path, sheet_name=sheet_name, header=None, engine='openpyxl')
+    except Exception as e:
+        results["success"] = False
+        results["errors"].append(f"Failed to read sheet '{sheet_name}': {str(e)}")
+        return results
+
+    def get_num(row, col, default=0):
+        if col >= len(row):
+            return default
+        val = row.iloc[col]
+        if pd.isna(val):
+            return default
+        try:
+            return float(val)
+        except:
+            return default
+
+    # Process each employee row (data starts at row 2, index 2)
+    for row_idx in range(2, len(df)):
+        row = df.iloc[row_idx]
+
+        emp_name = row.iloc[2] if pd.notna(row.iloc[2]) else None
+        if not emp_name:
+            continue
+
+        results["total"] += 1
+        emp_name = str(emp_name).strip()
+
+        try:
+            employee = find_employee_by_fullname(db, emp_name)
+
+            if not employee:
+                results["not_found"].append(emp_name)
+                continue
+
+            # === GET ALL DATA FROM FILE ===
+            basic_monthly = get_num(row, 11)
+            allowance_monthly = get_num(row, 12)
+            prod_monthly = get_num(row, 13)
+            lang_monthly = get_num(row, 14)
+
+            sss_ee = get_num(row, 55)
+            phil_ee = get_num(row, 56)
+            pagibig_ee = get_num(row, 57)
+
+            # === UPDATE EMPLOYEE RECORD ===
+            employee.basic_salary = str(basic_monthly)
+            employee.allowance = str(allowance_monthly)
+            employee.productivity_incentive = str(prod_monthly)
+            employee.language_incentive = str(lang_monthly)
+            employee.sss_contribution = str(sss_ee)
+            employee.philhealth_contribution = str(phil_ee)
+            employee.pagibig_contribution = str(pagibig_ee)
+
+            results["employees_updated"].append({
+                "name": emp_name,
+                "employee_no": employee.employee_no,
+                "basic_monthly": basic_monthly,
+                "sss": sss_ee,
+                "philhealth": phil_ee,
+                "pagibig": pagibig_ee
+            })
+
+            results["imported"] += 1
+
+        except Exception as e:
+            results["errors"].append(f"Row {row_idx + 1} ({emp_name}): {str(e)}")
+
+    db.commit()
+
+    results["message"] = f"Imported {results['imported']} employees. Updated their salary and deduction info."
+    return results

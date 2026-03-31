@@ -122,8 +122,8 @@ class AttendanceReport(BaseReportGenerator):
             data["records"].append({
                 "date": self.format_date(rec.date),
                 "day": rec.date.strftime("%a"),
-                "time_in": rec.time_in.strftime("%H:%M") if rec.time_in else "-",
-                "time_out": rec.time_out.strftime("%H:%M") if rec.time_out else "-",
+                "time_in": rec.time_in.strftime("%I:%M %p") if rec.time_in else "-",
+                "time_out": rec.time_out.strftime("%I:%M %p") if rec.time_out else "-",
                 "worked_hours": worked_hours,
                 "late_minutes": late_mins,
                 "undertime_minutes": undertime_mins,
