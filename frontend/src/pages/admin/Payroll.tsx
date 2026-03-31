@@ -1833,7 +1833,7 @@ export function PayrollPage() {
                 <tbody className="bg-white divide-y divide-gray-200">
                   {filteredPayslips.map((payslip) => {
                     // Color coding based on payslip status
-                    const deductions = payslip.deductions_json ? JSON.parse(payslip.deductions_json) : {};
+                    const deductions = payslip.deductions || {};
                     const hasLate = deductions.late_minutes > 0;
                     const hasAbsences = deductions.absences_days > 0;
 
