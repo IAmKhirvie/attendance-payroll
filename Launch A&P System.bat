@@ -10,8 +10,8 @@ REM Get the directory where this script is located
 cd /d "%~dp0"
 set "SCRIPT_DIR=%~dp0"
 
-set FRONTEND_PORT=4000
-set BACKEND_PORT=8000
+set FRONTEND_PORT=4500
+set BACKEND_PORT=8500
 
 cls
 echo ==============================================

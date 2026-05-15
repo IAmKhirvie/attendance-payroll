@@ -34,6 +34,51 @@ from app.models.attendance import ProcessedAttendance, AttendanceStatus
 from app.models.employee import Employee
 
 
+def parse_call_time(time_str: str) -> Tuple[int, int]:
+    """
+    Parse call time string to (hour, minute) in 24-hour format.
+    Handles both formats:
+    - 24-hour: "08:00", "17:00", "13:30"
+    - 12-hour: "08:00 AM", "01:00 PM", "5:30 PM"
+
+    Returns (hour, minute) tuple in 24-hour format.
+    """
+    if not time_str:
+        return (8, 0)  # Default to 8 AM
+
+    time_str = time_str.strip()
+
+    # Check for 12-hour format (contains AM/PM)
+    match_12 = re.match(r'^(\d{1,2}):(\d{2})\s*(AM|PM)$', time_str, re.IGNORECASE)
+    if match_12:
+        hour = int(match_12.group(1))
+        minute = int(match_12.group(2))
+        ampm = match_12.group(3).upper()
+
+        # Convert to 24-hour
+        if ampm == 'PM' and hour != 12:
+            hour += 12
+        elif ampm == 'AM' and hour == 12:
+            hour = 0
+
+        return (hour, minute)
+
+    # Try 24-hour format
+    match_24 = re.match(r'^(\d{1,2}):(\d{2})$', time_str)
+    if match_24:
+        return (int(match_24.group(1)), int(match_24.group(2)))
+
+    # Try just hour (e.g., "08:00" stored as "8")
+    try:
+        hour = int(time_str)
+        return (hour, 0)
+    except ValueError:
+        pass
+
+    # Default fallback
+    return (8, 0)
+
+
 class TimeReportParser:
     """Parser for NGTimereport format with auto-fix for machine errors."""
 
@@ -80,6 +125,28 @@ class TimeReportParser:
             return match.group(1).strip(), match.group(2)
         return emp_info.strip(), None
 
+    def _parse_date(self, date_value: Any) -> Optional[date]:
+        """Parse NGTimereport date values across export variants."""
+        if date_value is None or pd.isna(date_value):
+            return None
+
+        if isinstance(date_value, datetime):
+            return date_value.date()
+        if isinstance(date_value, date):
+            return date_value
+
+        date_str = str(date_value).strip()
+        if not date_str or date_str == 'nan':
+            return None
+
+        for fmt in ('%m/%d/%Y', '%m-%d-%Y', '%Y-%m-%d'):
+            try:
+                return datetime.strptime(date_str, fmt).date()
+            except ValueError:
+                continue
+
+        return None
+
     def _parse_employee_section(self, emp_idx: int, next_emp_idx: int, emp_name: str, emp_id: str) -> List[Dict[str, Any]]:
         """
         Parse all attendance rows for one employee, handling misaligned rows.
@@ -95,7 +162,8 @@ class TimeReportParser:
             row = self.df.iloc[row_idx]
 
             day_name = str(row.iloc[0]).strip() if pd.notna(row.iloc[0]) else ''
-            date_str = str(row.iloc[1]).strip() if pd.notna(row.iloc[1]) else ''
+            date_value = row.iloc[1] if pd.notna(row.iloc[1]) else None
+            date_str = str(date_value).strip() if date_value is not None else ''
             time_in_str = str(row.iloc[2]).strip() if pd.notna(row.iloc[2]) else ''
             time_out_str = str(row.iloc[3]).strip() if pd.notna(row.iloc[3]) else ''
             work_time = row.iloc[4] if pd.notna(row.iloc[4]) else None
@@ -114,9 +182,8 @@ class TimeReportParser:
                     pending_record = None
 
                 # Parse the date
-                try:
-                    record_date = datetime.strptime(date_str, '%m/%d/%Y').date()
-                except ValueError:
+                record_date = self._parse_date(date_value)
+                if not record_date:
                     continue
 
                 # Detect issues from notes
@@ -374,33 +441,109 @@ def normalize_name(name: str) -> str:
     return name
 
 
+# Common Filipino nickname to full name mappings
+NICKNAME_MAPPINGS = {
+    # Common nicknames
+    'greg': ['griego', 'gregorio', 'gregory'],
+    'lyn': ['evelyn', 'marilyn', 'roselyn', 'jocelyn', 'frezilyn'],
+    'joy': ['joyce', 'joylyn', 'joylene'],
+    'mae': ['may', 'maybelle', 'maylene'],
+    'cha': ['charlene', 'charito', 'charmaine'],
+    'che': ['rachel', 'michelle'],
+    'nel': ['nelly', 'nelson', 'manuel'],
+    'jun': ['junior', 'junel'],
+    'boy': ['robert', 'roberto'],
+    'baby': ['barbara', 'beatriz'],
+    'len': ['lenny', 'lenlen', 'helen', 'ellen'],
+    'beth': ['elizabeth', 'bethany'],
+    'tina': ['christine', 'christina', 'kristina', 'valentina'],
+    'chris': ['christine', 'christopher', 'christian', 'cristina'],
+    'ine': ['janine', 'christine', 'nadine'],
+    'rose': ['rosalie', 'rosalyn', 'rosemarie'],
+    'jean': ['jeanette', 'jeanine'],
+    'anne': ['annabelle', 'marianne'],
+    'belle': ['annabelle', 'isabelle', 'maybelle'],
+    'yusi': ['eusebio', 'eusebia'],  # Filipino name
+}
+
+
+def clean_ngt_name(name: str) -> str:
+    """
+    Clean weird name formats from NGT biometric device.
+    Handles reversed names like "Lastname. Firstname" or "Lastname, Firstname".
+    """
+    name = name.strip()
+
+    # Handle "Lastname. Firstname" format (note the period)
+    if '. ' in name:
+        parts = name.split('. ', 1)
+        if len(parts) == 2:
+            # Swap: "Bona. Jean May" -> "Jean May Bona"
+            return f"{parts[1]} {parts[0]}"
+
+    # Handle "Lastname, Firstname" format
+    if ', ' in name:
+        parts = name.split(', ', 1)
+        if len(parts) == 2:
+            return f"{parts[1]} {parts[0]}"
+
+    return name
+
+
+def get_name_variations(name_part: str) -> List[str]:
+    """Get variations of a name part including nicknames."""
+    variations = [name_part]
+
+    # Add nickname mappings
+    name_lower = name_part.lower()
+    if name_lower in NICKNAME_MAPPINGS:
+        variations.extend(NICKNAME_MAPPINGS[name_lower])
+
+    # Also check if this name is a target of a nickname
+    for nickname, full_names in NICKNAME_MAPPINGS.items():
+        if name_lower in full_names:
+            variations.append(nickname)
+
+    return variations
+
+
 def find_employee_by_name(db: Session, name: str) -> Optional[Employee]:
     """
     Find employee by name with fuzzy matching.
     Prioritizes employees with salary data (basic_salary > 0).
-    Matches if all name parts from input are found in employee's full name.
+    Handles NGT biometric weird formats and nickname matching.
     """
-    normalized = normalize_name(name)
+    # First clean the name (handle reversed formats from NGT)
+    cleaned_name = clean_ngt_name(name)
+    normalized = normalize_name(cleaned_name)
     name_parts = normalized.split()
 
     if not name_parts:
         return None
 
-    # Get all employees, prioritize those with salary
+    # Get all employees, prioritize those with salary and ICN numbers (from Notion)
     all_employees = db.query(Employee).order_by(
+        # Prioritize ICN employees (from Notion) over EMP (auto-generated)
+        Employee.employee_no.asc(),
         Employee.basic_salary.desc().nulls_last()
     ).all()
 
+    # Separate ICN employees (canonical source from Notion)
+    icn_employees = [e for e in all_employees if e.employee_no and e.employee_no.startswith('ICN')]
+    # Check ICN employees first, then others
+    prioritized_employees = icn_employees + [e for e in all_employees if e not in icn_employees]
+
     last_name = name_parts[-1]
+    first_name = name_parts[0] if name_parts else ''
 
     # Strategy 1: Exact full name match
-    for emp in all_employees:
+    for emp in prioritized_employees:
         emp_full = normalize_name(emp.full_name)
         if emp_full == normalized:
             return emp
 
     # Strategy 2: All input name parts found in employee's full name + same last name
-    for emp in all_employees:
+    for emp in prioritized_employees:
         emp_full = normalize_name(emp.full_name)
         emp_full_nospace = emp_full.replace(' ', '')
         emp_last = normalize_name(emp.last_name) if emp.last_name else ''
@@ -420,8 +563,7 @@ def find_employee_by_name(db: Session, name: str) -> Optional[Employee]:
 
     # Strategy 3: First name + last name match (exact)
     if len(name_parts) >= 2:
-        first_name = name_parts[0]
-        for emp in all_employees:
+        for emp in prioritized_employees:
             emp_first = normalize_name(emp.first_name) if emp.first_name else ''
             emp_last = normalize_name(emp.last_name) if emp.last_name else ''
             if emp_first == first_name and emp_last == last_name:
@@ -429,10 +571,10 @@ def find_employee_by_name(db: Session, name: str) -> Optional[Employee]:
 
     # Strategy 4: First name is substring of DB first name + last name match
     if len(name_parts) >= 2:
-        first_name = name_parts[0]
-        for emp in all_employees:
+        for emp in prioritized_employees:
             emp_first = normalize_name(emp.first_name) if emp.first_name else ''
             emp_first_nospace = emp_first.replace(' ', '')
+            emp_middle = normalize_name(emp.middle_name) if emp.middle_name else ''
             emp_last = normalize_name(emp.last_name) if emp.last_name else ''
 
             # Check last name match (with space variations)
@@ -440,20 +582,65 @@ def find_employee_by_name(db: Session, name: str) -> Optional[Employee]:
                          emp_last.replace(' ', '') == last_name or
                          emp_last == last_name.replace(' ', ''))
 
+            if not last_match:
+                continue
+
             # Check if first name is substring (e.g., "greg" in "griego")
             first_match = (first_name in emp_first or
                           first_name in emp_first_nospace or
-                          emp_first.startswith(first_name))
+                          emp_first.startswith(first_name) or
+                          # Also check middle name
+                          first_name in emp_middle or
+                          emp_middle.startswith(first_name))
 
-            if last_match and first_match:
+            if first_match:
                 return emp
 
-    # Strategy 5: Last name only match (if only one employee with that last name)
-    matching_last = [emp for emp in all_employees
+    # Strategy 5: Nickname matching - check if input name matches a nickname/variation
+    if len(name_parts) >= 2:
+        first_variations = get_name_variations(first_name)
+
+        for emp in prioritized_employees:
+            emp_first = normalize_name(emp.first_name) if emp.first_name else ''
+            emp_middle = normalize_name(emp.middle_name) if emp.middle_name else ''
+            emp_last = normalize_name(emp.last_name) if emp.last_name else ''
+            emp_full = normalize_name(emp.full_name)
+
+            # Check last name match
+            last_match = (emp_last == last_name or
+                         emp_last.replace(' ', '') == last_name or
+                         emp_last == last_name.replace(' ', ''))
+
+            if not last_match:
+                continue
+
+            # Check if any variation of first name matches
+            for variation in first_variations:
+                if (variation in emp_first or
+                    variation in emp_middle or
+                    variation in emp_full or
+                    emp_first.startswith(variation) or
+                    emp_middle.startswith(variation)):
+                    return emp
+
+    # Strategy 6: Last name only match (if only one employee with that last name)
+    matching_last = [emp for emp in prioritized_employees
                      if normalize_name(emp.last_name or '') == last_name or
                         normalize_name(emp.last_name or '').replace(' ', '') == last_name]
     if len(matching_last) == 1:
         return matching_last[0]
+
+    # Strategy 7: Try with swapped first/last name (in case name order is wrong)
+    if len(name_parts) >= 2:
+        swapped_first = last_name
+        swapped_last = first_name
+
+        for emp in prioritized_employees:
+            emp_first = normalize_name(emp.first_name) if emp.first_name else ''
+            emp_last = normalize_name(emp.last_name) if emp.last_name else ''
+
+            if emp_last == swapped_last and swapped_first in emp_first:
+                return emp
 
     return None
 
@@ -511,8 +698,10 @@ def import_time_report(
             employees_existing += 1
         else:
             # 3. No match found - create new employee
-            name_parts = emp_name.split()
-            first_name = name_parts[0] if name_parts else emp_name
+            # First clean the name format (handle reversed NGT names)
+            cleaned_name = clean_ngt_name(emp_name)
+            name_parts = cleaned_name.split()
+            first_name = name_parts[0] if name_parts else cleaned_name
             last_name = name_parts[-1] if len(name_parts) > 1 else ''
             middle_name = ' '.join(name_parts[1:-1]) if len(name_parts) > 2 else None
 
@@ -538,6 +727,28 @@ def import_time_report(
 
             employee_map[(emp_name, bio_id)] = new_employee
             employees_created += 1
+
+            # Add warning about potential duplicate
+            errors.append(f"WARNING: New employee created '{first_name} {last_name}' ({employee_no}) from NGT name '{emp_name}'. Please verify this is not a duplicate.")
+
+    # Build holidays lookup for the import date range
+    holidays_lookup = {}
+    if records:
+        from app.models.holiday import Holiday
+        all_dates = [r['date'] for r in records if r.get('date')]
+        if all_dates:
+            min_date = min(all_dates)
+            max_date = max(all_dates)
+            holidays = db.query(Holiday).filter(
+                Holiday.date >= min_date,
+                Holiday.date <= max_date,
+                Holiday.is_active == True
+            ).all()
+            for h in holidays:
+                holidays_lookup[h.date] = {
+                    'type': h.holiday_type.value if h.holiday_type else 'special',
+                    'name': h.name,
+                }
 
     # Process attendance records
     for record in records:
@@ -576,11 +787,25 @@ def import_time_report(
                 # Employee doesn't work this day - rest day
                 record_status = 'rest_day'
 
+        # Check if this date is a holiday
+        is_holiday = False
+        holiday_type = None
+        holiday_name = None
+        if holidays_lookup and record['date'] in holidays_lookup:
+            h = holidays_lookup[record['date']]
+            is_holiday = True
+            holiday_type = h['type']
+            holiday_name = h['name']
+            # If no attendance on a holiday, mark as HOLIDAY (not absent)
+            if record_status == 'absent':
+                record_status = 'holiday'
+
         status_map = {
             'complete': AttendanceStatus.COMPLETE,
             'incomplete': AttendanceStatus.INCOMPLETE,
             'absent': AttendanceStatus.ABSENT,
-            'rest_day': AttendanceStatus.REST_DAY
+            'rest_day': AttendanceStatus.REST_DAY,
+            'holiday': AttendanceStatus.HOLIDAY,
         }
         status = status_map.get(record_status, AttendanceStatus.INCOMPLETE)
 
@@ -592,7 +817,8 @@ def import_time_report(
             buffer_mins = employee.buffer_minutes or 10
 
             try:
-                call_hour, call_min = map(int, effective_call_time.split(':'))
+                # Parse call time (handles both "08:00" and "08:00 AM" formats)
+                call_hour, call_min = parse_call_time(effective_call_time)
                 call_time_dt = datetime.combine(record['date'], time(call_hour, call_min))
                 # Add buffer to call time - employee should arrive by call_time + buffer
                 latest_arrival = call_time_dt + timedelta(minutes=buffer_mins)
@@ -600,7 +826,12 @@ def import_time_report(
                 if time_in_dt > latest_arrival:
                     # Employee is late
                     late_minutes = int((time_in_dt - latest_arrival).total_seconds() / 60)
-            except (ValueError, TypeError):
+
+                # Sanity check: late should not exceed work hours (e.g., max 8 hours = 480 mins)
+                max_late = (employee.work_hours_per_day or 8) * 60
+                if late_minutes > max_late:
+                    late_minutes = 0  # Something's wrong with the calculation, don't mark as late
+            except (ValueError, TypeError) as e:
                 pass  # Invalid call time format, skip late calculation
 
         exceptions = record.get('exceptions', [])
@@ -612,6 +843,14 @@ def import_time_report(
         # Add late exception if applicable
         if late_minutes > 0 and 'late' not in exceptions:
             exceptions.append('late')
+
+        # Add holiday exception if applicable
+        if is_holiday:
+            holiday_tag = f'holiday:{holiday_type}'
+            if holiday_tag not in exceptions:
+                exceptions.append(holiday_tag)
+            if holiday_name and f'holiday_name:{holiday_name}' not in exceptions:
+                exceptions.append(f'holiday_name:{holiday_name}')
 
         if existing:
             existing.time_in = time_in_dt
@@ -651,4 +890,133 @@ def import_time_report(
         'employees_created': employees_created,
         'employees_existing': employees_existing,
         'records': records
+    }
+
+
+def recalculate_attendance_late(
+    db: Session,
+    employee_id: int = None,
+    date_from: date = None,
+    date_to: date = None
+) -> Dict[str, Any]:
+    """
+    Recalculate late minutes for attendance records based on current employee schedules.
+
+    This is useful when:
+    - Employee schedule was updated after attendance import
+    - Notion sync updated employee call_time/time_out
+    - Initial import used wrong schedule
+
+    Args:
+        db: Database session
+        employee_id: Optional - recalculate for specific employee only
+        date_from: Optional - start date for recalculation
+        date_to: Optional - end date for recalculation
+
+    Returns:
+        Summary of recalculated records
+    """
+    # Build query for attendance records
+    query = db.query(ProcessedAttendance).join(Employee)
+
+    if employee_id:
+        query = query.filter(ProcessedAttendance.employee_id == employee_id)
+
+    if date_from:
+        query = query.filter(ProcessedAttendance.date >= date_from)
+
+    if date_to:
+        query = query.filter(ProcessedAttendance.date <= date_to)
+
+    # Only recalculate records that have time_in
+    query = query.filter(ProcessedAttendance.time_in.isnot(None))
+
+    records = query.all()
+
+    updated = 0
+    unchanged = 0
+    errors = []
+    details = []
+
+    for record in records:
+        employee = db.query(Employee).filter(Employee.id == record.employee_id).first()
+        if not employee:
+            continue
+
+        old_late = record.late_minutes or 0
+        new_late = 0
+
+        try:
+            # Get employee's effective call time
+            effective_call_time = employee.get_effective_call_time()
+            buffer_mins = employee.buffer_minutes or 10
+
+            # Parse call time
+            call_hour, call_min = parse_call_time(effective_call_time)
+            call_time_dt = datetime.combine(record.date, time(call_hour, call_min))
+
+            # Add buffer - employee should arrive by call_time + buffer
+            latest_arrival = call_time_dt + timedelta(minutes=buffer_mins)
+
+            # Get time_in as datetime
+            time_in_dt = record.time_in
+            if isinstance(time_in_dt, datetime):
+                pass  # Already datetime
+            elif isinstance(time_in_dt, time):
+                time_in_dt = datetime.combine(record.date, time_in_dt)
+            else:
+                continue  # Can't process
+
+            # Calculate late minutes
+            if time_in_dt > latest_arrival:
+                new_late = int((time_in_dt - latest_arrival).total_seconds() / 60)
+            else:
+                new_late = 0  # On time or early
+
+            # Sanity check: late should not exceed work hours
+            max_late = (employee.work_hours_per_day or 8) * 60
+            if new_late > max_late:
+                new_late = 0  # Something's wrong, don't mark as late
+
+            # Update if changed
+            if new_late != old_late:
+                record.late_minutes = new_late
+
+                # Update exceptions
+                exceptions = record.exceptions or []
+                if isinstance(exceptions, str):
+                    exceptions = [exceptions] if exceptions else []
+
+                if new_late > 0 and 'late' not in exceptions:
+                    exceptions.append('late')
+                elif new_late == 0 and 'late' in exceptions:
+                    exceptions.remove('late')
+
+                record.exceptions = exceptions if exceptions else None
+                record.has_exception = len(exceptions) > 0
+
+                updated += 1
+                details.append({
+                    'employee': employee.full_name,
+                    'employee_no': employee.employee_no,
+                    'date': str(record.date),
+                    'time_in': str(record.time_in),
+                    'schedule': f"{employee.call_time} + {buffer_mins}min buffer",
+                    'old_late': old_late,
+                    'new_late': new_late,
+                })
+            else:
+                unchanged += 1
+
+        except Exception as e:
+            errors.append(f"{employee.full_name} ({record.date}): {str(e)}")
+
+    db.commit()
+
+    return {
+        'total_records': len(records),
+        'updated': updated,
+        'unchanged': unchanged,
+        'errors': errors,
+        'details': details[:50],  # Limit details to first 50 for response size
     }

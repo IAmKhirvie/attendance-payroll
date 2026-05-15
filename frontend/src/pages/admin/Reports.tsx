@@ -197,7 +197,7 @@ export default function ReportsPage() {
                 <p className="text-2xl font-bold" style={{ color: '#991b1b' }}>{formatCurrency(reportData.summary?.total_deductions || 0)}</p>
               </div>
               <div className="p-4 rounded-xl" style={{ background: 'linear-gradient(135deg, #e9d5ff 0%, #d8b4fe 100%)', border: '2px solid #c084fc' }}>
-                <p className="text-sm font-semibold" style={{ color: '#7c3aed' }}>Total Net</p>
+                <p className="text-sm font-semibold" style={{ color: '#15803d' }}>Total Net</p>
                 <p className="text-2xl font-bold" style={{ color: '#6d28d9' }}>{formatCurrency(reportData.summary?.total_net || 0)}</p>
               </div>
             </div>
@@ -280,7 +280,7 @@ export default function ReportsPage() {
                 <p className="text-2xl font-bold" style={{ color: '#92400e' }}>{reportData.summary?.total_late_instances || 0}</p>
               </div>
               <div className="p-4 rounded-xl" style={{ background: 'linear-gradient(135deg, #e9d5ff 0%, #d8b4fe 100%)', border: '2px solid #c084fc' }}>
-                <p className="text-sm font-semibold" style={{ color: '#7c3aed' }}>Attendance Rate</p>
+                <p className="text-sm font-semibold" style={{ color: '#15803d' }}>Attendance Rate</p>
                 <p className="text-2xl font-bold" style={{ color: '#6d28d9' }}>{reportData.summary?.average_attendance_rate || 0}%</p>
               </div>
             </div>
@@ -348,12 +348,12 @@ export default function ReportsPage() {
                 <p className="text-2xl font-bold" style={{ color: '#065f46' }}>{formatCurrency(reportData[totalEeField] || 0)}</p>
               </div>
               <div className="p-4 rounded-xl" style={{ background: 'linear-gradient(135deg, #e9d5ff 0%, #d8b4fe 100%)', border: '2px solid #c084fc' }}>
-                <p className="text-sm font-semibold" style={{ color: '#7c3aed' }}>Employer Share</p>
+                <p className="text-sm font-semibold" style={{ color: '#15803d' }}>Employer Share</p>
                 <p className="text-2xl font-bold" style={{ color: '#6d28d9' }}>{formatCurrency(reportData[totalErField] || 0)}</p>
               </div>
               <div className="p-4 rounded-xl" style={{ background: 'linear-gradient(135deg, #e0e7ff 0%, #c7d2fe 100%)', border: '2px solid #a5b4fc' }}>
                 <p className="text-sm font-semibold" style={{ color: '#4338ca' }}>Total</p>
-                <p className="text-2xl font-bold" style={{ color: '#3730a3' }}>{formatCurrency(reportData.total_contribution || 0)}</p>
+                <p className="text-2xl font-bold" style={{ color: '#14532d' }}>{formatCurrency(reportData.total_contribution || 0)}</p>
               </div>
             </div>
 

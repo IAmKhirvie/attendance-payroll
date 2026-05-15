@@ -130,8 +130,8 @@ export function RightSidebar() {
           style={{
             width: '256px',
             height: '256px',
-            background: 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 50%, #a855f7 100%)',
-            boxShadow: '0 4px 20px rgba(79, 70, 229, 0.25)',
+            background: 'linear-gradient(135deg, #166534 0%, #15803d 50%, #16a34a 100%)',
+            boxShadow: '0 4px 20px rgba(22, 101, 52, 0.25)',
           }}
         >
           {/* View Toggle */}
@@ -140,7 +140,7 @@ export function RightSidebar() {
               onClick={() => setViewMode('date')}
               className={`px-3 py-1 rounded-full text-xs font-semibold transition-all ${
                 viewMode === 'date'
-                  ? 'bg-white text-purple-600'
+                  ? 'bg-white text-green-800'
                   : 'bg-white/20 text-white hover:bg-white/30'
               }`}
             >
@@ -150,7 +150,7 @@ export function RightSidebar() {
               onClick={() => setViewMode('calendar')}
               className={`px-3 py-1 rounded-full text-xs font-semibold transition-all ${
                 viewMode === 'calendar'
-                  ? 'bg-white text-purple-600'
+                  ? 'bg-white text-green-800'
                   : 'bg-white/20 text-white hover:bg-white/30'
               }`}
             >
@@ -191,7 +191,7 @@ export function RightSidebar() {
                       className={`
                         h-5 w-5 flex items-center justify-center text-[11px] rounded-full mx-auto relative cursor-default
                         ${isToday
-                          ? 'bg-white text-purple-600 font-bold'
+                          ? 'bg-white text-green-800 font-bold'
                           : holiday
                           ? `${getHolidayColor(holiday.holiday_type)} text-white font-semibold`
                           : day !== null

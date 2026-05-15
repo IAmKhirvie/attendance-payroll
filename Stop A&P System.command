@@ -5,8 +5,8 @@
 # Double-click this file to stop the system
 # =============================================
 
-FRONTEND_PORT=4000
-BACKEND_PORT=8000
+FRONTEND_PORT=4500
+BACKEND_PORT=8500
 
 clear
 echo "=============================================="

@@ -162,6 +162,27 @@ def parse_notion_page(page: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     if full_name.startswith("[") and "]" in full_name:
         clean_name = full_name.split("]", 1)[1].strip()
 
+    def get_number(prop):
+        """Extract number value."""
+        if not prop or prop.get("type") != "number":
+            return None
+        return prop.get("number")
+
+    def get_date(prop):
+        """Extract date from date property."""
+        if not prop or prop.get("type") != "date":
+            return None
+        date_obj = prop.get("date")
+        if not date_obj:
+            return None
+        return date_obj.get("start")  # Returns ISO date string
+
+    def get_checkbox(prop):
+        """Extract boolean from checkbox property."""
+        if not prop or prop.get("type") != "checkbox":
+            return None
+        return prop.get("checkbox")
+
     return {
         "notion_id": page.get("id"),
         "teacher_id": get_unique_id(props.get("Teacher ID")),
@@ -169,14 +190,27 @@ def parse_notion_page(page: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         "nickname": nickname,
         "first_name": get_text(props.get("First Name")),
         "last_name": get_text(props.get("Last Name")),
+        "middle_name": get_text(props.get("Middle Name")),
         "email": get_email(props.get("Email")),
-        "phone": get_phone(props.get("Contact Number")),
+        "phone": get_phone(props.get("Contact Number")) or get_phone(props.get("Phone")),
         "status": get_select(props.get("Status")),  # Active, Inactive, Break
-        "start_time": get_select(props.get("Start Time")),  # 8am, 9am, etc.
-        "end_time": get_select(props.get("End Time")),  # 5pm, 6pm, etc.
-        "position": get_multi_select(props.get("Position")),  # ["Teacher", "Administrative"]
-        "designation": get_multi_select(props.get("Designation")),  # ["Teacher", "Coordinator", "Administrator"]
+        "start_time": get_select(props.get("Start Time")) or get_select(props.get("Call Time")),
+        "end_time": get_select(props.get("End Time")) or get_select(props.get("Time Out")),
+        "position": get_multi_select(props.get("Position")),
+        "designation": get_multi_select(props.get("Designation")),
         "major": get_text(props.get("Major")),
+        "employment_type": get_select(props.get("Employment Type")) or get_select(props.get("Type")),
+        "work_hours": get_number(props.get("Work Hours")) or get_number(props.get("Hours per Day")),
+        "hire_date": get_date(props.get("Hire Date")) or get_date(props.get("Start Date")),
+        "is_flexible": get_checkbox(props.get("Flexible")) or get_checkbox(props.get("Is Flexible")),
+        # Work days
+        "work_monday": get_checkbox(props.get("Monday")) if props.get("Monday") else None,
+        "work_tuesday": get_checkbox(props.get("Tuesday")) if props.get("Tuesday") else None,
+        "work_wednesday": get_checkbox(props.get("Wednesday")) if props.get("Wednesday") else None,
+        "work_thursday": get_checkbox(props.get("Thursday")) if props.get("Thursday") else None,
+        "work_friday": get_checkbox(props.get("Friday")) if props.get("Friday") else None,
+        "work_saturday": get_checkbox(props.get("Saturday")) if props.get("Saturday") else None,
+        "work_sunday": get_checkbox(props.get("Sunday")) if props.get("Sunday") else None,
     }
 
 
@@ -312,6 +346,33 @@ def sync_notion_to_employees(
                     changes["is_active"] = new_is_active
                     employee.is_active = new_is_active
 
+            # Update names (always sync from Notion as source of truth)
+            if teacher.get("first_name") and employee.first_name != teacher["first_name"]:
+                old_values["first_name"] = employee.first_name
+                changes["first_name"] = teacher["first_name"]
+                employee.first_name = teacher["first_name"]
+
+            if teacher.get("last_name") and employee.last_name != teacher["last_name"]:
+                old_values["last_name"] = employee.last_name
+                changes["last_name"] = teacher["last_name"]
+                employee.last_name = teacher["last_name"]
+
+            if teacher.get("middle_name") and employee.middle_name != teacher["middle_name"]:
+                old_values["middle_name"] = employee.middle_name
+                changes["middle_name"] = teacher["middle_name"]
+                employee.middle_name = teacher["middle_name"]
+
+            # Update contact info (always sync from Notion)
+            if teacher.get("email") and employee.email != teacher["email"]:
+                old_values["email"] = employee.email
+                changes["email"] = teacher["email"]
+                employee.email = teacher["email"]
+
+            if teacher.get("phone") and employee.phone != teacher["phone"]:
+                old_values["phone"] = employee.phone
+                changes["phone"] = teacher["phone"]
+                employee.phone = teacher["phone"]
+
             # Update schedule from Notion (AM/PM format)
             start_time = parse_time_to_ampm(teacher.get("start_time"))
             end_time = parse_time_to_ampm(teacher.get("end_time"))
@@ -326,17 +387,6 @@ def sync_notion_to_employees(
                 changes["time_out"] = end_time
                 employee.time_out = end_time
 
-            # Update contact info if empty in A&P
-            if teacher.get("email") and not employee.email:
-                old_values["email"] = employee.email
-                changes["email"] = teacher["email"]
-                employee.email = teacher["email"]
-
-            if teacher.get("phone") and not employee.phone:
-                old_values["phone"] = employee.phone
-                changes["phone"] = teacher["phone"]
-                employee.phone = teacher["phone"]
-
             # Update position if available
             position_list = teacher.get("position", [])
             if position_list:
@@ -345,6 +395,66 @@ def sync_notion_to_employees(
                     old_values["position"] = employee.position
                     changes["position"] = position_str
                     employee.position = position_str
+
+            # Update work hours per day
+            if teacher.get("work_hours") is not None:
+                work_hours = int(teacher["work_hours"])
+                if employee.work_hours_per_day != work_hours:
+                    old_values["work_hours_per_day"] = employee.work_hours_per_day
+                    changes["work_hours_per_day"] = work_hours
+                    employee.work_hours_per_day = work_hours
+
+            # Update employment type
+            if teacher.get("employment_type"):
+                emp_type = teacher["employment_type"].lower()
+                if "part" in emp_type:
+                    emp_type = "part_time"
+                elif "full" in emp_type:
+                    emp_type = "full_time"
+                else:
+                    emp_type = teacher["employment_type"]
+                if employee.employment_type != emp_type:
+                    old_values["employment_type"] = employee.employment_type
+                    changes["employment_type"] = emp_type
+                    employee.employment_type = emp_type
+
+            # Update hire date
+            if teacher.get("hire_date"):
+                from datetime import date as date_type
+                try:
+                    hire_date = date_type.fromisoformat(teacher["hire_date"])
+                    if employee.hire_date != hire_date:
+                        old_values["hire_date"] = str(employee.hire_date) if employee.hire_date else None
+                        changes["hire_date"] = str(hire_date)
+                        employee.hire_date = hire_date
+                except:
+                    pass
+
+            # Update flexible schedule flag
+            if teacher.get("is_flexible") is not None:
+                if employee.is_flexible != teacher["is_flexible"]:
+                    old_values["is_flexible"] = employee.is_flexible
+                    changes["is_flexible"] = teacher["is_flexible"]
+                    employee.is_flexible = teacher["is_flexible"]
+
+            # Update work days
+            work_day_fields = [
+                ("work_monday", "work_monday"),
+                ("work_tuesday", "work_tuesday"),
+                ("work_wednesday", "work_wednesday"),
+                ("work_thursday", "work_thursday"),
+                ("work_friday", "work_friday"),
+                ("work_saturday", "work_saturday"),
+                ("work_sunday", "work_sunday"),
+            ]
+            for notion_field, emp_field in work_day_fields:
+                if teacher.get(notion_field) is not None:
+                    current_val = getattr(employee, emp_field)
+                    new_val = teacher[notion_field]
+                    if current_val != new_val:
+                        old_values[emp_field] = current_val
+                        changes[emp_field] = new_val
+                        setattr(employee, emp_field, new_val)
 
             if changes:
                 results["synced"] += 1

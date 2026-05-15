@@ -6,7 +6,7 @@ Shifts, biometric devices, raw punches, and processed attendance.
 
 from sqlalchemy import (
     Column, Integer, String, Boolean, DateTime, Date, Time,
-    ForeignKey, Numeric, Text, Enum as SQLEnum, JSON
+    ForeignKey, Numeric, Text, Enum as SQLEnum, JSON, UniqueConstraint
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -145,6 +145,9 @@ class AttendanceStatus(str, enum.Enum):
 class ProcessedAttendance(Base):
     """Daily processed attendance record."""
     __tablename__ = "processed_attendance"
+    __table_args__ = (
+        UniqueConstraint('employee_id', 'date', name='uq_attendance_employee_date'),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
 

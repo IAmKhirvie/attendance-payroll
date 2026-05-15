@@ -4,8 +4,8 @@ REM Attendance & Payroll System - Stop Script (Windows)
 REM Double-click this file to stop the system
 REM =============================================
 
-set FRONTEND_PORT=4000
-set BACKEND_PORT=8000
+set FRONTEND_PORT=4500
+set BACKEND_PORT=8500
 
 cls
 echo ==============================================

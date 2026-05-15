@@ -3,8 +3,8 @@
 # Attendance Payroll System - Start Script
 # Run both backend and frontend on local network
 
-FRONTEND_PORT=4000
-BACKEND_PORT=8000
+FRONTEND_PORT=4500
+BACKEND_PORT=8500
 
 echo "Starting Attendance Payroll System..."
 echo "========================================"
@@ -14,17 +14,19 @@ LOCAL_IP=$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/n
 echo "Local IP: $LOCAL_IP"
 echo ""
 
-# Kill any existing processes on the ports
+# Kill any existing payroll processes on the ports
 echo "Cleaning up old processes..."
 lsof -ti:$BACKEND_PORT | xargs kill -9 2>/dev/null
 lsof -ti:$FRONTEND_PORT | xargs kill -9 2>/dev/null
 sleep 2
 
+# Project root
+PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
 # Start Backend
 echo "Starting Backend API..."
-cd /Users/icanstudio2/attendance-payroll/backend
-source venv/bin/activate
-nohup uvicorn app.main:app --host 0.0.0.0 --port $BACKEND_PORT > /tmp/payroll-backend.log 2>&1 &
+cd "$PROJECT_DIR/backend"
+nohup "$PROJECT_DIR/backend/venv/bin/uvicorn" app.main:app --host 0.0.0.0 --port $BACKEND_PORT > /tmp/payroll-backend.log 2>&1 &
 BACKEND_PID=$!
 echo "Backend started (PID: $BACKEND_PID)"
 
@@ -33,7 +35,7 @@ sleep 3
 
 # Start Frontend (using npm run preview for production build)
 echo "Starting Frontend..."
-cd /Users/icanstudio2/attendance-payroll/frontend
+cd "$PROJECT_DIR/frontend"
 # Build if not built recently
 npm run build > /dev/null 2>&1
 nohup npm run preview -- --host 0.0.0.0 --port $FRONTEND_PORT > /tmp/payroll-frontend.log 2>&1 &

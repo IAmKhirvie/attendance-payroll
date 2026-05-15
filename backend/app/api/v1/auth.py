@@ -4,8 +4,6 @@ Authentication API Endpoints
 Login, register, password management.
 """
 
-from collections import defaultdict
-from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.orm import Session
 
@@ -19,48 +17,10 @@ from app.services.auth_service import AuthService
 from app.services.audit_service import AuditService
 from app.models.audit import AuditAction
 from app.core.security import get_password_strength
+from app.core.security_middleware import token_blacklist
+from app.core.rate_limiter import login_rate_limiter
 
 router = APIRouter()
-
-# IP-based rate limiting for login attempts
-# Stores: {ip_address: [(timestamp, was_success), ...]}
-_login_attempts: dict[str, list[tuple[datetime, bool]]] = defaultdict(list)
-_RATE_LIMIT_WINDOW = timedelta(minutes=15)  # Time window for rate limiting
-_MAX_ATTEMPTS_PER_WINDOW = 10  # Max failed attempts per IP in window
-_BLOCK_DURATION = timedelta(minutes=30)  # How long to block after exceeding limit
-
-
-def _check_ip_rate_limit(ip_address: str) -> tuple[bool, str]:
-    """
-    Check if IP is rate limited.
-    Returns (is_blocked, error_message).
-    """
-    now = datetime.utcnow()
-    attempts = _login_attempts.get(ip_address, [])
-
-    # Clean old attempts outside window
-    cutoff = now - _RATE_LIMIT_WINDOW
-    attempts = [(t, s) for t, s in attempts if t > cutoff]
-    _login_attempts[ip_address] = attempts
-
-    # Count recent failed attempts
-    failed_attempts = sum(1 for t, s in attempts if not s)
-
-    if failed_attempts >= _MAX_ATTEMPTS_PER_WINDOW:
-        # Check if block duration has passed since last attempt
-        if attempts:
-            last_attempt = max(t for t, _ in attempts)
-            if now - last_attempt < _BLOCK_DURATION:
-                remaining = _BLOCK_DURATION - (now - last_attempt)
-                mins = int(remaining.total_seconds() / 60) + 1
-                return True, f"Too many failed login attempts. Please try again in {mins} minutes."
-
-    return False, ""
-
-
-def _record_login_attempt(ip_address: str, success: bool):
-    """Record a login attempt for rate limiting."""
-    _login_attempts[ip_address].append((datetime.utcnow(), success))
 
 
 @router.post("/login", response_model=TokenResponse)
@@ -76,9 +36,9 @@ async def login(
     audit_service = AuditService(db)
     ip_address = get_client_ip(request)
 
-    # Check IP-based rate limiting
-    is_blocked, block_error = _check_ip_rate_limit(ip_address)
-    if is_blocked:
+    # Check IP-based rate limiting using improved rate limiter
+    is_allowed, block_error = login_rate_limiter.check_login_allowed(ip_address)
+    if not is_allowed:
         audit_service.log(
             action=AuditAction.LOGIN_FAILED,
             resource_type="user",
@@ -96,7 +56,7 @@ async def login(
 
     if error:
         # Record failed attempt for rate limiting
-        _record_login_attempt(ip_address, success=False)
+        login_rate_limiter.record_attempt(ip_address, success=False)
 
         # Log failed attempt
         audit_service.log(
@@ -112,8 +72,8 @@ async def login(
             detail=error
         )
 
-    # Record successful login
-    _record_login_attempt(ip_address, success=True)
+    # Record successful login (clears failed attempts)
+    login_rate_limiter.record_attempt(ip_address, success=True)
 
     # Create tokens
     tokens = auth_service.create_tokens(user)
@@ -232,11 +192,16 @@ async def logout(
 ):
     """
     Logout current user.
-    Note: JWT tokens are stateless, so this mainly logs the action.
-    Client should discard the token.
+    Blacklists the current token to prevent reuse.
     """
     audit_service = AuditService(db)
     ip_address = get_client_ip(request)
+
+    # Extract and blacklist the token
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        token = auth_header[7:]  # Remove "Bearer " prefix
+        token_blacklist.add(token)
 
     audit_service.log_logout(
         user_id=current_user.id,

@@ -7,7 +7,7 @@ All deductions are configurable, not hard-coded.
 
 from sqlalchemy import (
     Column, Integer, String, Boolean, DateTime, Date,
-    ForeignKey, Numeric, Text, Enum as SQLEnum, JSON
+    ForeignKey, Numeric, Text, Enum as SQLEnum, JSON, UniqueConstraint
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -180,7 +180,7 @@ class PayrollRun(Base):
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
     # Relationships
-    payslips = relationship("Payslip", back_populates="payroll_run")
+    payslips = relationship("Payslip", back_populates="payroll_run", cascade="all, delete-orphan")
     deleted_by_user = relationship("User", foreign_keys=[deleted_by])
 
     def __repr__(self):
@@ -214,8 +214,10 @@ class PayrollSettings(Base):
     # Overtime rates (multipliers)
     overtime_rate = Column(Numeric(5, 2), default=1.25)  # Regular OT
     night_diff_rate = Column(Numeric(5, 2), default=1.10)  # Night differential
-    holiday_rate = Column(Numeric(5, 2), default=2.00)  # Regular holiday
-    special_holiday_rate = Column(Numeric(5, 2), default=1.30)  # Special non-working holiday
+    holiday_rate = Column(Numeric(5, 2), default=2.00)  # Regular holiday multiplier (200%)
+    special_holiday_rate = Column(Numeric(5, 2), default=1.30)  # SNWH multiplier (130%)
+    regular_holiday_bonus = Column(Numeric(10, 2), default=0)  # Flat bonus per RH day worked (PHP)
+    snwh_bonus = Column(Numeric(10, 2), default=0)  # Flat bonus per SNWH day worked (PHP)
 
     # Work hours calculation
     work_hours_per_day = Column(Numeric(4, 2), default=8)  # Standard work hours
@@ -226,6 +228,12 @@ class PayrollSettings(Base):
     # Minute Rate = Daily Rate ÷ Hours per day ÷ 60
     use_ican_formula = Column(Boolean, default=True)  # Use ICAN attendance deduction formula
     working_days_per_year = Column(Integer, default=261)  # For daily rate calculation (ICAN: 261)
+
+    # Allowance/Incentive Calculation Mode
+    # "fixed" = Always semi-monthly fixed amount (current behavior)
+    # "daily_always" = Always daily_rate × days_worked for everyone
+    # "daily_partial" = Daily calc only when days_worked < expected working days
+    allowance_calculation_mode = Column(String(20), default="fixed")
 
     # Timestamps
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -239,6 +247,9 @@ class PayrollSettings(Base):
 class ThirteenthMonthPay(Base):
     """13th Month Pay record for employees (Philippine requirement)."""
     __tablename__ = "thirteenth_month_pay"
+    __table_args__ = (
+        UniqueConstraint('employee_id', 'year', name='uq_13thmonth_employee_year'),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
 
@@ -274,6 +285,9 @@ class ThirteenthMonthPay(Base):
 class Payslip(Base):
     """Individual employee payslip."""
     __tablename__ = "payslips"
+    __table_args__ = (
+        UniqueConstraint('employee_id', 'payroll_run_id', name='uq_payslip_employee_run'),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
 
@@ -314,6 +328,10 @@ class Payslip(Base):
     # Additional (internal use only - NOT printed on payslip)
     additional_amount = Column(Numeric(12, 2), default=0)  # Hidden additional amount
     additional_notes = Column(Text, nullable=True)  # Hidden notes for admin
+
+    # Allowance calculation override (per-payslip)
+    # None = use global setting, True = force daily calc, False = force fixed
+    use_daily_allowance = Column(Boolean, nullable=True, default=None)
 
     # Status
     is_released = Column(Boolean, default=False)  # Visible to employee

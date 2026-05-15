@@ -725,6 +725,8 @@ export function SettingsPage() {
               <option value="EMPLOYEE_UPDATE">Employee Update</option>
               <option value="EMPLOYEE_DELETE">Employee Delete</option>
               <option value="PAYROLL_RUN">Payroll Run</option>
+              <option value="PAYSLIP_EDIT">Payslip Edit</option>
+              <option value="PAYSLIP_RESTORE">Payslip Restore</option>
               <option value="PAYSLIP_RELEASE">Payslip Release</option>
               <option value="ATTENDANCE_IMPORT">Attendance Import</option>
               <option value="ATTENDANCE_EDIT">Attendance Edit</option>
@@ -1075,6 +1077,18 @@ export function SettingsPage() {
             </ul>
             <p className="text-xs text-gray-500 mt-2">
               Matching: By email → by name → by Teacher ID (ICN-XXX). Only updates existing employees.
+            </p>
+          </div>
+
+          {/* Important reminder about syncing before import */}
+          <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+            <h4 className="font-medium text-amber-800 mb-2">When to Sync from Notion</h4>
+            <p className="text-sm text-amber-700">
+              <strong>Sync from Notion BEFORE importing attendance</strong> if employee schedules or statuses have changed.
+              This ensures late/early calculations are accurate based on the correct schedule.
+            </p>
+            <p className="text-xs text-amber-600 mt-2">
+              When schedules change, the system automatically recalculates late minutes for all affected attendance records.
             </p>
           </div>
         </div>

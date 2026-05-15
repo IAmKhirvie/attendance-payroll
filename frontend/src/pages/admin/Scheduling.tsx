@@ -412,7 +412,7 @@ export default function SchedulingPage() {
                           {emp.is_flexible ? (
                             <span
                               className="inline-flex items-center px-2 py-0.5 rounded-lg text-xs font-bold"
-                              style={{ background: 'linear-gradient(135deg, #e9d5ff 0%, #d8b4fe 100%)', color: '#7c3aed', border: '2px solid #c084fc' }}
+                              style={{ background: 'linear-gradient(135deg, #dcfce7 0%, #bbf7d0 100%)', color: '#15803d', border: '2px solid #86efac' }}
                             >
                               Flex
                             </span>

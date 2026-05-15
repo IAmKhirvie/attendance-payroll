@@ -102,14 +102,23 @@ class MonthlyPayrollSummary(BaseReportGenerator):
             total_deductions += deductions_total
             total_net += net
 
-            # Extract government contributions from deductions JSON
+            # Government contributions are deducted on 2nd cutoff only.
             deductions_dict = ps.deductions or {}
-            ps_sss_ee = Decimal(str(deductions_dict.get("sss", 0)))
-            ps_sss_er = Decimal(str(deductions_dict.get("sss_employer", 0)))
-            ps_philhealth_ee = Decimal(str(deductions_dict.get("philhealth", 0)))
-            ps_philhealth_er = Decimal(str(deductions_dict.get("philhealth_employer", 0)))
-            ps_pagibig_ee = Decimal(str(deductions_dict.get("pagibig", 0)))
-            ps_pagibig_er = Decimal(str(deductions_dict.get("pagibig_employer", 0)))
+            cutoff = ps.payroll_run.cutoff if ps.payroll_run else 1
+            if cutoff == 2:
+                ps_sss_ee = Decimal(str(deductions_dict.get("sss", 0)))
+                ps_sss_er = Decimal(str(deductions_dict.get("sss_employer", 0)))
+                ps_philhealth_ee = Decimal(str(deductions_dict.get("philhealth", 0)))
+                ps_philhealth_er = Decimal(str(deductions_dict.get("philhealth_employer", 0)))
+                ps_pagibig_ee = Decimal(str(deductions_dict.get("pagibig", 0)))
+                ps_pagibig_er = Decimal(str(deductions_dict.get("pagibig_employer", 0)))
+            else:
+                ps_sss_ee = Decimal("0")
+                ps_sss_er = Decimal("0")
+                ps_philhealth_ee = Decimal("0")
+                ps_philhealth_er = Decimal("0")
+                ps_pagibig_ee = Decimal("0")
+                ps_pagibig_er = Decimal("0")
             ps_tax = Decimal(str(deductions_dict.get("withholding_tax", 0)))
 
             sss_ee += ps_sss_ee

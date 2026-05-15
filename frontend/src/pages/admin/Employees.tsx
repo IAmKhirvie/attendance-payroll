@@ -3,18 +3,9 @@ import { employeesApi } from '../../api/client';
 import type { Employee, Department, EmployeeStatus } from '../../types';
 import api from '../../api/client';
 import { CreatableSelect } from '../../components/CreatableSelect';
+import { formatTime12Hour } from '../../utils/format';
 
-// Helper function to convert 24-hour time to 12-hour format
-const formatTime12Hour = (time24: string): string => {
-  if (!time24) return '';
-  const [hours, minutes] = time24.split(':');
-  const hour = parseInt(hours, 10);
-  const ampm = hour >= 12 ? 'PM' : 'AM';
-  const hour12 = hour % 12 || 12;
-  return `${hour12}:${minutes} ${ampm}`;
-};
-
-// Helper function to convert 12-hour time to 24-hour format
+// Helper function to convert 12-hour time to 24-hour format (specific signature for TimePicker)
 const convertTo24Hour = (hour: string, minute: string, ampm: string): string => {
   let h = parseInt(hour, 10);
   if (ampm === 'PM' && h !== 12) h += 12;
@@ -22,14 +13,94 @@ const convertTo24Hour = (hour: string, minute: string, ampm: string): string => 
   return `${h.toString().padStart(2, '0')}:${minute}`;
 };
 
-// Helper function to parse 24-hour time into components
-const parseTime = (time24: string): { hour: string; minute: string; ampm: string } => {
-  if (!time24) return { hour: '08', minute: '00', ampm: 'AM' };
-  const [hours, minutes] = time24.split(':');
-  const hour = parseInt(hours, 10);
-  const ampm = hour >= 12 ? 'PM' : 'AM';
-  const hour12 = hour % 12 || 12;
-  return { hour: hour12.toString().padStart(2, '0'), minute: minutes || '00', ampm };
+// Helper function to validate hour and minute ranges
+const validateTimeComponents = (hour: number, minute: number, is24Hour: boolean): { hour: number; minute: number; valid: boolean } => {
+  // Validate minute (0-59)
+  const validMinute = Math.max(0, Math.min(59, isNaN(minute) ? 0 : minute));
+
+  // Validate hour based on format
+  let validHour: number;
+  if (is24Hour) {
+    validHour = Math.max(0, Math.min(23, isNaN(hour) ? 8 : hour));
+  } else {
+    validHour = Math.max(1, Math.min(12, isNaN(hour) ? 8 : hour));
+  }
+
+  return { hour: validHour, minute: validMinute, valid: true };
+};
+
+// Helper function to parse time into components (handles both 24-hour and 12-hour formats)
+const parseTime = (timeStr: string): { hour: string; minute: string; ampm: string } => {
+  if (!timeStr) return { hour: '08', minute: '00', ampm: 'AM' };
+
+  // Normalize the string - trim and handle various formats
+  const normalized = timeStr.trim().toUpperCase();
+
+  // Check if it's in 12-hour format (e.g., "01:00 PM", "5:30 AM", "08:00 AM", "5:00PM")
+  const match12 = normalized.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/);
+  if (match12) {
+    let hour = parseInt(match12[1], 10);
+    const minuteNum = parseInt(match12[2], 10);
+    const ampm = match12[3];
+
+    // Validate ranges
+    const validated = validateTimeComponents(hour, minuteNum, false);
+
+    // Ensure hour is in 1-12 range for 12-hour display
+    if (validated.hour === 0) validated.hour = 12;
+    if (validated.hour > 12) validated.hour = validated.hour - 12;
+
+    return {
+      hour: validated.hour.toString().padStart(2, '0'),
+      minute: validated.minute.toString().padStart(2, '0'),
+      ampm
+    };
+  }
+
+  // Check for format without space (e.g., "05:00PM")
+  const matchNoSpace = normalized.match(/^(\d{1,2}):(\d{2})(AM|PM)$/);
+  if (matchNoSpace) {
+    let hour = parseInt(matchNoSpace[1], 10);
+    const minuteNum = parseInt(matchNoSpace[2], 10);
+    const ampm = matchNoSpace[3];
+
+    // Validate ranges
+    const validated = validateTimeComponents(hour, minuteNum, false);
+
+    if (validated.hour === 0) validated.hour = 12;
+    if (validated.hour > 12) validated.hour = validated.hour - 12;
+
+    return {
+      hour: validated.hour.toString().padStart(2, '0'),
+      minute: validated.minute.toString().padStart(2, '0'),
+      ampm
+    };
+  }
+
+  // Otherwise, assume 24-hour format (e.g., "08:00", "17:00", "13:30")
+  const parts = timeStr.split(':');
+  if (parts.length >= 2) {
+    const hour24 = parseInt(parts[0], 10);
+    const minuteNum = parseInt(parts[1].replace(/\s*(AM|PM)/i, '').substring(0, 2), 10);
+
+    // Validate ranges
+    const validated = validateTimeComponents(hour24, minuteNum, true);
+
+    if (!isNaN(hour24)) {
+      const ampm = validated.hour >= 12 ? 'PM' : 'AM';
+      let hour12 = validated.hour % 12;
+      if (hour12 === 0) hour12 = 12;
+
+      return {
+        hour: hour12.toString().padStart(2, '0'),
+        minute: validated.minute.toString().padStart(2, '0'),
+        ampm
+      };
+    }
+  }
+
+  // Default fallback
+  return { hour: '08', minute: '00', ampm: 'AM' };
 };
 
 // Custom 12-hour time picker component
@@ -42,39 +113,54 @@ const TimePicker12Hour = ({
   onChange: (value: string) => void;
   className?: string;
 }) => {
-  const { hour, minute, ampm } = parseTime(value);
+  const parsed = parseTime(value);
+
+  // Ensure we have valid values that match our options
+  const hour = parsed.hour || '08';
+  const minute = parsed.minute || '00';
+  const ampm = parsed.ampm || 'AM';
 
   const handleChange = (newHour: string, newMinute: string, newAmpm: string) => {
     onChange(convertTo24Hour(newHour, newMinute, newAmpm));
   };
+
+  // Generate hour options (01-12)
+  const hourOptions = Array.from({ length: 12 }, (_, i) => {
+    const h = (i + 1).toString().padStart(2, '0');
+    return { value: h, label: h };
+  });
+
+  // Generate minute options (00-59)
+  const minuteOptions = Array.from({ length: 60 }, (_, i) => {
+    const m = i.toString().padStart(2, '0');
+    return { value: m, label: m };
+  });
 
   return (
     <div className={`flex items-center gap-1 ${className}`}>
       <select
         value={hour}
         onChange={(e) => handleChange(e.target.value, minute, ampm)}
-        className="form-input w-16 text-center px-1"
+        className="form-input w-14 text-center text-sm px-1"
       >
-        {Array.from({ length: 12 }, (_, i) => {
-          const h = (i + 1).toString().padStart(2, '0');
-          return <option key={h} value={h}>{h}</option>;
-        })}
+        {hourOptions.map(opt => (
+          <option key={opt.value} value={opt.value}>{opt.label}</option>
+        ))}
       </select>
-      <span className="text-gray-500">:</span>
+      <span className="text-gray-400">:</span>
       <select
         value={minute}
         onChange={(e) => handleChange(hour, e.target.value, ampm)}
-        className="form-input w-16 text-center px-1"
+        className="form-input w-14 text-center text-sm px-1"
       >
-        {Array.from({ length: 60 }, (_, i) => {
-          const m = i.toString().padStart(2, '0');
-          return <option key={m} value={m}>{m}</option>;
-        })}
+        {minuteOptions.map(opt => (
+          <option key={opt.value} value={opt.value}>{opt.label}</option>
+        ))}
       </select>
       <select
         value={ampm}
         onChange={(e) => handleChange(hour, minute, e.target.value)}
-        className="form-input w-16 text-center px-1"
+        className="form-input w-16 text-center text-sm px-1"
       >
         <option value="AM">AM</option>
         <option value="PM">PM</option>
@@ -133,7 +219,7 @@ const emptyForm: EmployeeFormData = {
   phone: '',
   department_id: '',
   position: '',
-  employment_type: 'regular',
+  employment_type: 'Fixed Term - Full Time',
   hire_date: '',
   end_date: '',  // Contract end date or resignation date
   basic_salary: '',
@@ -373,10 +459,10 @@ const EmployeeForm = memo(function EmployeeForm({
             onChange={(e) => handleFieldChange('employment_type', e.target.value)}
             className="form-input"
           >
-            <option value="regular">Regular</option>
-            <option value="probationary">Probationary</option>
-            <option value="contractual">Contractual</option>
-            <option value="part_time">Part Time</option>
+            <option value="Regular - Full Time">Regular - Full Time</option>
+            <option value="Regular - Part Time">Regular - Part Time</option>
+            <option value="Fixed Term - Full Time">Fixed Term - Full Time</option>
+            <option value="Fixed Term - Part Time">Fixed Term - Part Time</option>
           </select>
         </div>
         <div>
@@ -453,8 +539,8 @@ const EmployeeForm = memo(function EmployeeForm({
 
       {/* Incentives */}
       <div className="grid grid-cols-3 gap-4">
-        <div>
-          <label className="form-label">Allowance (Monthly)</label>
+        <div className="flex flex-col">
+          <label className="form-label h-10 flex items-end">Allowance (Monthly)</label>
           <input
             type="number"
             step="0.01"
@@ -464,8 +550,8 @@ const EmployeeForm = memo(function EmployeeForm({
             placeholder="0.00"
           />
         </div>
-        <div>
-          <label className="form-label">Productivity Incentive</label>
+        <div className="flex flex-col">
+          <label className="form-label h-10 flex items-end">Productivity Incentive</label>
           <input
             type="number"
             step="0.01"
@@ -475,8 +561,8 @@ const EmployeeForm = memo(function EmployeeForm({
             placeholder="0.00"
           />
         </div>
-        <div>
-          <label className="form-label">Language Incentive</label>
+        <div className="flex flex-col">
+          <label className="form-label h-10 flex items-end">Language Incentive</label>
           <input
             type="number"
             step="0.01"
@@ -542,7 +628,7 @@ const EmployeeForm = memo(function EmployeeForm({
       {/* Schedule Settings */}
       <div className="pt-4 border-t">
         <h4 className="font-semibold text-gray-700 mb-3">Schedule Settings</h4>
-        <div className="grid grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 gap-4">
           <div>
             <label className="form-label">Call Time</label>
             <TimePicker12Hour
@@ -565,22 +651,35 @@ const EmployeeForm = memo(function EmployeeForm({
               max="60"
               value={formData.buffer_minutes}
               onChange={(e) => handleFieldChange('buffer_minutes', e.target.value)}
-              className="form-input"
+              className="form-input w-24"
               placeholder="10"
             />
           </div>
           <div>
-            <label className="form-label">Flexible Schedule</label>
-            <div className="flex items-center h-10">
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={formData.is_flexible}
-                  onChange={(e) => setFormData(prev => ({ ...prev, is_flexible: e.target.checked }))}
-                  className="w-4 h-4 text-primary-600 border-gray-300 rounded focus:ring-primary-500"
-                />
-                <span className="text-sm text-gray-700">Yes</span>
-              </label>
+            <label className="form-label">Schedule Type</label>
+            <div className="flex items-center h-10 gap-2">
+              <button
+                type="button"
+                onClick={() => setFormData(prev => ({ ...prev, is_flexible: false }))}
+                className={`px-3 py-1.5 rounded text-sm font-medium ${
+                  !formData.is_flexible
+                    ? 'bg-primary-600 text-white'
+                    : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+                }`}
+              >
+                Regular
+              </button>
+              <button
+                type="button"
+                onClick={() => setFormData(prev => ({ ...prev, is_flexible: true }))}
+                className={`px-3 py-1.5 rounded text-sm font-medium ${
+                  formData.is_flexible
+                    ? 'bg-amber-500 text-white'
+                    : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+                }`}
+              >
+                Flexible
+              </button>
             </div>
           </div>
         </div>
@@ -1036,6 +1135,7 @@ export function EmployeesPage() {
     setError('');
 
     try {
+      console.log('[DEBUG] Saving employee - is_flexible:', formData.is_flexible);
       await employeesApi.update(selectedEmployee.id, {
         employee_no: formData.employee_no,
         first_name: formData.first_name,
@@ -1730,7 +1830,7 @@ export function EmployeesPage() {
                     <p className="text-sm text-gray-500">Pag-IBIG</p>
                     <p className="font-bold text-lg">{formatCurrency(selectedEmployee.pagibig_contribution)}</p>
                   </div>
-                  <div className="p-3 bg-indigo-50 rounded">
+                  <div className="p-3 bg-green-50 rounded">
                     <p className="text-sm text-gray-500">Tax</p>
                     <p className="font-bold text-lg">{formatCurrency(selectedEmployee.tax_amount)}</p>
                   </div>

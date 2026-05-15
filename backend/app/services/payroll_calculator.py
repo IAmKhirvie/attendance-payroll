@@ -226,6 +226,7 @@ def get_employee_loan_deductions(db: Session, employee_id: int) -> Dict[str, Any
     """
     Get active loans and total monthly deductions for an employee.
     Returns breakdown by loan type for payslip transparency.
+    Separates SSS loans and Pag-IBIG loans for proper display.
     """
     from sqlalchemy import func
 
@@ -236,6 +237,9 @@ def get_employee_loan_deductions(db: Session, employee_id: int) -> Dict[str, Any
     ).all()
 
     total_deduction = 0.0
+    sss_loan_total = 0.0
+    pagibig_loan_total = 0.0
+    other_loan_total = 0.0
     loan_breakdown = []
 
     for loan in active_loans:
@@ -246,10 +250,12 @@ def get_employee_loan_deductions(db: Session, employee_id: int) -> Dict[str, Any
         actual_deduction = min(monthly, remaining)
 
         if actual_deduction > 0:
+            loan_type_code = loan.loan_type_config.code if loan.loan_type_config else 'other'
+
             loan_breakdown.append({
                 'loan_id': loan.id,
                 'loan_type_id': loan.loan_type_id,
-                'loan_type_code': loan.loan_type.code if loan.loan_type else 'UNKNOWN',
+                'loan_type_code': loan_type_code,
                 'reference_no': loan.reference_no,
                 'monthly_deduction': monthly,
                 'actual_deduction': actual_deduction,
@@ -257,8 +263,19 @@ def get_employee_loan_deductions(db: Session, employee_id: int) -> Dict[str, Any
             })
             total_deduction += actual_deduction
 
+            # Categorize by loan type for separate display
+            if loan_type_code in ('sss', 'sss_calamity'):
+                sss_loan_total += actual_deduction
+            elif loan_type_code in ('pagibig', 'pagibig_calamity'):
+                pagibig_loan_total += actual_deduction
+            else:
+                other_loan_total += actual_deduction
+
     return {
         'total': round(total_deduction, 2),
+        'sss_loan': round(sss_loan_total, 2),
+        'pagibig_loan': round(pagibig_loan_total, 2),
+        'other_loan': round(other_loan_total, 2),
         'loans': loan_breakdown,
         'loan_count': len(loan_breakdown),
     }
@@ -318,20 +335,70 @@ def record_loan_deductions(
     return round(total_deducted, 2)
 
 
-def calculate_tax(monthly_taxable: float) -> float:
-    """Calculate withholding tax based on TRAIN Law 2024."""
+def calculate_bir_withholding_tax(monthly_taxable: float) -> dict:
+    """
+    Calculate withholding tax based on BIR TRAIN Law 2023-2026 brackets.
+
+    Monthly Tax Brackets (2023-2026):
+    - ₱0 - ₱20,833: Exempt
+    - Over ₱20,833 - ₱33,333: (Excess over ₱20,833) × 15%
+    - Over ₱33,333 - ₱66,667: ₱1,875 + (Excess over ₱33,333) × 20%
+    - Over ₱66,667 - ₱166,667: ₱8,541.80 + (Excess over ₱66,667) × 25%
+    - Over ₱166,667 - ₱666,667: ₱33,541.80 + (Excess over ₱166,667) × 30%
+    - Over ₱666,667: ₱183,541.80 + (Excess over ₱666,667) × 35%
+
+    Args:
+        monthly_taxable: Monthly taxable income (gross - SSS - PhilHealth - Pag-IBIG)
+
+    Returns:
+        dict with monthly_tax, semi_monthly_tax, bracket info
+    """
     if monthly_taxable <= 20833:
-        return 0
-    elif monthly_taxable <= 33332:
-        return round((monthly_taxable - 20833) * 0.15, 2)
-    elif monthly_taxable <= 66666:
-        return round(1875 + (monthly_taxable - 33333) * 0.20, 2)
-    elif monthly_taxable <= 166666:
-        return round(8541.67 + (monthly_taxable - 66667) * 0.25, 2)
-    elif monthly_taxable <= 666666:
-        return round(33541.67 + (monthly_taxable - 166667) * 0.30, 2)
+        monthly_tax = 0
+        bracket = "Exempt (≤₱20,833)"
+        rate = 0
+    elif monthly_taxable <= 33333:
+        excess = monthly_taxable - 20833
+        monthly_tax = round(excess * 0.15, 2)
+        bracket = "₱20,833 - ₱33,333"
+        rate = 15
+    elif monthly_taxable <= 66667:
+        excess = monthly_taxable - 33333
+        monthly_tax = round(1875 + (excess * 0.20), 2)
+        bracket = "₱33,333 - ₱66,667"
+        rate = 20
+    elif monthly_taxable <= 166667:
+        excess = monthly_taxable - 66667
+        monthly_tax = round(8541.80 + (excess * 0.25), 2)
+        bracket = "₱66,667 - ₱166,667"
+        rate = 25
+    elif monthly_taxable <= 666667:
+        excess = monthly_taxable - 166667
+        monthly_tax = round(33541.80 + (excess * 0.30), 2)
+        bracket = "₱166,667 - ₱666,667"
+        rate = 30
     else:
-        return round(183541.67 + (monthly_taxable - 666667) * 0.35, 2)
+        excess = monthly_taxable - 666667
+        monthly_tax = round(183541.80 + (excess * 0.35), 2)
+        bracket = "Over ₱666,667"
+        rate = 35
+
+    return {
+        "monthly_taxable_income": round(monthly_taxable, 2),
+        "monthly_tax": monthly_tax,
+        "semi_monthly_tax": round(monthly_tax / 2, 2),
+        "bracket": bracket,
+        "rate": rate
+    }
+
+
+def calculate_tax(monthly_taxable: float) -> float:
+    """
+    Calculate withholding tax based on BIR TRAIN Law 2023-2026.
+    Returns the MONTHLY tax amount.
+    """
+    result = calculate_bir_withholding_tax(monthly_taxable)
+    return result["monthly_tax"]
 
 
 def calculate_ican_daily_rate(monthly_salary: float, working_days_per_year: int = 261) -> float:
@@ -384,7 +451,7 @@ def get_payroll_settings(db: Session) -> PayrollSettings:
             default_philhealth=0,
             default_pagibig=0,
             default_tax=0,
-            overtime_rate=1.25,
+            overtime_rate=1.30,
             night_diff_rate=1.10,
             holiday_rate=2.00,
             special_holiday_rate=1.30,
@@ -444,18 +511,52 @@ def get_attendance_summary(
     days_worked = 0
     days_absent = 0
     late_count = 0
+    # Holiday tracking
+    regular_holiday_worked = 0  # Days employee worked on a Regular Holiday
+    regular_holiday_not_worked = 0  # Days employee didn't work on a Regular Holiday (still gets paid)
+    snwh_worked = 0  # Days employee worked on SNWH
+
+    # Build holiday lookup for the period
+    from app.models.holiday import Holiday
+    holidays_in_period = db.query(Holiday).filter(
+        Holiday.date >= period_start,
+        Holiday.date <= period_end,
+        Holiday.is_active == True
+    ).all()
+    holiday_map = {}
+    for h in holidays_in_period:
+        holiday_map[h.date] = h.holiday_type.value if h.holiday_type else 'special'
 
     if records:
         # Use ProcessedAttendance
         for record in records:
+            record_holiday_type = holiday_map.get(record.date)
+
             if record.worked_minutes and record.worked_minutes > 0:
                 total_worked_minutes += record.worked_minutes
                 days_worked += 1
+                # Track holidays worked
+                if record_holiday_type == 'regular':
+                    regular_holiday_worked += 1
+                elif record_holiday_type in ('special', 'special_working'):
+                    snwh_worked += 1
             elif record.status == AttendanceStatus.ABSENT:
-                days_absent += 1
+                # If absent on a regular holiday, still gets paid (PH law)
+                if record_holiday_type == 'regular':
+                    regular_holiday_not_worked += 1
+                else:
+                    days_absent += 1
+            elif record.status == AttendanceStatus.HOLIDAY:
+                # Explicitly marked as holiday
+                if record_holiday_type == 'regular':
+                    regular_holiday_not_worked += 1
+                # SNWH not worked = no pay (unless company policy says otherwise)
             elif employee_works_on_weekday(record.date.weekday()):
                 # Employee should have worked this day but didn't
-                days_absent += 1
+                if record_holiday_type == 'regular':
+                    regular_holiday_not_worked += 1
+                else:
+                    days_absent += 1
             # Note: If employee doesn't work this day, it's not counted as absent
 
             if hasattr(record, 'late_minutes') and record.late_minutes and record.late_minutes > 0:
@@ -510,6 +611,10 @@ def get_attendance_summary(
         'total_late_hours': round(total_late_minutes / 60, 2),
         'total_ot_hours': round(total_ot_minutes / 60, 2),
         'total_undertime_minutes': total_undertime_minutes,
+        # Holiday data
+        'regular_holiday_worked': regular_holiday_worked,
+        'regular_holiday_not_worked': regular_holiday_not_worked,
+        'snwh_worked': snwh_worked,
     }
 
 
@@ -561,31 +666,91 @@ def generate_payslip(
         # ICAN Formula: Minute Rate = Daily Rate ÷ Hours per day ÷ 60
         ican_minute_rate = calculate_ican_minute_rate(ican_daily_rate, work_hours_per_day)
 
-    # Calculate semi-monthly amounts
+    # Get allowance calculation mode from settings
+    allowance_calc_mode = getattr(settings, 'allowance_calculation_mode', 'fixed') or 'fixed'
+
+    # Calculate working days in cutoff period (for daily calculation)
+    # Count actual working days between period_start and period_end based on employee's schedule
+    from datetime import timedelta
+    working_days_in_cutoff = 0
+    current_date = payroll_run.period_start
+    while current_date <= payroll_run.period_end:
+        weekday = current_date.weekday()
+        # Check if employee works on this weekday
+        day_map = {
+            0: getattr(employee, 'work_monday', True),
+            1: getattr(employee, 'work_tuesday', True),
+            2: getattr(employee, 'work_wednesday', True),
+            3: getattr(employee, 'work_thursday', True),
+            4: getattr(employee, 'work_friday', True),
+            5: getattr(employee, 'work_saturday', False),
+            6: getattr(employee, 'work_sunday', False),
+        }
+        if day_map.get(weekday, False):
+            working_days_in_cutoff += 1
+        current_date += timedelta(days=1)
+
+    # Default to 11 if no working days found (shouldn't happen)
+    if working_days_in_cutoff == 0:
+        working_days_in_cutoff = 11
+
+    # Calculate daily rates for allowances/incentives using ICAN formula
+    # Daily Rate = Monthly × 12 ÷ 261 (same formula as salary)
+    daily_allowance = round(monthly_allowance * 12 / 261, 2) if monthly_allowance > 0 else 0
+    daily_productivity = round(monthly_productivity * 12 / 261, 2) if monthly_productivity > 0 else 0
+    daily_language = round(monthly_language * 12 / 261, 2) if monthly_language > 0 else 0
+
+    # Determine if we should use daily calculation for THIS payslip
+    # Priority: payslip override > global setting
+    # Note: use_daily_allowance will be set later when creating the payslip,
+    # but for initial calculation we use the global setting
+    days_worked = attendance['days_worked']
+
+    use_daily_calc = False
+    if allowance_calc_mode == 'daily_always':
+        use_daily_calc = True
+    elif allowance_calc_mode == 'daily_partial':
+        # Only use daily if days worked is less than expected
+        if days_worked < working_days_in_cutoff:
+            use_daily_calc = True
+
+    # Calculate semi-monthly amounts based on mode
     basic_semi = round(monthly_basic / 2, 2)
-    allowance_semi = round(monthly_allowance / 2, 2)
-    productivity_semi = round(monthly_productivity / 2, 2)
-    language_semi = round(monthly_language / 2, 2)
+
+    if use_daily_calc:
+        # Daily calculation: daily_rate × days_worked
+        allowance_semi = round(daily_allowance * days_worked, 2)
+        productivity_semi = round(daily_productivity * days_worked, 2)
+        language_semi = round(daily_language * days_worked, 2)
+    else:
+        # Static: use employee's allowance/incentive values as-is (not divided)
+        allowance_semi = round(monthly_allowance, 2)
+        productivity_semi = round(monthly_productivity, 2)
+        language_semi = round(monthly_language, 2)
 
     # Calculate deductions for absences
     # Priority: ICAN formula > universal rate from settings > employee daily_rate
+    # Skip fallback rates when ICAN is enabled but employee has no salary (prevents negative net pay)
     absent_amount = 0
     effective_daily_rate = 0.0
+    has_salary = monthly_basic > 0
     if attendance['days_absent'] > 0:
         if use_ican_formula and ican_daily_rate > 0:
             # Use ICAN formula: Daily Rate = Monthly Salary × 12 ÷ 261
             effective_daily_rate = ican_daily_rate
             absent_amount = round(ican_daily_rate * attendance['days_absent'], 2)
-        elif absent_rate_per_day > 0:
+        elif not use_ican_formula and absent_rate_per_day > 0:
+            # Only use universal fallback when ICAN formula is disabled
             effective_daily_rate = absent_rate_per_day
             absent_amount = round(absent_rate_per_day * attendance['days_absent'], 2)
-        elif daily_rate > 0:
+        elif has_salary and daily_rate > 0:
             effective_daily_rate = daily_rate
             absent_amount = round(daily_rate * attendance['days_absent'], 2)
 
     # Calculate late deductions (Tardiness)
     # Priority: ICAN minute rate > per-minute setting > per-incident > hourly rate fallback
     # If employee is_flexible, skip late deductions entirely
+    # Skip fallback rates when ICAN is enabled but employee has no salary
     late_amount = 0
     total_late_minutes = attendance['total_late_minutes']
     late_count = attendance['late_count']
@@ -601,12 +766,12 @@ def generate_payslip(
         # Use ICAN formula: Minute Rate = Daily Rate ÷ Hours per day ÷ 60
         effective_minute_rate = ican_minute_rate
         late_amount = round(ican_minute_rate * total_late_minutes, 2)
-    elif late_rate_per_minute > 0 and total_late_minutes > 0:
+    elif not use_ican_formula and late_rate_per_minute > 0 and total_late_minutes > 0:
         effective_minute_rate = late_rate_per_minute
         late_amount = round(late_rate_per_minute * total_late_minutes, 2)
-    elif late_rate_per_incident > 0 and late_count > 0:
+    elif not use_ican_formula and late_rate_per_incident > 0 and late_count > 0:
         late_amount = round(late_rate_per_incident * late_count, 2)
-    elif hourly_rate > 0 and attendance['total_late_hours'] > 0:
+    elif has_salary and hourly_rate > 0 and attendance['total_late_hours'] > 0:
         late_amount = round(hourly_rate * attendance['total_late_hours'], 2)
 
     # Calculate undertime deduction
@@ -616,13 +781,45 @@ def generate_payslip(
     if use_ican_formula and ican_minute_rate > 0 and total_undertime > 0:
         # Use ICAN formula: same minute rate as tardiness
         undertime_amount = round(ican_minute_rate * total_undertime, 2)
-    elif undertime_rate_per_minute > 0 and total_undertime > 0:
+    elif not use_ican_formula and undertime_rate_per_minute > 0 and total_undertime > 0:
         undertime_amount = round(undertime_rate_per_minute * total_undertime, 2)
 
     # Calculate basic pay based on days worked (for manual/seasonal employees)
     days_worked = attendance['days_worked']
     daily_rate_for_calc = ican_daily_rate if use_ican_formula and ican_daily_rate > 0 else daily_rate
     daily_based_basic = round(daily_rate_for_calc * days_worked, 2)
+
+    # Calculate holiday pay (Philippine Labor Law + company settings)
+    # Regular Holiday (worked): 200% of daily rate (100% already in basic + 100% premium)
+    # Regular Holiday (not worked): 100% of daily rate (paid even if not worked)
+    # SNWH (worked): 130% of daily rate (100% already in basic + 30% premium)
+    # SNWH (not worked): No pay by law (but company may give flat bonus)
+    rh_worked = attendance.get('regular_holiday_worked', 0)
+    rh_not_worked = attendance.get('regular_holiday_not_worked', 0)
+    snwh_worked_count = attendance.get('snwh_worked', 0)
+
+    holiday_rate = float(getattr(settings, 'holiday_rate', 2.00) or 2.00)
+    special_holiday_rate = float(getattr(settings, 'special_holiday_rate', 1.30) or 1.30)
+    rh_bonus = float(getattr(settings, 'regular_holiday_bonus', 0) or 0)
+    snwh_bonus = float(getattr(settings, 'snwh_bonus', 0) or 0)
+
+    # Regular Holiday pay: premium portion only (100% is already in basic salary)
+    # If worked: (holiday_rate - 1.0) × daily_rate × days + flat bonus per day
+    # If not worked: 1.0 × daily_rate (ensures they get paid for that day)
+    regular_holiday_pay = 0
+    if daily_rate_for_calc > 0:
+        if rh_worked > 0:
+            regular_holiday_pay += round((holiday_rate - 1.0) * daily_rate_for_calc * rh_worked, 2)
+            regular_holiday_pay += round(rh_bonus * rh_worked, 2)
+        if rh_not_worked > 0:
+            # Employee gets daily rate even though they didn't work
+            regular_holiday_pay += round(daily_rate_for_calc * rh_not_worked, 2)
+
+    # SNWH pay: premium portion (30% of daily rate) + flat bonus
+    snwh_pay = 0
+    if daily_rate_for_calc > 0 and snwh_worked_count > 0:
+        snwh_pay = round((special_holiday_rate - 1.0) * daily_rate_for_calc * snwh_worked_count, 2)
+        snwh_pay += round(snwh_bonus * snwh_worked_count, 2)
 
     # Build earnings (all adjustable by HR)
     earnings = {
@@ -635,12 +832,12 @@ def generate_payslip(
         'daily_rate': daily_rate_for_calc,
         'days_worked': days_worked,
         'daily_based_basic': daily_based_basic,  # Daily rate × Days worked
-        # Holiday pay (HR will fill)
-        'regular_holiday': 0,
+        # Holiday pay (auto-calculated from attendance + settings, adjustable by HR)
+        'regular_holiday': regular_holiday_pay,
         'regular_holiday_ot': 0,
-        'snwh': 0,  # Special Non-Working Holiday
+        'snwh': snwh_pay,  # Special Non-Working Holiday
         'snwh_ot': 0,  # SNWH Overtime
-        'overtime_pay': 0,  # HR will fill
+        'overtime': 0,  # Auto-computed below, adjustable by HR
         # Calculation reference (for transparency)
         '_calculation_info': {
             'monthly_basic': monthly_basic,
@@ -650,18 +847,46 @@ def generate_payslip(
             'ican_daily_rate': ican_daily_rate,  # Monthly × 12 ÷ 261
             'ican_minute_rate': ican_minute_rate,  # Daily Rate ÷ Hours ÷ 60
             'employee_working_days_per_week': getattr(employee, 'working_days_per_week', 5),
+            # Allowance calculation info
+            'allowance_calc_mode': allowance_calc_mode,
+            'use_daily_allowance': use_daily_calc,
+            'working_days_in_cutoff': working_days_in_cutoff,
+            'daily_allowance_rate': daily_allowance,
+            'daily_productivity_rate': daily_productivity,
+            'daily_language_rate': daily_language,
+            'monthly_allowance': monthly_allowance,
+            'monthly_productivity': monthly_productivity,
+            'monthly_language': monthly_language,
+            # Holiday info
+            'regular_holiday_worked': rh_worked,
+            'regular_holiday_not_worked': rh_not_worked,
+            'snwh_worked': snwh_worked_count,
+            'holiday_rate': holiday_rate,
+            'special_holiday_rate': special_holiday_rate,
+            'rh_bonus_per_day': rh_bonus,
+            'snwh_bonus_per_day': snwh_bonus,
         }
     }
 
-    total_earnings = basic_semi + allowance_semi + productivity_semi + language_semi
+    # Auto-compute OT pay: (Daily Rate / Work Hours) × OT Rate × OT Hours
+    total_ot_hours = float(attendance.get('total_ot_hours', 0) or 0)
+    ot_rate_multiplier = float(getattr(settings, 'overtime_rate', 1.30) or 1.30)
+    ot_hourly_rate = (ican_daily_rate / work_hours_per_day) if (ican_daily_rate > 0 and work_hours_per_day > 0) else 0
+    ot_pay = round(ot_hourly_rate * ot_rate_multiplier * total_ot_hours, 2)
+    earnings['overtime'] = ot_pay
+    earnings['_calculation_info']['ot_hourly_rate'] = round(ot_hourly_rate, 4)
+    earnings['_calculation_info']['ot_rate_multiplier'] = ot_rate_multiplier
+    earnings['_calculation_info']['ot_hours'] = total_ot_hours
+
+    total_earnings = basic_semi + allowance_semi + productivity_semi + language_semi + regular_holiday_pay + snwh_pay + ot_pay
 
     # Build deductions based on cutoff
     deductions = {
         'absences_days': attendance['days_absent'],
         'absences_amount': absent_amount,
         'absences_daily_rate_used': effective_daily_rate,  # Rate used for absence deduction
-        'late_hours': attendance['total_late_hours'],
-        'late_minutes': attendance['total_late_minutes'],
+        'late_hours': round(total_late_minutes / 60, 2),
+        'late_minutes': total_late_minutes,
         'late_amount': late_amount,
         'late_minute_rate_used': effective_minute_rate,  # Rate used for late deduction
         'work_hours_per_day_used': work_hours_per_day,  # Employee's work hours used in calculation
@@ -686,6 +911,38 @@ def generate_payslip(
     loan_info = get_employee_loan_deductions(db, employee.id)
     loan_deduction_total = loan_info['total']
 
+    # Calculate monthly government contributions for tax computation
+    # (Even though SSS/PhilHealth/Pag-IBIG are only deducted in 2nd cutoff,
+    # we need the monthly amounts to compute taxable income for BIR tax)
+    if emp_sss is not None:
+        monthly_sss = emp_sss
+    elif default_sss is not None and default_sss > 0:
+        monthly_sss = default_sss
+    else:
+        monthly_sss = calculate_sss_from_db(db, monthly_basic)
+
+    if emp_philhealth is not None:
+        monthly_philhealth = emp_philhealth
+    elif default_philhealth is not None and default_philhealth > 0:
+        monthly_philhealth = default_philhealth
+    else:
+        monthly_philhealth = calculate_philhealth_from_db(db, monthly_basic)
+
+    if emp_pagibig is not None:
+        monthly_pagibig = emp_pagibig
+    elif default_pagibig is not None and default_pagibig > 0:
+        monthly_pagibig = default_pagibig
+    else:
+        monthly_pagibig = calculate_pagibig_from_db(db, monthly_basic)
+
+    # Calculate BIR Taxable Income = Gross Monthly - SSS - PhilHealth - Pag-IBIG
+    # Gross includes basic salary + taxable allowances (productivity, language incentives)
+    gross_monthly = monthly_basic + float(employee.allowance or 0) + float(employee.productivity_incentive or 0) + float(employee.language_incentive or 0)
+    monthly_taxable_income = gross_monthly - monthly_sss - monthly_philhealth - monthly_pagibig
+
+    # Calculate BIR withholding tax
+    tax_computation = calculate_bir_withholding_tax(monthly_taxable_income)
+
     # Deductions based on cutoff
     # 1st cutoff: absences, lates, loans, tax (NO government benefits)
     # 2nd cutoff: absences, lates, tax, SSS, PhilHealth, Pag-IBIG (NO loans)
@@ -696,64 +953,55 @@ def generate_payslip(
         elif default_tax > 0:
             tax_semi = round(default_tax / 2, 2)
         else:
-            tax_semi = round(calculate_tax(monthly_basic) / 2, 2)
+            # Auto-calculate using BIR formula
+            tax_semi = tax_computation["semi_monthly_tax"]
 
         deductions['tax'] = tax_semi
-        deductions['loans'] = loan_deduction_total  # Auto-calculated from active loans
+        deductions['tax_computation'] = tax_computation  # Store computation details
+        deductions['sss_loan'] = loan_info.get('sss_loan', 0)  # SSS loans (regular + calamity)
+        deductions['pagibig_loan'] = loan_info.get('pagibig_loan', 0)  # Pag-IBIG loans (regular + calamity)
+        deductions['other_loan'] = loan_info.get('other_loan', 0)  # Company, cash advance, other loans
+        deductions['loans'] = loan_deduction_total  # Legacy field - total of all loans
         deductions['loans_breakdown'] = loan_info['loans']  # Detailed breakdown
         deductions['sss'] = 0
         deductions['philhealth'] = 0
         deductions['pagibig'] = 0
     else:
         # 2nd cutoff: absences, lates, tax, SSS, PhilHealth, Pag-IBIG (NO loans)
-        # Priority: 1) Employee-specific value, 2) Default from settings, 3) Auto-calculate
-        # Note: We check "is not None" to allow explicit 0 values (meaning no deduction)
-        if emp_sss is not None:
-            deductions['sss'] = emp_sss
-        elif default_sss is not None:
-            deductions['sss'] = default_sss
-        else:
-            # Use database-aware calculation (falls back to hardcoded if no DB table)
-            deductions['sss'] = calculate_sss_from_db(db, monthly_basic)
-
-        if emp_philhealth is not None:
-            deductions['philhealth'] = emp_philhealth
-        elif default_philhealth is not None:
-            deductions['philhealth'] = default_philhealth
-        else:
-            # Use database-aware calculation (falls back to hardcoded if no DB table)
-            deductions['philhealth'] = calculate_philhealth_from_db(db, monthly_basic)
-
-        if emp_pagibig is not None:
-            deductions['pagibig'] = emp_pagibig
-        elif default_pagibig is not None:
-            deductions['pagibig'] = default_pagibig
-        else:
-            # Use database-aware calculation (falls back to hardcoded if no DB table)
-            deductions['pagibig'] = calculate_pagibig_from_db(db, monthly_basic)
+        deductions['sss'] = monthly_sss
+        deductions['philhealth'] = monthly_philhealth
+        deductions['pagibig'] = monthly_pagibig
 
         if emp_tax is not None:
             deductions['tax'] = round(emp_tax / 2, 2)
-        elif default_tax is not None:
+        elif default_tax > 0:
             deductions['tax'] = round(default_tax / 2, 2)
         else:
-            deductions['tax'] = round(calculate_tax(monthly_basic) / 2, 2)
+            # Auto-calculate using BIR formula
+            deductions['tax'] = tax_computation["semi_monthly_tax"]
+
+        deductions['tax_computation'] = tax_computation  # Store computation details
 
         # NO loans in 2nd cutoff
+        deductions['sss_loan'] = 0
+        deductions['pagibig_loan'] = 0
+        deductions['other_loan'] = 0
         deductions['loans'] = 0
         deductions['loans_breakdown'] = []
 
     # Calculate totals based on cutoff
-    # 1st cutoff: absences, lates, loans, tax (NO government benefits)
+    # 1st cutoff: absences, lates, loans (SSS + Pag-IBIG), tax (NO government contributions)
     # 2nd cutoff: absences, lates, tax, SSS, PhilHealth, Pag-IBIG (NO loans)
     if cutoff == 1:
-        # 1st cutoff: absences, lates, undertime, loans, tax (NO gov benefits)
+        # 1st cutoff: absences, lates, undertime, loans (SSS, Pag-IBIG, other), tax (NO gov contributions)
         total_deductions = (
             deductions['absences_amount'] +
             deductions['late_amount'] +
             deductions.get('undertime_amount', 0) +
             deductions.get('tax', 0) +
-            deductions.get('loans', 0)
+            deductions.get('sss_loan', 0) +
+            deductions.get('pagibig_loan', 0) +
+            deductions.get('other_loan', 0)
         )
     else:
         # 2nd cutoff: absences, lates, undertime, tax, SSS, PhilHealth, Pag-IBIG (NO loans)
@@ -788,6 +1036,8 @@ def generate_payslip(
         absent_deduction=absent_amount,
         late_deduction=late_amount,
         undertime_deduction=undertime_amount,
+        # Allowance calculation mode used (for this payslip)
+        use_daily_allowance=use_daily_calc if use_daily_calc else None,
     )
 
     return payslip
@@ -841,15 +1091,18 @@ def process_payroll(db: Session, payroll_run: PayrollRun) -> Dict[str, Any]:
     if not employees_with_attendance:
         raise ValueError("No employees with attendance records found for this period. Please import attendance data first.")
 
-    # Step 2: Only include ACTIVE employees WITH attendance
+    # Step 2: Include employees WITH attendance, regardless of active status
+    # If they have attendance records for this period, they should be in the payroll
+    # This ensures employees who resigned mid-period or are inactive still get paid for work done
     employees = db.query(Employee).filter(
         Employee.id.in_(employees_with_attendance),
-        Employee.is_active == True,
-        Employee.status == 'active'
+        # Don't filter by status - if they have attendance, include them
+        # Only exclude deleted employees
+        Employee.status != 'deleted'
     ).all()
 
     if not employees:
-        raise ValueError("No active employees with attendance records found. Please verify pending employees first.")
+        raise ValueError("No employees with attendance records found. Please verify the attendance data.")
 
     total_gross = 0
     total_deductions = 0
@@ -857,6 +1110,10 @@ def process_payroll(db: Session, payroll_run: PayrollRun) -> Dict[str, Any]:
     processed_count = 0
 
     # Delete existing payslips for this run (for reprocessing)
+    # First delete orphan loan deductions linked to these payslips
+    existing_payslip_ids = [p.id for p in db.query(Payslip.id).filter(Payslip.payroll_run_id == payroll_run.id).all()]
+    if existing_payslip_ids:
+        db.query(LoanDeduction).filter(LoanDeduction.payslip_id.in_(existing_payslip_ids)).delete(synchronize_session='fetch')
     db.query(Payslip).filter(Payslip.payroll_run_id == payroll_run.id).delete()
 
     for employee in employees:

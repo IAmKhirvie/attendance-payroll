@@ -209,7 +209,7 @@ export function EmployeePayslipsPage() {
                       Payroll #{payslip.payroll_run_id}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
-                      {formatCurrency(payslip.gross_pay)}
+                      {formatCurrency(payslip.gross_pay ?? payslip.total_earnings)}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-red-600">
                       -{formatCurrency(payslip.total_deductions)}

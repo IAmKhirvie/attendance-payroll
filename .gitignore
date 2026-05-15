@@ -31,6 +31,9 @@ certs/
 *.db
 *.sqlite
 *.sqlite3
+backups/
+backend/backups/
+*.zip
 
 # Uploaded files
 uploads/

@@ -82,6 +82,7 @@ export interface Employee {
   buffer_minutes?: number;
   is_flexible?: boolean;
   adjusted_call_time?: string | null;
+  work_hours_per_day?: number;
   // Working days
   work_monday?: boolean;
   work_tuesday?: boolean;
@@ -130,19 +131,46 @@ export interface Payslip {
   id: number;
   payroll_run_id: number;
   employee_id: number;
-  basic_pay: number;
-  overtime_pay: number;
-  night_diff_pay: number;
-  holiday_pay: number;
-  gross_pay: number;
-  sss_deduction: number;
-  philhealth_deduction: number;
-  pagibig_deduction: number;
-  tax_deduction: number;
-  other_deductions: number;
+  employee_name: string;
+  employee_no: string;
+  period_start?: string;
+  period_end?: string;
+  earnings: Record<string, any>;
+  deductions: Record<string, any>;
+  total_earnings: number;
   total_deductions: number;
   net_pay: number;
+  days_worked: number;
+  days_absent: number;
+  late_count: number;
+  total_late_minutes: number;
+  overtime_hours: number;
+  adjustments?: Record<string, any>;
+  adjustment_notes?: string;
+  additional_amount: number;
+  additional_notes?: string;
   is_released: boolean;
+  released_at?: string;
+  created_at?: string;
+  employee_settings?: {
+    call_time: string;
+    time_out: string;
+    buffer_minutes: number;
+    is_flexible: boolean;
+    work_hours_per_day: number;
+    basic_salary: number;
+  };
+  // Legacy fields for compatibility
+  basic_pay?: number;
+  overtime_pay?: number;
+  night_diff_pay?: number;
+  holiday_pay?: number;
+  gross_pay?: number;
+  sss_deduction?: number;
+  philhealth_deduction?: number;
+  pagibig_deduction?: number;
+  tax_deduction?: number;
+  other_deductions?: number;
 }
 
 // System settings

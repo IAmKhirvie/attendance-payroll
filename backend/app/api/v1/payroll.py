@@ -4,9 +4,10 @@ Payroll API Endpoints
 Payroll runs, payslips, 13th month pay, PDF generation, and deduction configuration.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, status, Query, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, status, Query, UploadFile, File
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import flag_modified
 from sqlalchemy import extract
 from typing import Optional, List
 from datetime import date, datetime
@@ -19,20 +20,287 @@ from app.api.deps import get_db, get_current_admin, get_current_user
 from app.models.user import User, Role
 from app.models.payroll import PayrollRun, Payslip, DeductionConfig, PayrollStatus, PayrollSettings, ThirteenthMonthPay, ContributionTable, ContributionType
 from app.models.employee import Employee
+from app.models.audit import AuditLog, AuditAction
+from app.models.settings import SystemSettings
 from app.schemas.payroll import (
     PayrollRunCreate, PayrollRunResponse, PayrollRunListResponse,
-    PayslipResponse, PayslipListResponse, PayslipAdjustRequest,
+    PayslipAdjustRequest,
     DeductionConfigCreate, DeductionConfigUpdate, DeductionConfigResponse,
     PayrollSettingsUpdate, PayrollSettingsResponse,
     ContributionTableCreate, ContributionTableUpdate, ContributionTableResponse, ContributionTableListResponse
 )
 from app.services.email_service import email_service
+from app.services.audit_service import AuditService
+from app.services.payroll_calculator import get_payroll_settings as _get_payroll_settings, calculate_ican_daily_rate, calculate_ican_minute_rate
 import logging
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+
+def _snapshot_payslip(payslip: Payslip) -> dict:
+    """Capture full payslip state for audit trail / restore."""
+    return {
+        "earnings": payslip.earnings,
+        "deductions": payslip.deductions,
+        "total_earnings": float(payslip.total_earnings or 0),
+        "total_deductions": float(payslip.total_deductions or 0),
+        "net_pay": float(payslip.net_pay or 0),
+        "days_worked": float(payslip.days_worked or 0),
+        "days_absent": float(payslip.days_absent or 0),
+        "late_count": payslip.late_count or 0,
+        "total_late_minutes": payslip.total_late_minutes or 0,
+        "overtime_hours": float(payslip.overtime_hours or 0),
+        "additional_amount": float(payslip.additional_amount or 0),
+        "additional_notes": payslip.additional_notes,
+        "employee_name": payslip.employee.full_name if payslip.employee else "Unknown",
+    }
+
+
+def _audit_payslip_edit(db: Session, payslip: Payslip, old_snap: dict, new_snap: dict,
+                        user: User, change_type: str, ip: str = None):
+    """Log a payslip edit to the audit trail."""
+    audit = AuditLog(
+        user_id=user.id,
+        user_email=user.email,
+        action=AuditAction.PAYSLIP_EDIT,
+        resource_type="payslip",
+        resource_id=str(payslip.id),
+        old_value=old_snap,
+        new_value=new_snap,
+        reason=change_type,
+        ip_address=ip,
+        extra_data={
+            "employee_id": payslip.employee_id,
+            "employee_name": new_snap.get("employee_name", ""),
+            "payroll_run_id": payslip.payroll_run_id,
+            "change_type": change_type,
+        }
+    )
+    db.add(audit)
+
+
+# ---- Shared Constants & Helpers ----
+
+EARNINGS_FIELDS = [
+    'basic_semi', 'allowance_semi', 'productivity_incentive_semi', 'language_incentive_semi',
+    'regular_holiday', 'regular_holiday_ot', 'snwh', 'snwh_ot', 'overtime',
+]
+
+def get_cutoff_deduction_fields(cutoff: int) -> list:
+    """Return the deduction fields applicable to this cutoff."""
+    if cutoff == 1:
+        return ['absences_amount', 'late_amount', 'undertime_amount', 'tax', 'sss_loan', 'pagibig_loan', 'other_loan']
+    else:
+        return ['absences_amount', 'late_amount', 'undertime_amount', 'tax', 'sss', 'philhealth', 'pagibig']
+
+def migrate_overtime_key(earnings: dict) -> None:
+    """Standardize old 'overtime_pay' key to 'overtime' in-place."""
+    if 'overtime_pay' in earnings and 'overtime' not in earnings:
+        earnings['overtime'] = earnings.pop('overtime_pay')
+    elif 'overtime_pay' in earnings:
+        earnings.pop('overtime_pay')
+
+def sum_earnings(earnings: dict) -> Decimal:
+    """Sum only the actual earnings fields from the earnings JSON."""
+    prorate_total = sum_prorate_earnings(earnings)
+    if prorate_total is not None:
+        return prorate_total
+
+    total = Decimal('0')
+    for f in EARNINGS_FIELDS:
+        v = earnings.get(f)
+        if v is not None:
+            try:
+                total += Decimal(str(v))
+            except:
+                pass
+    return total
+
+def sum_deductions(deductions: dict, cutoff: int) -> Decimal:
+    """Sum the applicable deduction fields for the given cutoff."""
+    total = Decimal('0')
+    for f in get_cutoff_deduction_fields(cutoff):
+        v = deductions.get(f, 0)
+        if v is not None:
+            try:
+                total += Decimal(str(v))
+            except:
+                pass
+    return total
+
+
+def sanitize_deductions_for_cutoff(deductions: Optional[dict], cutoff: int) -> dict:
+    """Remove deduction values that do not apply to the current cutoff."""
+    sanitized = dict(deductions or {})
+    if cutoff == 1:
+        sanitized['sss'] = 0
+        sanitized['philhealth'] = 0
+        sanitized['pagibig'] = 0
+    else:
+        sanitized['sss_loan'] = 0
+        sanitized['pagibig_loan'] = 0
+        sanitized['other_loan'] = 0
+        sanitized['loans'] = 0
+        sanitized['loans_breakdown'] = []
+    return sanitized
+
+
+def _to_decimal(value) -> Decimal:
+    if value is None or value == "":
+        return Decimal('0')
+    try:
+        return Decimal(str(value))
+    except Exception:
+        return Decimal('0')
+
+
+def _get_prorate_info(earnings: dict) -> Optional[list]:
+    prorate_info = earnings.get('_prorate_info') if earnings else None
+    if isinstance(prorate_info, list) and len(prorate_info) > 0:
+        return prorate_info
+    return None
+
+
+def sum_prorate_earnings(earnings: dict) -> Optional[Decimal]:
+    prorate_info = _get_prorate_info(earnings)
+    if not prorate_info:
+        return None
+
+    total = Decimal('0')
+    for period in prorate_info:
+        if not isinstance(period, dict):
+            continue
+        if 'totalEarnings' in period:
+            total += _to_decimal(period.get('totalEarnings'))
+            continue
+        total += _to_decimal(period.get('basicEarned'))
+        total += _to_decimal(period.get('allowanceEarned'))
+        total += _to_decimal(period.get('productivityEarned'))
+        total += _to_decimal(period.get('languageEarned'))
+        total += _to_decimal(period.get('otPay'))
+        total += _to_decimal(period.get('regularHoliday'))
+        total += _to_decimal(period.get('regularHolidayOt'))
+        total += _to_decimal(period.get('snwh'))
+        total += _to_decimal(period.get('snwhOt'))
+    return total
+
+
+def sum_prorate_attendance_deductions(earnings: dict) -> Optional[dict]:
+    prorate_info = _get_prorate_info(earnings)
+    if not prorate_info:
+        return None
+
+    absent = Decimal('0')
+    late = Decimal('0')
+    days_absent = Decimal('0')
+    late_minutes = Decimal('0')
+
+    for period in prorate_info:
+        if not isinstance(period, dict):
+            continue
+        absent += _to_decimal(period.get('absentDeduction'))
+        late += _to_decimal(period.get('lateDeduction'))
+        days_absent += _to_decimal(period.get('daysAbsent'))
+        late_minutes += _to_decimal(period.get('lateMinutes'))
+
+    return {
+        "absences_amount": absent,
+        "late_amount": late,
+        "days_absent": days_absent,
+        "late_minutes": late_minutes,
+    }
+
+
+def sum_current_earnings(earnings: dict) -> Decimal:
+    """Sum saved earnings without rewriting the earnings JSON."""
+    prorate_total = sum_prorate_earnings(earnings)
+    if prorate_total is not None:
+        return prorate_total
+
+    total = Decimal('0')
+    for f in EARNINGS_FIELDS:
+        total += _to_decimal(earnings.get(f))
+    if 'overtime' not in earnings:
+        total += _to_decimal(earnings.get('overtime_pay'))
+    return total
+
+
+def sum_saved_deductions(deductions: dict, cutoff: int, earnings: Optional[dict] = None) -> Decimal:
+    deductions = sanitize_deductions_for_cutoff(deductions, cutoff)
+    prorate_deductions = sum_prorate_attendance_deductions(earnings or {})
+    total = Decimal('0')
+
+    for field in get_cutoff_deduction_fields(cutoff):
+        if prorate_deductions and field in ('absences_amount', 'late_amount'):
+            total += prorate_deductions[field]
+        else:
+            total += _to_decimal(deductions.get(field))
+    return total
+
+
+def recalculate_payslip_totals_from_saved_values(payslip: Payslip, cutoff: int) -> dict:
+    """Recompute only totals from existing payslip values."""
+    earnings = dict(payslip.earnings or {})
+    deductions = sanitize_deductions_for_cutoff(payslip.deductions, cutoff)
+
+    total_earnings = sum_current_earnings(earnings)
+    total_deductions = sum_saved_deductions(deductions, cutoff, earnings)
+    net_pay = total_earnings - total_deductions
+
+    payslip.deductions = deductions
+    flag_modified(payslip, 'deductions')
+    payslip.total_earnings = total_earnings
+    payslip.total_deductions = total_deductions
+    payslip.net_pay = net_pay
+
+    return {
+        "total_earnings": float(total_earnings),
+        "total_deductions": float(total_deductions),
+        "net_pay": float(net_pay),
+    }
+
+
+def get_payslip_totals_for_response(payslip: Payslip) -> dict:
+    """Return display totals using only deductions allowed for the run cutoff."""
+    earnings = dict(payslip.earnings or {})
+    cutoff = payslip.payroll_run.cutoff if payslip.payroll_run else 1
+    total_earnings = sum_current_earnings(earnings)
+    total_deductions = sum_saved_deductions(payslip.deductions or {}, cutoff, earnings)
+    return {
+        "total_earnings": total_earnings,
+        "total_deductions": total_deductions,
+        "net_pay": total_earnings - total_deductions,
+    }
+
+
+def get_payslip_deductions_for_response(payslip: Payslip) -> dict:
+    cutoff = payslip.payroll_run.cutoff if payslip.payroll_run else 1
+    return sanitize_deductions_for_cutoff(payslip.deductions, cutoff)
+
+
+def sync_payroll_run_totals(db: Session, payroll_run: PayrollRun) -> dict:
+    """Update a payroll run summary from current payslip rows."""
+    db.flush()
+    payslips = db.query(Payslip).filter(Payslip.payroll_run_id == payroll_run.id).all()
+
+    totals = [get_payslip_totals_for_response(p) for p in payslips]
+    total_gross = sum((t["total_earnings"] for t in totals), Decimal('0'))
+    total_deductions = sum((t["total_deductions"] for t in totals), Decimal('0'))
+    total_net = sum((t["net_pay"] for t in totals), Decimal('0'))
+
+    payroll_run.total_gross = total_gross
+    payroll_run.total_deductions = total_deductions
+    payroll_run.total_net = total_net
+    payroll_run.employee_count = len(payslips)
+
+    return {
+        "employee_count": len(payslips),
+        "total_gross": float(total_gross),
+        "total_deductions": float(total_deductions),
+        "total_net": float(total_net),
+    }
 
 def generate_coded_filename(payslip: Payslip, extension: str = "pdf") -> str:
     """
@@ -244,7 +512,6 @@ async def list_deleted_payroll_runs(
     - Who deleted it
     - When it was deleted
     """
-    from app.models.user import User as UserModel
 
     query = db.query(PayrollRun).filter(PayrollRun.is_deleted == True)
 
@@ -331,8 +598,6 @@ async def update_payroll_run(
                 detail="A reason is required to edit non-DRAFT payroll runs."
             )
         # Log the forced edit
-        from app.services.audit_service import AuditService
-        from app.models.audit import AuditAction
         audit = AuditService(db)
         audit.log(
             action=AuditAction.PAYROLL_RUN,
@@ -401,8 +666,6 @@ async def delete_payroll_run(
             )
 
     # Log the deletion
-    from app.services.audit_service import AuditService
-    from app.models.audit import AuditAction
     audit = AuditService(db)
     audit.log(
         action=AuditAction.PAYROLL_RUN,
@@ -452,8 +715,6 @@ async def restore_payroll_run(
         raise HTTPException(status_code=404, detail="Deleted payroll run not found")
 
     # Log the restore
-    from app.services.audit_service import AuditService
-    from app.models.audit import AuditAction
     audit = AuditService(db)
     audit.log(
         action=AuditAction.PAYROLL_RUN,
@@ -510,8 +771,6 @@ async def permanently_delete_payroll_run(
         raise HTTPException(status_code=404, detail="Deleted payroll run not found in trash")
 
     # Log the permanent deletion
-    from app.services.audit_service import AuditService
-    from app.models.audit import AuditAction
     audit = AuditService(db)
     audit.log(
         action=AuditAction.PAYROLL_RUN,
@@ -642,12 +901,9 @@ async def recalculate_payroll_run(
     db: Session = Depends(get_db)
 ):
     """
-    Recalculate all payslips in a payroll run using current employee salaries.
-    This updates basic_semi, daily rates, and recalculates deductions.
+    Recalculate payroll run totals from current payslip rows.
+    This does not overwrite individual payslip earnings, deductions, or attendance edits.
     """
-    from decimal import Decimal
-    from sqlalchemy.orm.attributes import flag_modified
-    from app.services.payroll_calculator import get_payroll_settings, calculate_ican_daily_rate, calculate_ican_minute_rate
 
     run = db.query(PayrollRun).filter(PayrollRun.id == run_id).first()
     if not run:
@@ -661,119 +917,16 @@ async def recalculate_payroll_run(
     if not payslips:
         raise HTTPException(status_code=400, detail="No payslips found in this payroll run")
 
-    settings = get_payroll_settings(db)
-    updated_count = 0
-    total_gross = Decimal('0')
-    total_deductions = Decimal('0')
-    total_net = Decimal('0')
-
-    for payslip in payslips:
-        employee = db.query(Employee).filter(Employee.id == payslip.employee_id).first()
-        if not employee:
-            continue
-
-        # Get employee's current basic salary
-        monthly_basic = float(employee.basic_salary or 0)
-        basic_semi = monthly_basic / 2
-
-        # Get work hours for this employee
-        work_hours = float(employee.work_hours_per_day or settings.work_hours_per_day or 8)
-
-        # Calculate rates using ICAN formula
-        working_days = settings.working_days_per_year or 261
-        daily_rate = calculate_ican_daily_rate(monthly_basic, working_days)
-        minute_rate = calculate_ican_minute_rate(daily_rate, work_hours)
-
-        # Update earnings
-        current_earnings = dict(payslip.earnings or {})
-        current_earnings['basic_semi'] = basic_semi
-        current_earnings['allowance_semi'] = float(employee.allowance or 0) / 2
-        current_earnings['productivity_incentive_semi'] = float(employee.productivity_incentive or 0) / 2
-        current_earnings['language_incentive_semi'] = float(employee.language_incentive or 0) / 2
-
-        # Calculate absent deduction
-        days_absent = float(payslip.days_absent or 0)
-        absent_deduction = days_absent * daily_rate
-        current_earnings['absent_deduction'] = absent_deduction
-
-        # Calculate late deduction
-        late_minutes = float(payslip.total_late_minutes or 0)
-        late_deduction = late_minutes * minute_rate
-        current_earnings['late_deduction'] = late_deduction
-
-        # Store calculation info
-        current_earnings['_calculation_info'] = {
-            'monthly_basic': monthly_basic,
-            'work_hours_per_day': work_hours,
-        }
-
-        payslip.earnings = current_earnings
-        flag_modified(payslip, 'earnings')
-
-        # Update deductions with rates and current employee values
-        current_deductions = dict(payslip.deductions or {})
-        current_deductions['absences_daily_rate_used'] = daily_rate
-        current_deductions['late_minute_rate_used'] = minute_rate
-        current_deductions['work_hours_per_day_used'] = work_hours
-        current_deductions['absences_amount'] = absent_deduction
-        current_deductions['late_amount'] = late_deduction
-
-        # Update government deductions from employee's current values
-        current_deductions['sss'] = float(employee.sss_contribution or 0)
-        current_deductions['philhealth'] = float(employee.philhealth_contribution or 0)
-        current_deductions['pagibig'] = float(employee.pagibig_contribution or 0)
-        current_deductions['tax'] = float(employee.tax_amount or 0)
-
-        payslip.deductions = current_deductions
-        flag_modified(payslip, 'deductions')
-
-        # Recalculate totals
-        total_earnings = Decimal('0')
-        for k, v in current_earnings.items():
-            if k.startswith('_') or k in ['absent_deduction', 'late_deduction']:
-                continue
-            if v is not None:
-                try:
-                    total_earnings += Decimal(str(v))
-                except:
-                    pass
-        # Subtract deductions from earnings
-        total_earnings -= Decimal(str(absent_deduction))
-        total_earnings -= Decimal(str(late_deduction))
-        payslip.total_earnings = total_earnings
-
-        # Calculate total deductions (government + loans)
-        ded_total = Decimal('0')
-        for f in ['sss', 'philhealth', 'pagibig', 'tax', 'loans']:
-            v = current_deductions.get(f, 0)
-            if v:
-                try:
-                    ded_total += Decimal(str(v))
-                except:
-                    pass
-        payslip.total_deductions = ded_total
-
-        # Calculate net pay
-        payslip.net_pay = selectedPayslip.earnings.basic_semi - payslip.total_deductions
-
-        total_gross += payslip.total_earnings
-        total_deductions += payslip.total_deductions
-        total_net += payslip.net_pay
-        updated_count += 1
-
-    # Update payroll run totals
-    run.total_gross = total_gross
-    run.total_deductions = total_deductions
-    run.total_net = total_net
+    totals = sync_payroll_run_totals(db, run)
 
     db.commit()
 
     return {
-        "message": f"Recalculated {updated_count} payslips",
-        "updated_count": updated_count,
-        "total_gross": float(total_gross),
-        "total_deductions": float(total_deductions),
-        "total_net": float(total_net)
+        "message": f"Recalculated totals from {totals['employee_count']} payslips",
+        "updated_count": totals["employee_count"],
+        "total_gross": totals["total_gross"],
+        "total_deductions": totals["total_deductions"],
+        "total_net": totals["total_net"]
     }
 
 
@@ -792,7 +945,6 @@ async def list_payslips(
     List payslips.
     Employees can only see their own released payslips.
     """
-    from app.models.employee import Employee
 
     query = db.query(Payslip).join(Employee).join(PayrollRun)
 
@@ -811,6 +963,17 @@ async def list_payslips(
         if employee_id:
             query = query.filter(Payslip.employee_id == employee_id)
 
+    summary = None
+    if payroll_run_id:
+        summary_payslips = query.all()
+        summary_totals = [get_payslip_totals_for_response(p) for p in summary_payslips]
+        summary = {
+            "employee_count": len(summary_payslips),
+            "total_gross": float(sum((t["total_earnings"] for t in summary_totals), Decimal('0'))),
+            "total_deductions": float(sum((t["total_deductions"] for t in summary_totals), Decimal('0'))),
+            "total_net": float(sum((t["net_pay"] for t in summary_totals), Decimal('0'))),
+        }
+
     total = query.count()
     payslips = query.order_by(Payslip.created_at.desc()).offset(
         (page - 1) * page_size
@@ -823,6 +986,7 @@ async def list_payslips(
         is_flexible = emp.is_flexible if emp else False
         call_time = emp.call_time if emp else "08:00"
         time_out = emp.time_out if emp else "17:00"
+        totals = get_payslip_totals_for_response(p)
 
         items.append({
             "id": p.id,
@@ -833,15 +997,17 @@ async def list_payslips(
             "period_start": p.payroll_run.period_start.isoformat() if p.payroll_run else None,
             "period_end": p.payroll_run.period_end.isoformat() if p.payroll_run else None,
             "earnings": p.earnings,
-            "deductions": p.deductions,
-            "total_earnings": float(p.total_earnings),
-            "total_deductions": float(p.total_deductions),
-            "net_pay": float(p.net_pay),
+            "deductions": get_payslip_deductions_for_response(p),
+            "total_earnings": float(totals["total_earnings"]),
+            "total_deductions": float(totals["total_deductions"]),
+            "net_pay": float(totals["net_pay"]),
             "days_worked": float(p.days_worked),
             "days_absent": float(p.days_absent),
             "late_count": p.late_count,
             "total_late_minutes": p.total_late_minutes,
             "overtime_hours": float(p.overtime_hours),
+            "additional_amount": float(p.additional_amount or 0),
+            "additional_notes": p.additional_notes,
             "is_released": p.is_released,
             "created_at": p.created_at.isoformat() if p.created_at else None,
             "is_flexible": is_flexible or False,
@@ -853,7 +1019,8 @@ async def list_payslips(
         "items": items,
         "total": total,
         "page": page,
-        "page_size": page_size
+        "page_size": page_size,
+        "summary": summary
     }
 
 
@@ -886,7 +1053,20 @@ async def get_payslip(
             "is_flexible": emp.is_flexible or False,
             "work_hours_per_day": float(emp.work_hours_per_day or 8),
             "basic_salary": float(emp.basic_salary or 0),
+            "employment_type": emp.employment_type or "",
+            "allowance": float(emp.allowance or 0),
+            "productivity_incentive": float(emp.productivity_incentive or 0),
+            "language_incentive": float(emp.language_incentive or 0),
+            "work_monday": getattr(emp, 'work_monday', True) if getattr(emp, 'work_monday', None) is not None else True,
+            "work_tuesday": getattr(emp, 'work_tuesday', True) if getattr(emp, 'work_tuesday', None) is not None else True,
+            "work_wednesday": getattr(emp, 'work_wednesday', True) if getattr(emp, 'work_wednesday', None) is not None else True,
+            "work_thursday": getattr(emp, 'work_thursday', True) if getattr(emp, 'work_thursday', None) is not None else True,
+            "work_friday": getattr(emp, 'work_friday', True) if getattr(emp, 'work_friday', None) is not None else True,
+            "work_saturday": getattr(emp, 'work_saturday', False) if getattr(emp, 'work_saturday', None) is not None else False,
+            "work_sunday": getattr(emp, 'work_sunday', False) if getattr(emp, 'work_sunday', None) is not None else False,
         }
+
+    totals = get_payslip_totals_for_response(payslip)
 
     return {
         "id": payslip.id,
@@ -897,10 +1077,10 @@ async def get_payslip(
         "period_start": payslip.payroll_run.period_start.isoformat() if payslip.payroll_run else None,
         "period_end": payslip.payroll_run.period_end.isoformat() if payslip.payroll_run else None,
         "earnings": payslip.earnings,
-        "deductions": payslip.deductions,
-        "total_earnings": float(payslip.total_earnings),
-        "total_deductions": float(payslip.total_deductions),
-        "net_pay": float(payslip.net_pay),
+        "deductions": get_payslip_deductions_for_response(payslip),
+        "total_earnings": float(totals["total_earnings"]),
+        "total_deductions": float(totals["total_deductions"]),
+        "net_pay": float(totals["net_pay"]),
         "days_worked": float(payslip.days_worked),
         "days_absent": float(payslip.days_absent),
         "late_count": payslip.late_count,
@@ -908,6 +1088,8 @@ async def get_payslip(
         "overtime_hours": float(payslip.overtime_hours),
         "adjustments": payslip.adjustments,
         "adjustment_notes": payslip.adjustment_notes,
+        "additional_amount": float(payslip.additional_amount or 0),
+        "additional_notes": payslip.additional_notes,
         "is_released": payslip.is_released,
         "released_at": payslip.released_at.isoformat() if payslip.released_at else None,
         "created_at": payslip.created_at.isoformat() if payslip.created_at else None,
@@ -1081,27 +1263,28 @@ async def update_payslip_earnings(
     if run and run.status == PayrollStatus.LOCKED:
         raise HTTPException(status_code=400, detail="Cannot modify locked payroll")
 
-    from decimal import Decimal
-    from sqlalchemy.orm.attributes import flag_modified
+
+    # Snapshot before changes
+    old_snap = _snapshot_payslip(payslip)
 
     # Update earnings - create new dict to ensure SQLAlchemy detects change
     current_earnings = dict(payslip.earnings or {})
     current_earnings.update(earnings)
+    migrate_overtime_key(current_earnings)
     payslip.earnings = current_earnings
     flag_modified(payslip, 'earnings')
 
-    # Recalculate total earnings
-    total = Decimal('0')
-    for k, v in current_earnings.items():
-        if v is not None:
-            try:
-                total += Decimal(str(v))
-            except:
-                pass
+    total = sum_earnings(current_earnings)
     payslip.total_earnings = total
 
-    # Recalculate net pay
-    payslip.net_pay = selectedPayslip.earnings.basic_semi - (payslip.total_deductions or Decimal('0'))
+    # Recalculate net pay (include additional_amount)
+    payslip.net_pay = total - (payslip.total_deductions or Decimal('0'))
+
+    # Audit trail
+    new_snap = _snapshot_payslip(payslip)
+    _audit_payslip_edit(db, payslip, old_snap, new_snap, current_admin, "earnings_edit")
+    if run:
+        sync_payroll_run_totals(db, run)
 
     db.commit()
     return {"message": "Earnings updated", "total_earnings": float(total), "net_pay": float(payslip.net_pay)}
@@ -1127,29 +1310,29 @@ async def update_payslip_deductions(
     if run and run.status == PayrollStatus.LOCKED:
         raise HTTPException(status_code=400, detail="Cannot modify locked payroll")
 
-    from decimal import Decimal
-    from sqlalchemy.orm.attributes import flag_modified
+
+    # Snapshot before changes
+    old_snap = _snapshot_payslip(payslip)
 
     # Update deductions - create new dict to ensure SQLAlchemy detects change
-    current_deductions = dict(payslip.deductions or {})
+    cutoff = run.cutoff if run else 1
+    current_deductions = sanitize_deductions_for_cutoff(payslip.deductions, cutoff)
     current_deductions.update(deductions)
+    current_deductions = sanitize_deductions_for_cutoff(current_deductions, cutoff)
     payslip.deductions = current_deductions
     flag_modified(payslip, 'deductions')
 
-    # Recalculate total deductions (exclude non-amount fields)
-    amount_fields = ['absences_amount', 'late_amount', 'sss', 'philhealth', 'pagibig', 'tax', 'loans']
-    total = Decimal('0')
-    for f in amount_fields:
-        v = current_deductions.get(f, 0)
-        if v is not None:
-            try:
-                total += Decimal(str(v))
-            except:
-                pass
+    total = sum_saved_deductions(current_deductions, cutoff, payslip.earnings)
     payslip.total_deductions = total
 
-    # Recalculate net pay
-    payslip.net_pay = (selectedPayslip.earnings.basic_semi or Decimal('0')) - payslip.total_deductions
+    # Recalculate net pay (include additional_amount)
+    payslip.net_pay = (payslip.total_earnings or Decimal('0')) - payslip.total_deductions
+
+    # Audit trail
+    new_snap = _snapshot_payslip(payslip)
+    _audit_payslip_edit(db, payslip, old_snap, new_snap, current_admin, "deductions_edit")
+    if run:
+        sync_payroll_run_totals(db, run)
 
     db.commit()
     return {"message": "Deductions updated", "total_deductions": float(total), "net_pay": float(payslip.net_pay)}
@@ -1176,7 +1359,9 @@ async def update_payslip_attendance(
     if run and run.status == PayrollStatus.LOCKED:
         raise HTTPException(status_code=400, detail="Cannot modify locked payroll")
 
-    from decimal import Decimal
+    # Snapshot before changes
+    old_snap = _snapshot_payslip(payslip)
+
 
     # Update attendance fields
     if 'days_worked' in attendance:
@@ -1198,7 +1383,7 @@ async def update_payslip_attendance(
         if employee:
             from app.services.payroll_calculator import get_payroll_settings, calculate_ican_daily_rate, calculate_ican_minute_rate
             from sqlalchemy.orm.attributes import flag_modified
-            settings = get_payroll_settings(db)
+            settings = _get_payroll_settings(db)
             monthly_basic = float(employee.basic_salary or 0)
 
             # Use work hours from request, or employee's setting, or fall back to global settings
@@ -1241,22 +1426,18 @@ async def update_payslip_attendance(
                     deductions['late_amount'] = 0
                     deductions['late_minutes'] = 0
 
+                cutoff = run.cutoff if run else 1
+                deductions = sanitize_deductions_for_cutoff(deductions, cutoff)
+
                 # Assign deductions and flag as modified
                 payslip.deductions = deductions
                 flag_modified(payslip, 'deductions')
 
-                # Recalculate total deductions
-                amount_fields = ['absences_amount', 'late_amount', 'sss', 'philhealth', 'pagibig', 'tax', 'loans', 'undertime_amount']
-                total = Decimal('0')
-                for f in amount_fields:
-                    v = deductions.get(f, 0)
-                    if v is not None:
-                        try:
-                            total += Decimal(str(v))
-                        except:
-                            pass
+                # Recalculate total deductions based on cutoff
+                total = sum_saved_deductions(deductions, cutoff, payslip.earnings)
                 payslip.total_deductions = total
-                payslip.net_pay = (selectedPayslip.earnings.basic_semi or Decimal('0')) - payslip.total_deductions
+                additional_amt = payslip.additional_amount or Decimal('0')
+                payslip.net_pay = (payslip.total_earnings or Decimal('0')) - payslip.total_deductions + additional_amt
 
     # Auto-save settings as employee's defaults for future payrolls
     # This is the "preset" feature - when you edit an employee's settings,
@@ -1295,6 +1476,12 @@ async def update_payslip_attendance(
             employee.is_flexible = bool(attendance['is_flexible'])
             preset_saved = True
             preset_fields.append(f"flexible: {'Yes' if attendance['is_flexible'] else 'No'}")
+
+    # Audit trail
+    new_snap = _snapshot_payslip(payslip)
+    _audit_payslip_edit(db, payslip, old_snap, new_snap, current_admin, "attendance_edit")
+    if run:
+        sync_payroll_run_totals(db, run)
 
     db.commit()
 
@@ -1336,18 +1523,72 @@ async def update_payslip_additional(
     if run and run.status == PayrollStatus.LOCKED:
         raise HTTPException(status_code=400, detail="Cannot modify locked payroll")
 
+    # Snapshot before changes
+    old_snap = _snapshot_payslip(payslip)
+
     # Update additional fields
     if 'additional_amount' in additional:
         payslip.additional_amount = Decimal(str(additional['additional_amount'] or 0))
     if 'additional_notes' in additional:
         payslip.additional_notes = additional['additional_notes']
 
+    # Recalculate net pay: total_earnings - total_deductions + additional_amount
+    total_earnings = payslip.total_earnings or Decimal('0')
+    total_deductions = payslip.total_deductions or Decimal('0')
+    payslip.net_pay = total_earnings - total_deductions
+
+    # Audit trail
+    new_snap = _snapshot_payslip(payslip)
+    _audit_payslip_edit(db, payslip, old_snap, new_snap, current_admin, "additional_edit")
+    if run:
+        sync_payroll_run_totals(db, run)
+
     db.commit()
 
     return {
         "message": "Additional updated",
         "additional_amount": float(payslip.additional_amount or 0),
-        "additional_notes": payslip.additional_notes
+        "additional_notes": payslip.additional_notes,
+        "net_pay": float(payslip.net_pay)
+    }
+
+
+@router.post("/payslips/{payslip_id}/recalculate")
+async def recalculate_single_payslip(
+    payslip_id: int,
+    current_admin: User = Depends(get_current_admin),
+    db: Session = Depends(get_db)
+):
+    """
+    Recalculate a single payslip's totals from its current saved values.
+    This does not overwrite earnings, deductions, rates, or attendance edits.
+    """
+
+    payslip = db.query(Payslip).filter(Payslip.id == payslip_id).first()
+    if not payslip:
+        raise HTTPException(status_code=404, detail="Payslip not found")
+
+    run = db.query(PayrollRun).filter(PayrollRun.id == payslip.payroll_run_id).first()
+    if run and run.status == PayrollStatus.LOCKED:
+        raise HTTPException(status_code=400, detail="Cannot modify locked payroll")
+
+    old_snap = _snapshot_payslip(payslip)
+    totals = recalculate_payslip_totals_from_saved_values(
+        payslip,
+        run.cutoff if run else 1
+    )
+
+    # Audit trail
+    new_snap = _snapshot_payslip(payslip)
+    _audit_payslip_edit(db, payslip, old_snap, new_snap, current_admin, "recalculate")
+    if run:
+        sync_payroll_run_totals(db, run)
+
+    db.commit()
+
+    return {
+        "message": "Payslip totals recalculated",
+        **totals,
     }
 
 
@@ -1368,6 +1609,8 @@ async def delete_payslip(
         raise HTTPException(status_code=400, detail="Cannot delete payslip from locked payroll run")
 
     db.delete(payslip)
+    if run:
+        sync_payroll_run_totals(db, run)
     db.commit()
 
     return {"message": "Payslip deleted"}
@@ -1527,7 +1770,7 @@ async def get_payroll_settings(
             default_philhealth=0,
             default_pagibig=0,
             default_tax=0,
-            overtime_rate=1.25,
+            overtime_rate=1.30,
             night_diff_rate=1.10,
             holiday_rate=2.00,
             special_holiday_rate=1.30,
@@ -1953,7 +2196,9 @@ def generate_payslip_pdf(payslip: Payslip, company_name: str = "Company") -> byt
 
     # Earnings and Deductions
     earnings = payslip.earnings or {}
-    deductions = payslip.deductions or {}
+    cutoff = payslip.payroll_run.cutoff if payslip.payroll_run else 1
+    deductions = sanitize_deductions_for_cutoff(payslip.deductions, cutoff)
+    totals = get_payslip_totals_for_response(payslip)
 
     def fmt(amount):
         return f"{float(amount):,.2f}"
@@ -1968,19 +2213,30 @@ def generate_payslip_pdf(payslip: Payslip, company_name: str = "Company") -> byt
         ('Prod', earnings.get('productivity_incentive_semi', 0)),
         ('Lang', earnings.get('language_incentive_semi', 0)),
         ('RH', earnings.get('regular_holiday', 0)),
+        ('RH OT', earnings.get('regular_holiday_ot', 0)),
         ('SNWH', earnings.get('snwh', 0)),
-        ('OT', earnings.get('overtime', 0)),
+        ('SNWH OT', earnings.get('snwh_ot', 0)),
+        ('OT', earnings.get('overtime', 0) or earnings.get('overtime_pay', 0)),
     ]
 
-    deduction_items = [
-        ('SSS', deductions.get('sss', 0)),
-        ('PH', deductions.get('philhealth', 0)),
-        ('HDMF', deductions.get('pagibig', 0)),
-        ('Tax', deductions.get('tax', 0)),
-        ('Loan', deductions.get('loans', 0)),
-        ('Abs', earnings.get('absent_deduction', 0)),
-        ('Late', earnings.get('late_deduction', 0)),
-    ]
+    deduction_items = []
+    if cutoff == 2:
+        deduction_items.extend([
+            ('SSS', deductions.get('sss', 0)),
+            ('PH', deductions.get('philhealth', 0)),
+            ('HDMF', deductions.get('pagibig', 0)),
+        ])
+    deduction_items.append(('Tax', deductions.get('tax', 0)))
+    if cutoff == 1:
+        deduction_items.extend([
+            ('SSS Ln', deductions.get('sss_loan', 0)),
+            ('HDMF Ln', deductions.get('pagibig_loan', 0)),
+            ('Oth Ln', deductions.get('other_loan', 0)),
+        ])
+    deduction_items.extend([
+        ('Abs', deductions.get('absences_amount', 0)),
+        ('Late', deductions.get('late_amount', 0)),
+    ])
 
     # Filter non-zero items
     earnings_items = [(l, a) for l, a in earnings_items if a and float(a) > 0]
@@ -1995,7 +2251,7 @@ def generate_payslip_pdf(payslip: Payslip, company_name: str = "Company") -> byt
         rows.append([e_label, e_amt, d_label, d_amt])
 
     # Totals row
-    rows.append(['Total', fmt(payslip.total_earnings), 'Total', fmt(payslip.total_deductions)])
+    rows.append(['Total', fmt(totals["total_earnings"]), 'Total', fmt(totals["total_deductions"])])
 
     main_table = Table(rows, colWidths=[0.45*inch, 0.75*inch, 0.45*inch, 0.75*inch])
     main_table.setStyle(TableStyle([
@@ -2016,7 +2272,7 @@ def generate_payslip_pdf(payslip: Payslip, company_name: str = "Company") -> byt
     elements.append(Spacer(1, 0.04*inch))
 
     # Net Pay - prominent but compact
-    net_data = [['NET PAY:', fmt(payslip.net_pay)]]
+    net_data = [['NET PAY:', fmt(totals["net_pay"])]]
     net_table = Table(net_data, colWidths=[1.2*inch, 1.4*inch])
     net_table.setStyle(TableStyle([
         ('FONTNAME', (0, 0), (-1, -1), 'Helvetica-Bold'),
@@ -2083,7 +2339,19 @@ def generate_payslip_png(payslip: Payslip, company_name: str = "I CAN LANGUAGE C
     """
     from PIL import Image, ImageDraw, ImageFont
 
-    width, height = 400, 520
+    # Calculate height: base 520 + extra rows for loans, optional earnings, and prorate
+    earnings_data = payslip.earnings or {}
+    cutoff = payslip.payroll_run.cutoff if payslip.payroll_run else 1
+    deductions_data = sanitize_deductions_for_cutoff(payslip.deductions, cutoff)
+    extra_rows = sum(1 for k in ('sss_loan', 'pagibig_loan', 'other_loan')
+                     if float(deductions_data.get(k, 0) or 0) > 0)
+    extra_rows += sum(1 for k in ('regular_holiday_ot', 'snwh', 'snwh_ot')
+                      if float(earnings_data.get(k, 0) or 0) > 0)
+    # Prorate adds significant height per period
+    prorate_data = earnings_data.get('_prorate_info')
+    if prorate_data and isinstance(prorate_data, list) and len(prorate_data) >= 2:
+        extra_rows += 0  # Compact prorate fits in base height
+    width, height = 400, 520 + (extra_rows * 14)
     img = Image.new('RGB', (width, height), 'white')
     draw = ImageDraw.Draw(img)
 
@@ -2123,13 +2391,14 @@ def generate_payslip_png(payslip: Payslip, company_name: str = "I CAN LANGUAGE C
         period_str = 'N/A'
 
     earnings = payslip.earnings or {}
-    deductions = payslip.deductions or {}
+    deductions = sanitize_deductions_for_cutoff(payslip.deductions, cutoff)
+    totals = get_payslip_totals_for_response(payslip)
 
-    def fmt(amount):
+    def fmt(amount, zero_dash: bool = True):
         """Format currency."""
         try:
             val = float(amount or 0)
-            if val == 0:
+            if val == 0 and zero_dash:
                 return '-'
             return f"{val:,.2f}"
         except:
@@ -2164,10 +2433,28 @@ def generate_payslip_png(payslip: Payslip, company_name: str = "I CAN LANGUAGE C
     draw.text((col2 + 55, y), str(start_date), fill='black', font=font_normal)
     y += 14
 
+    # Hours and Schedule - read from employee settings
+    work_hours = int(employee.work_hours_per_day) if employee and employee.work_hours_per_day else 8
+    emp_call_time = employee.call_time if employee and employee.call_time else "08:00"
+    emp_time_out = employee.time_out if employee and employee.time_out else "17:00"
+
+    def _fmt_time_12h(t):
+        try:
+            h, m = map(int, t.split(':'))
+            suffix = "am" if h < 12 else "pm"
+            h12 = h if h <= 12 else h - 12
+            if h12 == 0:
+                h12 = 12
+            return f"{h12}:{m:02d}{suffix}" if m else f"{h12}{suffix}"
+        except Exception:
+            return t
+
+    schedule_str = f"{_fmt_time_12h(emp_call_time)} - {_fmt_time_12h(emp_time_out)}"
+
     draw.text((col1, y), "Hours:", fill='black', font=font_small)
-    draw.text((col1 + 40, y), "8hrs", fill='black', font=font_normal)
+    draw.text((col1 + 40, y), f"{work_hours}hrs", fill='black', font=font_normal)
     draw.text((col1 + 80, y), "Schedule:", fill='black', font=font_small)
-    draw.text((col1 + 130, y), "10am - 7pm", fill='black', font=font_normal)
+    draw.text((col1 + 130, y), schedule_str, fill='black', font=font_normal)
     y += 18
 
     # Divider
@@ -2180,74 +2467,195 @@ def generate_payslip_png(payslip: Payslip, company_name: str = "I CAN LANGUAGE C
     right_col = mid_x + 5
     right_val = width - margin - 10
 
-    draw.text((left_col, y), "Monthly Rate", fill='black', font=font_bold)
-    draw.text((right_col, y), "Semi - Monthly", fill='black', font=font_bold)
+    # Section headers (drawn once, prorate or normal)
+    prorate_info = earnings.get('_prorate_info')
+    is_prorated = prorate_info and isinstance(prorate_info, list) and len(prorate_info) >= 2
+
+    draw.text((left_col, y), "Rate Info", fill='black', font=font_bold)
+    draw.text((right_col, y), "Earnings", fill='black', font=font_bold)
     y += 16
 
-    # Get monthly values from employee
+    # Get rate values from employee
     basic_monthly = float(employee.basic_salary or 0) if employee else 0
-    allowance_monthly = float(employee.allowance or 0) if employee else 0
-    prod_monthly = float(employee.productivity_incentive or 0) if employee else 0
-    lang_monthly = float(employee.language_incentive or 0) if employee else 0
     daily_rate = float(employee.daily_rate or 0) if employee else 0
     hourly_rate = float(employee.hourly_rate or 0) if employee else 0
+    work_hours = float(employee.work_hours_per_day or 8) if employee else 8
 
-    # Get semi-monthly values from payslip
+    # Get earnings values from payslip (static, not divided)
     basic_semi = float(earnings.get('basic_semi', 0))
-    allowance_semi = float(earnings.get('allowance_semi', 0))
-    prod_semi = float(earnings.get('productivity_incentive_semi', 0))
-    lang_semi = float(earnings.get('language_incentive_semi', 0))
-    reg_ot = float(earnings.get('overtime', 0))
+    allowance_val = float(earnings.get('allowance_semi', 0))
+    prod_val = float(earnings.get('productivity_incentive_semi', 0))
+    lang_val = float(earnings.get('language_incentive_semi', 0))
+    reg_ot = float(earnings.get('overtime', 0) or earnings.get('overtime_pay', 0))
     holiday = float(earnings.get('regular_holiday', 0))
+    holiday_ot = float(earnings.get('regular_holiday_ot', 0))
+    snwh_pay = float(earnings.get('snwh', 0))
+    snwh_ot = float(earnings.get('snwh_ot', 0))
 
     # === EARNINGS ROWS ===
     row_height = 14
+    amt_x = width - margin - 10
 
-    # Row 1: Basic Salary / Basic (semi mo)
-    draw.text((left_col, y), "Basic Salary", fill='black', font=font_small)
-    draw.text((left_val, y), fmt(basic_monthly), fill='black', font=font_normal, anchor='rt')
-    draw.text((right_col, y), "Basic (semi mo)", fill='black', font=font_small)
-    draw.text((right_val, y), fmt(basic_semi), fill='black', font=font_normal, anchor='rt')
-    y += row_height
+    if is_prorated:
+        # ---- COMPACT PRORATED LAYOUT (fits same height as normal) ----
+        rh = 12  # Tight row height
+        try:
+            font_xs = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 8)
+        except:
+            font_xs = font_small
 
-    # Row 2: Allowance / Prod Incentive
-    draw.text((left_col, y), "Allowance", fill='black', font=font_small)
-    draw.text((left_val, y), fmt(allowance_monthly), fill='black', font=font_normal, anchor='rt')
-    draw.text((right_col, y), "Prod Incentive", fill='black', font=font_small)
-    draw.text((right_val, y), fmt(prod_semi), fill='black', font=font_normal, anchor='rt')
-    y += row_height
+        # Column positions for compact table
+        c1 = left_col       # Label
+        c2 = left_col + 80  # P1 value
+        c3 = mid_x + 10     # P2 value (or P2 label area)
 
-    # Row 3: Prod Incentive / Lang Incentive
-    draw.text((left_col, y), "Prod Incentive", fill='black', font=font_small)
-    draw.text((left_val, y), fmt(prod_monthly), fill='black', font=font_normal, anchor='rt')
-    draw.text((right_col, y), "Lang Incentive", fill='black', font=font_small)
-    draw.text((right_val, y), fmt(lang_semi), fill='black', font=font_normal, anchor='rt')
-    y += row_height
+        draw.text((left_col, y), f"PRORATED ({len(prorate_info)} Periods)", fill='#6b21a8', font=font_bold)
+        y += rh + 2
 
-    # Row 4: Lang Incentive / Allowance
-    draw.text((left_col, y), "Lang Incentive", fill='black', font=font_small)
-    draw.text((left_val, y), fmt(lang_monthly), fill='black', font=font_normal, anchor='rt')
-    draw.text((right_col, y), "Allowance", fill='black', font=font_small)
-    draw.text((right_val, y), fmt(allowance_semi), fill='black', font=font_normal, anchor='rt')
-    y += row_height + 6
+        # Table header: blank | P1 dates | P2 dates
+        for pi, period in enumerate(prorate_info):
+            p_start = period.get('startDate', '')
+            p_end = period.get('endDate', '')
+            p_days = period.get('daysWorked', 0)
+            p_hrs = period.get('workHours', 8)
+            col_x = c2 if pi == 0 else c3
+            date_short = p_start[5:] if p_start else ''
+            end_short = p_end[5:] if p_end else ''
+            draw.text((col_x, y), f"P{pi+1}: {date_short}~{end_short}", fill='#6b21a8', font=font_xs)
+        y += rh
 
-    # Row 5: Daily Rate / Reg. OT
-    draw.text((left_col, y), "Total Daily Rate", fill='black', font=font_small)
-    draw.text((left_val, y), fmt(daily_rate), fill='black', font=font_normal, anchor='rt')
-    draw.text((right_col, y), "Reg. OT", fill='black', font=font_small)
-    draw.text((right_val, y), fmt(reg_ot), fill='black', font=font_normal, anchor='rt')
-    y += row_height
+        # Sub-header: days/hrs
+        for pi, period in enumerate(prorate_info):
+            col_x = c2 if pi == 0 else c3
+            draw.text((col_x, y), f"{period.get('daysWorked',0)}d | {period.get('workHours',8)}hrs", fill='gray', font=font_xs)
+        y += rh
 
-    # Row 6: Hourly Rate / Holiday
-    draw.text((left_col, y), "Hourly Rate", fill='black', font=font_small)
-    draw.text((left_val, y), fmt(hourly_rate), fill='black', font=font_normal, anchor='rt')
-    draw.text((right_col, y), "Holiday", fill='black', font=font_small)
-    draw.text((right_val, y), fmt(holiday), fill='black', font=font_normal, anchor='rt')
-    y += row_height + 8
+        # Data rows — label | P1 value | P2 value
+        def prorate_row(label, values, color='black'):
+            nonlocal y
+            draw.text((c1, y), label, fill=color, font=font_xs)
+            for vi, v in enumerate(values):
+                col_x = c2 if vi == 0 else c3
+                draw.text((col_x + 75, y), fmt(v), fill=color, font=font_xs, anchor='rt')
+            y += rh
+
+        periods_data = []
+        for period in prorate_info:
+            periods_data.append({
+                'monthly': float(period.get('monthlyBasic', 0)),
+                'daily': float(period.get('dailyRate', 0)),
+                'basic': float(period.get('basicEarned', 0)),
+                'allow': float(period.get('allowanceEarned', 0)),
+                'prod': float(period.get('productivityEarned', 0)),
+                'lang': float(period.get('languageEarned', 0)),
+                'ot': float(period.get('otPay', 0)),
+                'hol': float(period.get('regularHoliday', 0)),
+                'total': float(period.get('totalEarnings', 0)),
+                'absent': float(period.get('absentDeduction', 0)),
+                'late': float(period.get('lateDeduction', 0)),
+            })
+
+        prorate_row("Monthly", [p['monthly'] for p in periods_data], 'gray')
+        prorate_row("Daily Rate", [p['daily'] for p in periods_data], 'gray')
+        prorate_row("Basic", [p['basic'] for p in periods_data])
+        prorate_row("Allowance", [p['allow'] for p in periods_data])
+        prorate_row("Productivity", [p['prod'] for p in periods_data])
+        prorate_row("Language", [p['lang'] for p in periods_data])
+
+        # Optional rows
+        if any(p['ot'] > 0 for p in periods_data):
+            prorate_row("Overtime", [p['ot'] for p in periods_data])
+        if any(p['hol'] > 0 for p in periods_data):
+            prorate_row("Holiday", [p['hol'] for p in periods_data])
+        if any(p['absent'] > 0 for p in periods_data):
+            prorate_row("Absent Ded", [p['absent'] for p in periods_data], 'red')
+        if any(p['late'] > 0 for p in periods_data):
+            prorate_row("Late Ded", [p['late'] for p in periods_data], 'red')
+
+        # Period totals row
+        draw.text((c1, y), "Period Total", fill='#6b21a8', font=font_bold)
+        for vi, p in enumerate(periods_data):
+            col_x = c2 if vi == 0 else c3
+            draw.text((col_x + 75, y), fmt(p['total']), fill='#6b21a8', font=font_bold, anchor='rt')
+        y += rh + 2
+
+    else:
+        # ---- NORMAL (NON-PRORATED) PAYSLIP LAYOUT ----
+        # Row 1: Basic Salary (monthly) / Basic (semi)
+        draw.text((left_col, y), "Basic Salary", fill='black', font=font_small)
+        draw.text((left_val, y), fmt(basic_monthly), fill='black', font=font_normal, anchor='rt')
+        draw.text((right_col, y), "Basic (Semi)", fill='black', font=font_small)
+        draw.text((right_val, y), fmt(basic_semi), fill='black', font=font_normal, anchor='rt')
+        y += row_height
+
+        # Row 2: Daily Rate / Allowance
+        draw.text((left_col, y), "Daily Rate", fill='black', font=font_small)
+        draw.text((left_val, y), fmt(daily_rate), fill='black', font=font_normal, anchor='rt')
+        draw.text((right_col, y), "Allowance", fill='black', font=font_small)
+        draw.text((right_val, y), fmt(allowance_val), fill='black', font=font_normal, anchor='rt')
+        y += row_height
+
+        # Row 3: Hourly Rate / Prod Incentive
+        draw.text((left_col, y), "Hourly Rate", fill='black', font=font_small)
+        draw.text((left_val, y), fmt(hourly_rate), fill='black', font=font_normal, anchor='rt')
+        draw.text((right_col, y), "Prod Incentive", fill='black', font=font_small)
+        draw.text((right_val, y), fmt(prod_val), fill='black', font=font_normal, anchor='rt')
+        y += row_height
+
+        # Row 4: Work Hours / Lang Incentive
+        draw.text((left_col, y), "Work Hours/Day", fill='black', font=font_small)
+        draw.text((left_val, y), f"{int(work_hours)}", fill='black', font=font_normal, anchor='rt')
+        draw.text((right_col, y), "Lang Incentive", fill='black', font=font_small)
+        draw.text((right_val, y), fmt(lang_val), fill='black', font=font_normal, anchor='rt')
+        y += row_height + 6
+
+        # Row 5: Overtime
+        draw.text((right_col, y), "Overtime", fill='black', font=font_small)
+        draw.text((right_val, y), fmt(reg_ot), fill='black', font=font_normal, anchor='rt')
+        y += row_height
+
+        # Row 6: Holiday
+        draw.text((right_col, y), "Holiday", fill='black', font=font_small)
+        draw.text((right_val, y), fmt(holiday), fill='black', font=font_normal, anchor='rt')
+        y += row_height
+
+        # Extra earnings rows
+        if holiday_ot > 0:
+            draw.text((right_col, y), "Holiday OT", fill='black', font=font_small)
+            draw.text((right_val, y), fmt(holiday_ot), fill='black', font=font_normal, anchor='rt')
+            y += row_height
+
+        if snwh_pay > 0:
+            draw.text((right_col, y), "SNWH", fill='black', font=font_small)
+            draw.text((right_val, y), fmt(snwh_pay), fill='black', font=font_normal, anchor='rt')
+            y += row_height
+
+        if snwh_ot > 0:
+            draw.text((right_col, y), "SNWH OT", fill='black', font=font_small)
+            draw.text((right_val, y), fmt(snwh_ot), fill='black', font=font_normal, anchor='rt')
+            y += row_height
+
+    # Total Allowance/Incentives summary
+    if allowance_val > 0 or prod_val > 0 or lang_val > 0:
+        y += 4
+        if allowance_val > 0:
+            draw.text((left_col, y), "Total Allowance", fill='black', font=font_bold)
+            draw.text((amt_x, y), fmt(allowance_val), fill='black', font=font_bold, anchor='rt')
+            y += row_height
+        if prod_val > 0:
+            draw.text((left_col, y), "Total Productivity", fill='black', font=font_bold)
+            draw.text((amt_x, y), fmt(prod_val), fill='black', font=font_bold, anchor='rt')
+            y += row_height
+        if lang_val > 0:
+            draw.text((left_col, y), "Total Language", fill='black', font=font_bold)
+            draw.text((amt_x, y), fmt(lang_val), fill='black', font=font_bold, anchor='rt')
+            y += row_height
+
+    y += 8
 
     # === ABSENCES/LATES ===
-    absent_amt = float(earnings.get('absent_deduction', 0) or deductions.get('absences_amount', 0) or 0)
-    late_amt = float(earnings.get('late_deduction', 0) or deductions.get('late_amount', 0) or 0)
+    absent_amt = float(deductions.get('absences_amount', 0) or 0)
+    late_amt = float(deductions.get('late_amount', 0) or 0)
     absences_total = absent_amt + late_amt
 
     draw.text((left_col, y), "Abs / Late", fill='black', font=font_small)
@@ -2263,27 +2671,49 @@ def generate_payslip_png(payslip: Payslip, company_name: str = "I CAN LANGUAGE C
     philhealth = float(deductions.get('philhealth', 0))
     hdmf = float(deductions.get('pagibig', 0))
     wtax = float(deductions.get('tax', 0))
+    sss_loan = float(deductions.get('sss_loan', 0))
+    pagibig_loan = float(deductions.get('pagibig_loan', 0))
+    other_loan = float(deductions.get('other_loan', 0))
 
-    draw.text((right_col, y), "SSS", fill='black', font=font_small)
-    draw.text((right_val, y), fmt(sss), fill='black', font=font_normal, anchor='rt')
-    y += row_height
+    if cutoff == 2:
+        draw.text((right_col, y), "SSS", fill='black', font=font_small)
+        draw.text((right_val, y), fmt(sss), fill='black', font=font_normal, anchor='rt')
+        y += row_height
 
-    draw.text((right_col, y), "PHIL", fill='black', font=font_small)
-    draw.text((right_val, y), fmt(philhealth), fill='black', font=font_normal, anchor='rt')
-    y += row_height
+        draw.text((right_col, y), "PHIL", fill='black', font=font_small)
+        draw.text((right_val, y), fmt(philhealth), fill='black', font=font_normal, anchor='rt')
+        y += row_height
 
-    draw.text((right_col, y), "HDMF", fill='black', font=font_small)
-    draw.text((right_val, y), fmt(hdmf), fill='black', font=font_normal, anchor='rt')
-    y += row_height
+        draw.text((right_col, y), "HDMF", fill='black', font=font_small)
+        draw.text((right_val, y), fmt(hdmf), fill='black', font=font_normal, anchor='rt')
+        y += row_height
 
     draw.text((right_col, y), "Wtax", fill='black', font=font_small)
     draw.text((right_val, y), fmt(wtax), fill='black', font=font_normal, anchor='rt')
-    y += row_height + 8
+    y += row_height
+
+    # Loan deductions (1st cutoff only)
+    if cutoff == 1 and sss_loan > 0:
+        draw.text((right_col, y), "SSS Loan", fill='black', font=font_small)
+        draw.text((right_val, y), fmt(sss_loan), fill='black', font=font_normal, anchor='rt')
+        y += row_height
+
+    if cutoff == 1 and pagibig_loan > 0:
+        draw.text((right_col, y), "HDMF Loan", fill='black', font=font_small)
+        draw.text((right_val, y), fmt(pagibig_loan), fill='black', font=font_normal, anchor='rt')
+        y += row_height
+
+    if cutoff == 1 and other_loan > 0:
+        draw.text((right_col, y), "Other Loan", fill='black', font=font_small)
+        draw.text((right_val, y), fmt(other_loan), fill='black', font=font_normal, anchor='rt')
+        y += row_height
+
+    y += 8
 
     # === NET PAY ===
     draw.rectangle([(right_col - 5, y - 2), (right_val + 5, y + 18)], outline='black', width=2)
     draw.text((right_col, y + 2), "Net Pay", fill='black', font=font_bold)
-    draw.text((right_val, y + 2), fmt(payslip.net_pay), fill='black', font=font_bold, anchor='rt')
+    draw.text((right_val, y + 2), fmt(totals["net_pay"], zero_dash=False), fill='black', font=font_bold, anchor='rt')
     y += 30
 
     # Divider
@@ -2322,24 +2752,29 @@ def generate_payslips_sheet(payslips: list, company_name: str = "I CAN LANGUAGE 
     """Generate a single PNG image with up to 4 payslips arranged in 2x2 grid."""
     from PIL import Image
 
-    # Each payslip is 400x520 pixels (I CAN format)
-    slip_w, slip_h = 400, 520
-    # 2 columns, 2 rows = 800x1040 pixels (fits on letter paper)
+    slip_w = 400
+    # Find the max height across all payslips (varies with loan rows)
+    slip_images = []
+    max_h = 520
+    for payslip in payslips[:4]:
+        slip_bytes = generate_payslip_png(payslip, company_name)
+        slip_img = Image.open(io.BytesIO(slip_bytes))
+        if slip_img.height > max_h:
+            max_h = slip_img.height
+        slip_images.append(slip_img)
+
+    # 2 columns, 2 rows - use max height so all cells are uniform
     cols, rows = 2, 2
     sheet_w = slip_w * cols
-    sheet_h = slip_h * rows
+    sheet_h = max_h * rows
 
     sheet = Image.new('RGB', (sheet_w, sheet_h), 'white')
 
-    for idx, payslip in enumerate(payslips[:4]):  # Max 4 per sheet (2x2)
+    for idx, slip_img in enumerate(slip_images):
         col = idx % cols
         row = idx // cols
         x = col * slip_w
-        y = row * slip_h
-
-        # Generate individual payslip PNG
-        slip_bytes = generate_payslip_png(payslip, company_name)
-        slip_img = Image.open(io.BytesIO(slip_bytes))
+        y = row * max_h
         sheet.paste(slip_img, (x, y))
 
     buffer = io.BytesIO()
@@ -2435,6 +2870,87 @@ async def get_payslips_count(
     pages = (count + 3) // 4  # Ceiling division, 4 payslips per sheet
 
     return {"count": count, "pages": pages}
+
+
+@router.get("/runs/{run_id}/all-payslips-pdf")
+async def download_all_payslips_pdf(
+    run_id: int,
+    current_admin: User = Depends(get_current_admin),
+    db: Session = Depends(get_db)
+):
+    """
+    Download ALL payslips for a payroll run as a single PDF file.
+    Arranges 4 payslips per A4 page in a 2x2 grid.
+    """
+    from PIL import Image
+    from app.models.settings import SystemSettings
+
+    payroll_run = db.query(PayrollRun).filter(PayrollRun.id == run_id).first()
+    if not payroll_run:
+        raise HTTPException(status_code=404, detail="Payroll run not found")
+
+    payslips = db.query(Payslip).filter(
+        Payslip.payroll_run_id == run_id
+    ).order_by(Payslip.id).all()
+
+    if not payslips:
+        raise HTTPException(status_code=404, detail="No payslips found")
+
+    settings = db.query(SystemSettings).first()
+    company_name = settings.company_name if settings else "I CAN LANGUAGE CENTER INC."
+
+    slip_w = 400
+    cols, rows_per_page = 2, 2
+    per_page = cols * rows_per_page
+
+    # Pre-generate all PNGs to get actual heights
+    slip_images = []
+    for payslip in payslips:
+        slip_bytes = generate_payslip_png(payslip, company_name)
+        slip_images.append(Image.open(io.BytesIO(slip_bytes)))
+
+    pages = []
+    for page_idx in range(0, len(slip_images), per_page):
+        batch = slip_images[page_idx:page_idx + per_page]
+
+        # Find max height per row for this page
+        row_heights = []
+        for r in range(rows_per_page):
+            row_slips = batch[r * cols:(r + 1) * cols]
+            if row_slips:
+                row_heights.append(max(s.height for s in row_slips))
+            else:
+                row_heights.append(0)
+
+        sheet_w = slip_w * cols
+        sheet_h = sum(row_heights)
+        sheet = Image.new('RGB', (sheet_w, sheet_h), 'white')
+
+        for idx, slip_img in enumerate(batch):
+            col = idx % cols
+            row = idx // cols
+            x = col * slip_w
+            y_offset = sum(row_heights[:row])
+            sheet.paste(slip_img, (x, y_offset))
+
+        pages.append(sheet)
+
+    buffer = io.BytesIO()
+    if len(pages) == 1:
+        pages[0].save(buffer, format='PDF', resolution=100.0)
+    else:
+        pages[0].save(buffer, format='PDF', resolution=100.0, save_all=True, append_images=pages[1:])
+    buffer.seek(0)
+
+    period_code = payroll_run.period_start.strftime('%y%m')
+    cutoff = 'A' if payroll_run.cutoff == 1 else 'B'
+    filename = f"PAYSLIPS-{period_code}{cutoff}-ALL.pdf"
+
+    return StreamingResponse(
+        buffer,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
 
 
 # === Payroll Import from File ===
@@ -2694,3 +3210,166 @@ async def download_thirteenth_month_pdf(
         media_type="application/pdf",
         headers={"Content-Disposition": f"attachment; filename={filename}"}
     )
+
+
+# ═══════════════════════════════════════════════════════════════
+# PAYSLIP VERSION HISTORY & POINT-IN-TIME RESTORE
+# ═══════════════════════════════════════════════════════════════
+
+@router.get("/payslips/{payslip_id}/history")
+async def get_payslip_history(
+    payslip_id: int,
+    current_admin: User = Depends(get_current_admin),
+    db: Session = Depends(get_db)
+):
+    """Get full edit history for a payslip. Each entry is a restorable snapshot."""
+    payslip = db.query(Payslip).filter(Payslip.id == payslip_id).first()
+    if not payslip:
+        raise HTTPException(status_code=404, detail="Payslip not found")
+
+    logs = db.query(AuditLog).filter(
+        AuditLog.resource_type == "payslip",
+        AuditLog.resource_id == str(payslip_id),
+        AuditLog.action.in_([AuditAction.PAYSLIP_EDIT, AuditAction.PAYSLIP_RESTORE])
+    ).order_by(AuditLog.timestamp.desc()).all()
+
+    items = []
+    for log in logs:
+        change_type = ""
+        if log.extra_data:
+            change_type = log.extra_data.get("change_type", "")
+
+        # Describe the change
+        description = _describe_change(log.action, change_type, log.old_value, log.new_value, log.extra_data)
+
+        items.append({
+            "id": log.id,
+            "timestamp": log.timestamp.isoformat() if log.timestamp else None,
+            "user_email": log.user_email,
+            "action": log.action.value,
+            "change_type": change_type,
+            "description": description,
+            "snapshot": log.new_value,  # The state AFTER this change
+            "old_snapshot": log.old_value,  # The state BEFORE this change
+            "reason": log.reason,
+        })
+
+    return {"items": items, "total": len(items)}
+
+
+def _describe_change(action, change_type, old_val, new_val, extra_data):
+    """Generate human-readable description of a payslip change."""
+    if action == AuditAction.PAYSLIP_RESTORE:
+        restored_from = extra_data.get("restored_from_date", "") if extra_data else ""
+        return f"Restored to {restored_from} state"
+
+    if not old_val or not new_val:
+        return change_type.replace("_", " ").title()
+
+    changes = []
+    # Compare key numeric fields
+    fields_to_check = [
+        ("total_earnings", "Total Earnings"),
+        ("total_deductions", "Total Deductions"),
+        ("net_pay", "Net Pay"),
+        ("days_worked", "Days Worked"),
+        ("days_absent", "Days Absent"),
+        ("total_late_minutes", "Late Minutes"),
+        ("additional_amount", "Additional Amount"),
+    ]
+    for key, label in fields_to_check:
+        old_v = old_val.get(key, 0) or 0
+        new_v = new_val.get(key, 0) or 0
+        if abs(float(old_v) - float(new_v)) > 0.001:
+            changes.append(f"{label}: {float(old_v):,.2f} → {float(new_v):,.2f}")
+
+    if changes:
+        return "; ".join(changes[:3])  # Show up to 3 changes
+    return change_type.replace("_", " ").title()
+
+
+@router.post("/payslips/{payslip_id}/restore/{audit_log_id}")
+async def restore_payslip_to_snapshot(
+    payslip_id: int,
+    audit_log_id: int,
+    current_admin: User = Depends(get_current_admin),
+    db: Session = Depends(get_db)
+):
+    """
+    Restore a payslip to a specific point in history.
+    This itself creates an audit entry so it can be undone.
+    """
+    payslip = db.query(Payslip).filter(Payslip.id == payslip_id).first()
+    if not payslip:
+        raise HTTPException(status_code=404, detail="Payslip not found")
+
+    # Check if locked
+    run = db.query(PayrollRun).filter(PayrollRun.id == payslip.payroll_run_id).first()
+    if run and run.status == PayrollStatus.LOCKED:
+        raise HTTPException(status_code=400, detail="Cannot modify locked payroll")
+
+    # Get the audit log entry to restore from
+    audit_entry = db.query(AuditLog).filter(AuditLog.id == audit_log_id).first()
+    if not audit_entry:
+        raise HTTPException(status_code=404, detail="Audit log entry not found")
+    if audit_entry.resource_type != "payslip" or audit_entry.resource_id != str(payslip_id):
+        raise HTTPException(status_code=400, detail="Audit entry does not belong to this payslip")
+
+    # Get the snapshot to restore to (the state AFTER that change was made)
+    snapshot = audit_entry.new_value
+    if not snapshot:
+        raise HTTPException(status_code=400, detail="No snapshot data available for this entry")
+
+
+    # Snapshot current state before restore
+    old_snap = _snapshot_payslip(payslip)
+
+    # Restore payslip fields from snapshot
+    if snapshot.get("earnings"):
+        payslip.earnings = snapshot["earnings"]
+        flag_modified(payslip, 'earnings')
+    if snapshot.get("deductions"):
+        payslip.deductions = snapshot["deductions"]
+        flag_modified(payslip, 'deductions')
+
+    payslip.total_earnings = Decimal(str(snapshot.get("total_earnings", 0)))
+    payslip.total_deductions = Decimal(str(snapshot.get("total_deductions", 0)))
+    payslip.net_pay = Decimal(str(snapshot.get("net_pay", 0)))
+    payslip.days_worked = Decimal(str(snapshot.get("days_worked", 0)))
+    payslip.days_absent = Decimal(str(snapshot.get("days_absent", 0)))
+    payslip.late_count = int(snapshot.get("late_count", 0))
+    payslip.total_late_minutes = int(snapshot.get("total_late_minutes", 0))
+    payslip.overtime_hours = Decimal(str(snapshot.get("overtime_hours", 0)))
+    payslip.additional_amount = Decimal(str(snapshot.get("additional_amount", 0)))
+    payslip.additional_notes = snapshot.get("additional_notes")
+
+    # Create audit entry for the restore action
+    restored_date = audit_entry.timestamp.strftime("%b %d, %Y %I:%M %p") if audit_entry.timestamp else "unknown"
+    new_snap = _snapshot_payslip(payslip)
+    audit = AuditLog(
+        user_id=current_admin.id,
+        user_email=current_admin.email,
+        action=AuditAction.PAYSLIP_RESTORE,
+        resource_type="payslip",
+        resource_id=str(payslip.id),
+        old_value=old_snap,
+        new_value=new_snap,
+        reason=f"Restored to {restored_date} state",
+        extra_data={
+            "employee_id": payslip.employee_id,
+            "employee_name": new_snap.get("employee_name", ""),
+            "payroll_run_id": payslip.payroll_run_id,
+            "change_type": "restore",
+            "restored_from_audit_id": audit_log_id,
+            "restored_from_date": restored_date,
+        }
+    )
+    db.add(audit)
+    db.commit()
+
+    return {
+        "message": f"Payslip restored to {restored_date} state",
+        "total_earnings": float(payslip.total_earnings),
+        "total_deductions": float(payslip.total_deductions),
+        "net_pay": float(payslip.net_pay),
+    }

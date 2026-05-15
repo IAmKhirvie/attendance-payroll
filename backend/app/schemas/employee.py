@@ -4,7 +4,7 @@ Employee Schemas
 Pydantic models for employee-related API operations.
 """
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, field_validator
 from typing import Optional
 from datetime import date, datetime
 from decimal import Decimal
@@ -86,6 +86,29 @@ class EmployeeCreate(EmployeeBase):
     work_saturday: bool = False
     work_sunday: bool = False
 
+    @field_validator('work_hours_per_day')
+    @classmethod
+    def validate_work_hours(cls, v):
+        if v is not None:
+            if v < 1 or v > 24:
+                raise ValueError('work_hours_per_day must be between 1 and 24')
+        return v
+
+    @field_validator('buffer_minutes')
+    @classmethod
+    def validate_buffer_minutes(cls, v):
+        if v is not None:
+            if v < 0 or v > 120:
+                raise ValueError('buffer_minutes must be between 0 and 120')
+        return v
+
+    @field_validator('basic_salary', 'daily_rate', 'hourly_rate', 'allowance')
+    @classmethod
+    def validate_positive_amounts(cls, v):
+        if v is not None and v < 0:
+            raise ValueError('Amount cannot be negative')
+        return v
+
 
 class EmployeeUpdate(BaseModel):
     """Update employee request."""
@@ -130,6 +153,29 @@ class EmployeeUpdate(BaseModel):
     work_friday: Optional[bool] = None
     work_saturday: Optional[bool] = None
     work_sunday: Optional[bool] = None
+
+    @field_validator('work_hours_per_day')
+    @classmethod
+    def validate_work_hours(cls, v):
+        if v is not None:
+            if v < 1 or v > 24:
+                raise ValueError('work_hours_per_day must be between 1 and 24')
+        return v
+
+    @field_validator('buffer_minutes')
+    @classmethod
+    def validate_buffer_minutes(cls, v):
+        if v is not None:
+            if v < 0 or v > 120:
+                raise ValueError('buffer_minutes must be between 0 and 120')
+        return v
+
+    @field_validator('basic_salary', 'daily_rate', 'hourly_rate', 'allowance')
+    @classmethod
+    def validate_positive_amounts(cls, v):
+        if v is not None and v < 0:
+            raise ValueError('Amount cannot be negative')
+        return v
 
 
 class EmployeeResponse(EmployeeBase):

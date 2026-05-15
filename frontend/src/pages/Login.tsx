@@ -108,7 +108,7 @@ export function LoginPage() {
                 <div
                   className="h-20 w-20 rounded-2xl flex items-center justify-center shadow-xl animate-float"
                   style={{
-                    background: 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 50%, #a855f7 100%)',
+                    background: 'linear-gradient(135deg, #166534 0%, #15803d 50%, #16a34a 100%)',
                     boxShadow: '0 8px 32px rgba(79, 70, 229, 0.3)',
                   }}
                 >
@@ -290,7 +290,7 @@ export function LoginPage() {
               <div
                 className="h-24 w-24 rounded-2xl flex items-center justify-center shadow-xl animate-float"
                 style={{
-                  background: 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 50%, #a855f7 100%)',
+                  background: 'linear-gradient(135deg, #166534 0%, #15803d 50%, #16a34a 100%)',
                   boxShadow: '0 12px 40px rgba(79, 70, 229, 0.4)',
                 }}
               >

@@ -180,7 +180,7 @@ export function Layout() {
           <div
             className="flex items-center justify-between px-6 py-5"
             style={{
-              background: 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 50%, #a855f7 100%)',
+              background: 'linear-gradient(135deg, #166534 0%, #15803d 50%, #16a34a 100%)',
             }}
           >
             <div className="flex items-center gap-4">
@@ -208,7 +208,7 @@ export function Layout() {
           </div>
 
           {/* Decorative divider */}
-          <div className="h-1" style={{ background: 'linear-gradient(90deg, #4f46e5, #a855f7, #4f46e5)' }}></div>
+          <div className="h-1" style={{ background: 'linear-gradient(90deg, #166534, #16a34a, #166534)' }}></div>
 
           {/* Navigation */}
           <nav className="flex-1 px-4 py-6 space-y-2 overflow-y-auto">
@@ -244,7 +244,7 @@ export function Layout() {
               <div className="avatar-ring">
                 <div
                   className="w-11 h-11 rounded-full flex items-center justify-center"
-                  style={{ background: 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)' }}
+                  style={{ background: 'linear-gradient(135deg, #166534 0%, #15803d 100%)' }}
                 >
                   <span className="text-white font-bold text-sm">
                     {user?.first_name?.charAt(0)}{user?.last_name?.charAt(0)}
@@ -321,7 +321,7 @@ export function Layout() {
               to="/admin/attendance"
               className="flex items-center gap-3 px-5 py-3 rounded-xl text-sm font-bold text-white transition-all uppercase tracking-wide"
               style={{
-                background: 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)',
+                background: 'linear-gradient(135deg, #166534 0%, #15803d 100%)',
                 boxShadow: 'var(--shadow-md), 0 4px 20px rgba(79, 70, 229, 0.3)',
               }}
             >

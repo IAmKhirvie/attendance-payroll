@@ -49,17 +49,18 @@ export function AdminDashboard() {
   const loadDashboardData = async () => {
     try {
       // Get counts by status using separate API calls with status filter
+      // Each call has individual error handling to prevent partial failures
       const [activeData, pendingData, payrollData, importData] = await Promise.all([
-        employeesApi.list({ page: 1, page_size: 1, status: 'active' }),
-        employeesApi.list({ page: 1, page_size: 1, status: 'pending' }),
+        employeesApi.list({ page: 1, page_size: 1, status: 'active' }).catch(() => ({ total: 0, items: [] })),
+        employeesApi.list({ page: 1, page_size: 1, status: 'pending' }).catch(() => ({ total: 0, items: [] })),
         api.get('/payroll/runs', { params: { page: 1, page_size: 1 } }).catch(() => ({ data: { items: [] } })),
         api.get('/attendance/imports', { params: { page: 1, page_size: 1 } }).catch(() => ({ data: { items: [] } })),
       ]);
 
       setStats({
-        totalEmployees: activeData.total,  // Only count active employees
-        activeEmployees: activeData.total,
-        pendingEmployees: pendingData.total,
+        totalEmployees: (activeData?.total ?? 0) + (pendingData?.total ?? 0),
+        activeEmployees: activeData?.total ?? 0,
+        pendingEmployees: pendingData?.total ?? 0,
       });
 
       if (payrollData.data.items.length > 0) {
@@ -98,7 +99,7 @@ export function AdminDashboard() {
           </p>
         </div>
         <div className="absolute right-0 top-0 -mt-4 -mr-4 opacity-10">
-          <svg width="200" height="200" viewBox="0 0 200 200" fill="#4f46e5">
+          <svg width="200" height="200" viewBox="0 0 200 200" fill="#166534">
             <circle cx="100" cy="100" r="80" />
             <circle cx="160" cy="40" r="40" />
           </svg>
@@ -147,7 +148,7 @@ export function AdminDashboard() {
                   )}
                 </div>
                 <div className="w-12 h-12 bg-indigo-100 rounded-lg flex items-center justify-center">
-                  <svg className="w-6 h-6 text-indigo-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <svg className="w-6 h-6 text-green-700" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                   </svg>
                 </div>

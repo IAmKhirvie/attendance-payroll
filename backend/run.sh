@@ -16,14 +16,14 @@ LOCAL_IP=$(ifconfig | grep -A5 "en0\|en1" | grep "inet " | awk '{print $2}' | he
 echo "Starting Attendance & Payroll Backend (HTTPS)..."
 echo ""
 echo "Server available at:"
-echo "  Local:   https://127.0.0.1:8000"
-echo "  Network: https://${LOCAL_IP}:8000"
+echo "  Local:   https://127.0.0.1:8500"
+echo "  Network: https://${LOCAL_IP}:8500"
 echo ""
-echo "API Documentation: https://${LOCAL_IP}:8000/docs"
+echo "API Documentation: https://${LOCAL_IP}:8500/docs"
 echo ""
 echo "Press Ctrl+C to stop the server"
 echo ""
 
 # Run the server with HTTPS
-python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload \
+python -m uvicorn app.main:app --host 0.0.0.0 --port 8500 --reload \
     --ssl-keyfile=../certs/key.pem --ssl-certfile=../certs/cert.pem

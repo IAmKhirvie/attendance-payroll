@@ -56,6 +56,7 @@ async def sync_from_notion(
     - Fetches teacher data from Notion
     - Updates matching employees in A&P
     - Does NOT write anything to Notion
+    - Auto-recalculates late minutes after schedule updates
 
     Matching logic:
     1. Match by email (exact)
@@ -75,6 +76,21 @@ async def sync_from_notion(
             admin_user_id=current_admin.id,
             admin_email=current_admin.email
         )
+
+        # Auto-recalculate late minutes if any schedules were updated
+        schedule_changed = False
+        for detail in results.get("details", []):
+            if detail.get("action") == "updated":
+                changes = detail.get("changes", {})
+                if "call_time" in changes or "time_out" in changes:
+                    schedule_changed = True
+                    break
+
+        if schedule_changed:
+            from app.services.attendance_recalc import recalculate_all_late_minutes
+            recalc_result = recalculate_all_late_minutes(db)
+            results["late_recalculation"] = recalc_result
+
         return results
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

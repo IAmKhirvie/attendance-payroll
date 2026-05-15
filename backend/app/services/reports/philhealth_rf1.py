@@ -63,6 +63,9 @@ class PhilHealthRF1Report(BaseReportGenerator):
         employee_contributions = {}
 
         for ps in payslips:
+            if not ps.payroll_run or ps.payroll_run.cutoff != 2:
+                continue
+
             # Extract PhilHealth contributions from deductions JSON
             deductions_dict = ps.deductions or {}
             philhealth_ee = Decimal(str(deductions_dict.get("philhealth", 0)))

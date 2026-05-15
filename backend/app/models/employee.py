@@ -50,7 +50,10 @@ class Employee(Base):
     # Employment Info
     department_id = Column(Integer, ForeignKey("departments.id"), nullable=True)
     position = Column(String(100), nullable=True)
-    employment_type = Column(String(50), default="regular")  # regular, probationary, contractual
+    # Employment type: "Regular - Full Time", "Regular - Part Time",
+    # "Fixed Term - Full Time", "Fixed Term - Part Time"
+    # Fixed Term = per camp/training period, may change between camps
+    employment_type = Column(String(50), default="Regular - Full Time")
     hire_date = Column(Date, nullable=True)
     end_date = Column(Date, nullable=True)  # Contract end date or resignation date
 

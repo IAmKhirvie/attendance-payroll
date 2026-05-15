@@ -54,6 +54,8 @@ class AuditAction(str, enum.Enum):
     PAYROLL_LOCK = "payroll_lock"
     PAYROLL_EXPORT = "payroll_export"
     PAYSLIP_VIEW = "payslip_view"
+    PAYSLIP_EDIT = "payslip_edit"
+    PAYSLIP_RESTORE = "payslip_restore"
     PAYSLIP_RELEASE = "payslip_release"
     PAYSLIP_BULK_RELEASE = "payslip_bulk_release"
 

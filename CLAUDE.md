@@ -160,7 +160,7 @@ Payslips can be downloaded as PDF:
 ```bash
 cd /Users/icanstudio2/attendance-payroll/backend
 source venv/bin/activate
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8500
 ```
 
 ## Running the Frontend
@@ -181,13 +181,13 @@ ifconfig | grep "inet " | grep -v 127.0.0.1
 ```
 
 ### Accessing from Other Devices
-1. Backend API: `http://<your-ip>:8000`
-2. Frontend: `https://<your-ip>:3000` (or whichever port Vite uses)
+1. Backend API: `http://<your-ip>:8500`
+2. Frontend: `https://<your-ip>:4500` (or whichever port Vite uses)
 
 Note: HTTPS is required for the frontend. You may need to accept the self-signed certificate warning in your browser.
 
 ### Example
 If your IP is 192.168.68.225:
-- Frontend: https://192.168.68.225:3000
-- API: http://192.168.68.225:8000
-- API Docs: http://192.168.68.225:8000/docs
+- Frontend: https://192.168.68.225:4500
+- API: http://192.168.68.225:8500
+- API Docs: http://192.168.68.225:8500/docs

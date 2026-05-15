@@ -70,6 +70,11 @@ export function AttendancePage() {
   const [recordsSearchTerm, setRecordsSearchTerm] = useState('');
   const [recordsStatusFilter, setRecordsStatusFilter] = useState<string>('all');
 
+  // Pagination state for records tab
+  const [recordsPage, setRecordsPage] = useState(1);
+  const [recordsPageSize, setRecordsPageSize] = useState(50);
+  const [recordsTotal, setRecordsTotal] = useState(0);
+
   // Import results state
   const [searchTerm, setSearchTerm] = useState('');
   const [expandedEmployees, setExpandedEmployees] = useState<Set<string>>(new Set());
@@ -388,6 +393,18 @@ export function AttendancePage() {
   // Auto-switch to results tab when import completes
   useEffect(() => {
     if (importResult && !isUploading) {
+      const importedDates = (importResult.records || [])
+        .map((record) => record.date)
+        .filter(Boolean)
+        .sort();
+      const importedDateFrom = importResult.date_from || importResult.payroll?.period_start || importedDates[0];
+      const importedDateTo = importResult.date_to || importResult.payroll?.period_end || importedDates[importedDates.length - 1];
+
+      if (importedDateFrom && importedDateTo) {
+        setDateFrom(importedDateFrom);
+        setDateTo(importedDateTo);
+      }
+
       setActiveTab('results');
       // Refresh history when new import completes
       loadImportHistory();
@@ -396,12 +413,20 @@ export function AttendancePage() {
 
   useEffect(() => {
     if (activeTab === 'records') {
-      loadAttendance();
+      // Reset to page 1 when dates change
+      loadAttendance(1);
     }
     if (activeTab === 'history') {
       loadImportHistory();
     }
   }, [activeTab, dateFrom, dateTo]);
+
+  // Handle page size changes - reset to page 1
+  useEffect(() => {
+    if (activeTab === 'records') {
+      loadAttendance(1);
+    }
+  }, [recordsPageSize]);
 
   // Filter attendance records
   const filteredAttendance = useMemo(() => {
@@ -470,15 +495,24 @@ export function AttendancePage() {
     }
   };
 
-  const loadAttendance = async () => {
+  const loadAttendance = async (page = recordsPage) => {
     setLoading(true);
     try {
       const response = await api.get('/attendance', {
-        params: { date_from: dateFrom, date_to: dateTo, page_size: 100 }
+        params: {
+          date_from: dateFrom,
+          date_to: dateTo,
+          page: page,
+          page_size: recordsPageSize
+        }
       });
-      setAttendance(response.data.items);
+      setAttendance(response.data.items || []);
+      setRecordsTotal(response.data.total || 0);
+      setRecordsPage(page);
     } catch (error) {
       console.error('Failed to load attendance:', error);
+      setAttendance([]);
+      setRecordsTotal(0);
     } finally {
       setLoading(false);
     }
@@ -589,7 +623,7 @@ export function AttendancePage() {
       {activeTab === 'import' && (
         <div className="space-y-6">
           {/* Instructions Card */}
-          <div className="card bg-gradient-to-r from-blue-50 to-indigo-50 border-blue-200">
+          <div className="card bg-gradient-to-r from-green-50 to-emerald-50 border-green-200">
             <h2 className="text-lg font-semibold text-gray-900 mb-3 flex items-center gap-2">
               <svg className="w-5 h-5 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -606,6 +640,11 @@ export function AttendancePage() {
             <div className="mt-3 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
               <p className="text-sm text-yellow-800">
                 <strong>Note:</strong> If a teacher only works 2 days, you can adjust their payroll in the Payroll section after import.
+              </p>
+            </div>
+            <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+              <p className="text-sm text-blue-800">
+                <strong>Important:</strong> If there are changes to employee schedules or statuses, please sync from Notion first (Settings → Notion Sync) before importing attendance. This ensures late/early calculations are accurate.
               </p>
             </div>
           </div>
@@ -800,7 +839,7 @@ export function AttendancePage() {
               </div>
 
               {/* Extract Employee Names Button */}
-              <div className="card bg-gradient-to-r from-blue-50 to-indigo-50 border-blue-200">
+              <div className="card bg-gradient-to-r from-green-50 to-emerald-50 border-green-200">
                 <div className="flex items-center justify-between">
                   <div>
                     <h3 className="font-semibold text-gray-900">Register Extracted Employees</h3>
@@ -838,6 +877,12 @@ export function AttendancePage() {
                     </select>
                   </div>
                   <div className="flex gap-2">
+                    <button
+                      onClick={() => setActiveTab('records')}
+                      className="bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-2 rounded-lg"
+                    >
+                      View Attendance Records
+                    </button>
                     <button onClick={expandAll} className="btn-secondary text-sm">
                       Expand All
                     </button>
@@ -1181,6 +1226,18 @@ export function AttendancePage() {
                             >
                               View
                             </button>
+                            {item.date_from && item.date_to && (
+                              <button
+                                onClick={() => {
+                                  setDateFrom(item.date_from!);
+                                  setDateTo(item.date_to!);
+                                  setActiveTab('records');
+                                }}
+                                className="text-blue-600 hover:text-blue-800"
+                              >
+                                Records
+                              </button>
+                            )}
                             <button
                               onClick={() => deleteImport(item.batch_id)}
                               className="text-red-600 hover:text-red-800"
@@ -1222,7 +1279,7 @@ export function AttendancePage() {
               />
             </div>
             <div className="flex items-end">
-              <button onClick={loadAttendance} className="btn-primary">
+              <button onClick={() => loadAttendance()} className="btn-primary">
                 Load Records
               </button>
             </div>
@@ -1281,7 +1338,8 @@ export function AttendancePage() {
           ) : (
             <>
               <div className="text-sm text-gray-500 mb-2">
-                Showing {filteredAttendance.length} of {attendance.length} records
+                Showing {filteredAttendance.length} of {recordsTotal} records
+                {recordsSearchTerm || recordsStatusFilter !== 'all' ? ` (filtered from ${attendance.length} loaded)` : ''}
               </div>
               <div className="overflow-x-auto">
                 <table className="min-w-full divide-y divide-gray-200">
@@ -1328,6 +1386,63 @@ export function AttendancePage() {
                   </tbody>
                 </table>
               </div>
+
+              {/* Pagination Controls */}
+              {recordsTotal > recordsPageSize && (
+                <div className="mt-4 flex flex-wrap items-center justify-between gap-4 pt-4 border-t">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-gray-600">Rows per page:</span>
+                    <select
+                      value={recordsPageSize}
+                      onChange={(e) => setRecordsPageSize(Number(e.target.value))}
+                      className="form-input py-1 px-2 text-sm w-20"
+                    >
+                      <option value={25}>25</option>
+                      <option value={50}>50</option>
+                      <option value={100}>100</option>
+                      <option value={200}>200</option>
+                    </select>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-gray-600">
+                      Page {recordsPage} of {Math.ceil(recordsTotal / recordsPageSize)}
+                    </span>
+                    <div className="flex gap-1">
+                      <button
+                        onClick={() => loadAttendance(1)}
+                        disabled={recordsPage === 1 || loading}
+                        className="px-2 py-1 text-sm border rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                        title="First page"
+                      >
+                        ««
+                      </button>
+                      <button
+                        onClick={() => loadAttendance(recordsPage - 1)}
+                        disabled={recordsPage === 1 || loading}
+                        className="px-3 py-1 text-sm border rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        Previous
+                      </button>
+                      <button
+                        onClick={() => loadAttendance(recordsPage + 1)}
+                        disabled={recordsPage >= Math.ceil(recordsTotal / recordsPageSize) || loading}
+                        className="px-3 py-1 text-sm border rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        Next
+                      </button>
+                      <button
+                        onClick={() => loadAttendance(Math.ceil(recordsTotal / recordsPageSize))}
+                        disabled={recordsPage >= Math.ceil(recordsTotal / recordsPageSize) || loading}
+                        className="px-2 py-1 text-sm border rounded hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                        title="Last page"
+                      >
+                        »»
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
             </>
           )}
         </div>

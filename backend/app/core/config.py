@@ -31,7 +31,7 @@ class Settings(BaseSettings):
 
     # Server - Accessible from network
     HOST: str = "0.0.0.0"  # Bind to all interfaces
-    PORT: int = 8000
+    PORT: int = 8500
     SSL_CERTFILE: str = "../certs/cert.pem"
     SSL_KEYFILE: str = "../certs/key.pem"
 

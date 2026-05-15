@@ -43,7 +43,10 @@ async def create_department(
     # Check for duplicate code
     existing = db.query(Department).filter(Department.code == dept_data.code).first()
     if existing:
-        raise HTTPException(status_code=400, detail="Department code already exists")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Department code '{dept_data.code}' is already used by '{existing.name}'"
+        )
 
     dept = Department(**dept_data.model_dump())
     db.add(dept)
@@ -85,7 +88,10 @@ async def update_department(
             Department.id != department_id
         ).first()
         if existing:
-            raise HTTPException(status_code=400, detail="Department code already exists")
+            raise HTTPException(
+                status_code=400,
+                detail=f"Department code '{update_data['code']}' is already used by '{existing.name}'"
+            )
 
     for field, value in update_data.items():
         setattr(dept, field, value)
@@ -140,12 +146,22 @@ async def list_employees_without_users(
         Employee.is_active == True
     ).all()
 
-    # Check which ones don't have users
+    # Get all employee IDs
+    employee_ids = [emp.id for emp in employees]
+
+    # Single query to get all users linked to these employees (fixes N+1)
+    users_with_employees = db.query(User).filter(
+        User.employee_id.in_(employee_ids)
+    ).all() if employee_ids else []
+
+    # Create a mapping of employee_id -> user
+    employee_user_map = {user.employee_id: user for user in users_with_employees}
+
+    # Categorize employees without additional queries
     without_users = []
     with_users = []
 
     for emp in employees:
-        existing_user = db.query(User).filter(User.employee_id == emp.id).first()
         emp_data = {
             "id": emp.id,
             "employee_no": emp.employee_no,
@@ -153,6 +169,7 @@ async def list_employees_without_users(
             "email": emp.email,
             "status": emp.status
         }
+        existing_user = employee_user_map.get(emp.id)
         if existing_user:
             emp_data["user_email"] = existing_user.email
             with_users.append(emp_data)
@@ -261,7 +278,10 @@ async def create_employee(
     # Check for duplicate employee_no
     existing = db.query(Employee).filter(Employee.employee_no == employee_data.employee_no).first()
     if existing:
-        raise HTTPException(status_code=400, detail="Employee number already exists")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Employee number '{employee_data.employee_no}' is already assigned to {existing.full_name}"
+        )
 
     employee = Employee(**employee_data.model_dump())
     db.add(employee)
@@ -359,11 +379,6 @@ async def update_employee(
     # Capture old values for audit log
     update_data = employee_data.model_dump(exclude_unset=True)
 
-    # Debug: Log is_flexible values
-    print(f"[DEBUG] Employee {employee_id} update - is_flexible in update_data: {'is_flexible' in update_data}")
-    if 'is_flexible' in update_data:
-        print(f"[DEBUG] is_flexible value being set: {update_data['is_flexible']} (type: {type(update_data['is_flexible'])})")
-    print(f"[DEBUG] Current employee.is_flexible: {employee.is_flexible}")
     old_values = {}
     new_values = {}
 
@@ -384,9 +399,6 @@ async def update_employee(
 
     db.commit()
     db.refresh(employee)
-
-    # Debug: Log is_flexible after commit
-    print(f"[DEBUG] After commit - employee.is_flexible: {employee.is_flexible}")
 
     # Log the changes if any
     if old_values:
@@ -597,20 +609,30 @@ async def sync_employees_to_users(
 
     TEMP_PASSWORD = "1441@Ican"
 
-    # Get active employees without user accounts
-    employees_without_users = db.query(Employee).filter(
+    # Get active employees
+    employees = db.query(Employee).filter(
         Employee.status == 'active',
         Employee.is_active == True
     ).all()
+
+    employee_ids = [emp.id for emp in employees]
+
+    # Batch query: Get all users linked to these employees (fixes N+1)
+    existing_users_by_emp = db.query(User).filter(
+        User.employee_id.in_(employee_ids)
+    ).all() if employee_ids else []
+    employee_ids_with_users = {u.employee_id for u in existing_users_by_emp}
+
+    # Batch query: Get all existing emails (fixes N+1)
+    all_existing_emails = {u.email.lower() for u in db.query(User.email).all()}
 
     created = 0
     skipped = 0
     errors = []
 
-    for emp in employees_without_users:
+    for emp in employees:
         # Check if user already exists for this employee
-        existing_user = db.query(User).filter(User.employee_id == emp.id).first()
-        if existing_user:
+        if emp.id in employee_ids_with_users:
             skipped += 1
             continue
 
@@ -622,10 +644,11 @@ async def sync_employees_to_users(
             last = emp.last_name.lower().replace(' ', '') if emp.last_name else ''
             email = f"{first}.{last}@company.local" if last else f"{first}@company.local"
 
-        # Check if email already exists
-        existing_email = db.query(User).filter(User.email == email).first()
-        if existing_email:
+        # Check if email already exists (use cached set)
+        if email.lower() in all_existing_emails:
             # Add employee ID to make unique
+            first = emp.first_name.lower().replace(' ', '')
+            last = emp.last_name.lower().replace(' ', '') if emp.last_name else ''
             email = f"{first}.{last}.{emp.id}@company.local"
 
         try:
@@ -641,6 +664,8 @@ async def sync_employees_to_users(
             )
             db.add(new_user)
             db.flush()
+            # Add new email to the set to prevent duplicates within same batch
+            all_existing_emails.add(email.lower())
             created += 1
         except Exception as e:
             errors.append(f"{emp.full_name}: {str(e)}")

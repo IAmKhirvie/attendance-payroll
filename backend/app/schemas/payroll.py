@@ -206,6 +206,13 @@ class PayslipResponse(BaseModel):
     released_at: Optional[datetime]
     created_at: datetime
 
+    # Allowance calculation override
+    use_daily_allowance: Optional[bool] = None
+
+    # Additional (internal only - not printed)
+    additional_amount: Decimal = Decimal("0")
+    additional_notes: Optional[str] = None
+
     class Config:
         from_attributes = True
 
@@ -243,10 +250,18 @@ class PayrollSettingsUpdate(BaseModel):
     night_diff_rate: Optional[Decimal] = None
     holiday_rate: Optional[Decimal] = None
     special_holiday_rate: Optional[Decimal] = None
+    regular_holiday_bonus: Optional[Decimal] = None
+    snwh_bonus: Optional[Decimal] = None
 
     # Work hours
     work_hours_per_day: Optional[Decimal] = None
     work_days_per_month: Optional[int] = None
+
+    # Allowance calculation mode
+    # "fixed" = Always semi-monthly fixed (monthly / 2)
+    # "daily_always" = Always daily_rate × days_worked
+    # "daily_partial" = Daily calc only when days_worked < expected
+    allowance_calculation_mode: Optional[str] = None
 
 
 class PayrollSettingsResponse(BaseModel):
@@ -274,10 +289,15 @@ class PayrollSettingsResponse(BaseModel):
     night_diff_rate: Decimal
     holiday_rate: Decimal
     special_holiday_rate: Decimal
+    regular_holiday_bonus: Decimal = Decimal("0")
+    snwh_bonus: Decimal = Decimal("0")
 
     # Work hours
     work_hours_per_day: Decimal
     work_days_per_month: int
+
+    # Allowance calculation mode
+    allowance_calculation_mode: str = "fixed"
 
     updated_at: Optional[datetime]
 

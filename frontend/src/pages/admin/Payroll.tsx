@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { payrollApi, payrollRunsApi } from '../../api/client';
+import { payrollApi, payrollRunsApi, employeesApi } from '../../api/client';
 import type { PayrollRun } from '../../types';
 import dayjs from 'dayjs';
 
@@ -163,13 +163,61 @@ export function PayrollPage() {
   // Show additions toggle (hidden by default)
   const [showAdditions, setShowAdditions] = useState(false);
 
+  // Bulk selection & edit
+  const [selectedPayslipIds, setSelectedPayslipIds] = useState<Set<number>>(new Set());
+  const [bulkProcessing, setBulkProcessing] = useState(false);
+  const [showBulkEdit, setShowBulkEdit] = useState(false);
+  const [bulkFields, setBulkFields] = useState<Record<string, { enabled: boolean; value: number }>>({
+    basicSalary: { enabled: false, value: 0 },
+    allowance: { enabled: false, value: 0 },
+    productivity: { enabled: false, value: 0 },
+    language: { enabled: false, value: 0 },
+    workHours: { enabled: false, value: 8 },
+    daysWorked: { enabled: false, value: 0 },
+    daysAbsent: { enabled: false, value: 0 },
+    lateMinutes: { enabled: false, value: 0 },
+    otHours: { enabled: false, value: 0 },
+    tax: { enabled: false, value: 0 },
+    sss: { enabled: false, value: 0 },
+    philhealth: { enabled: false, value: 0 },
+    pagibig: { enabled: false, value: 0 },
+    sss_loan: { enabled: false, value: 0 },
+    pagibig_loan: { enabled: false, value: 0 },
+    other_loan: { enabled: false, value: 0 },
+  });
+  const [bulkUpdateEmployee, setBulkUpdateEmployee] = useState(true);
+
   // Edit mode
   const [editMode, setEditMode] = useState(false);
-  const [editEarnings, setEditEarnings] = useState<Record<string, number>>({});
+  const [editEarnings, setEditEarnings] = useState<Record<string, any>>({});
   const [editDeductions, setEditDeductions] = useState<Record<string, number>>({});
   const [editAttendance, setEditAttendance] = useState<{ days_worked?: number; days_absent?: number; late_count?: number; total_late_minutes?: number; overtime_hours?: number; work_hours_per_day?: number; call_time?: string; time_out?: string; buffer_minutes?: number; is_flexible?: boolean; recalculate_deductions?: boolean }>({});
   const [editAdditional, setEditAdditional] = useState<{ additional_amount?: number; additional_notes?: string }>({});
   const [saving, setSaving] = useState(false);
+
+  // Prorate Calculator (dynamic periods — full mini-payslip per period)
+  interface ProratePeriod {
+    startDate: string; basicSalary: number; workHours: number;
+    allowance: number; productivity: number; language: number;
+    daysWorked: number; daysAbsent: number; lateMinutes: number; otHours: number;
+    regularHoliday: number; regularHolidayOt: number; snwh: number; snwhOt: number;
+  }
+  const defaultPeriod = (workHrs = 8): ProratePeriod => ({
+    startDate: '', basicSalary: 0, workHours: workHrs,
+    allowance: 0, productivity: 0, language: 0,
+    daysWorked: 0, daysAbsent: 0, lateMinutes: 0, otHours: 0,
+    regularHoliday: 0, regularHolidayOt: 0, snwh: 0, snwhOt: 0,
+  });
+  const [showProrate, setShowProrate] = useState(false);
+  const [proratePeriods, setProratePeriods] = useState<ProratePeriod[]>([defaultPeriod(4), defaultPeriod(8)]);
+
+  // Version History
+  const [showHistory, setShowHistory] = useState(false);
+  const [historyItems, setHistoryItems] = useState<Array<{
+    id: number; timestamp: string; user_email: string; action: string;
+    change_type: string; description: string; snapshot: any; old_snapshot: any; reason: string;
+  }>>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
 
   // Payroll Settings
   const [settings, setSettings] = useState<PayrollSettings | null>(null);
@@ -445,6 +493,7 @@ export function PayrollPage() {
 
   const loadPayslips = async (runId: number, page: number = 1, pageSize: number = 25) => {
     setLoadingPayslips(true);
+    setSelectedPayslipIds(new Set());
     try {
       const response = await payrollApi.listPayslips({
         payroll_run_id: runId,
@@ -454,6 +503,22 @@ export function PayrollPage() {
       setPayslips(response.items as unknown as PayslipData[]);
       setPayslipTotal(response.total || 0);
       setPayslipPage(page);
+
+      if (response.summary) {
+        const summary = response.summary;
+        const applySummary = (run: PayrollRun): PayrollRun => ({
+          ...run,
+          total_gross: summary.total_gross,
+          total_deductions: summary.total_deductions,
+          total_net: summary.total_net,
+          employee_count: summary.employee_count,
+        });
+
+        setSelectedRun(current => current?.id === runId ? applySummary(current) : current);
+        setPayrollRuns(current =>
+          current.map(run => run.id === runId ? applySummary(run) : run)
+        );
+      }
     } catch (error) {
       console.error('Failed to load payslips:', error);
     } finally {
@@ -498,7 +563,15 @@ export function PayrollPage() {
     }
   };
 
-  const handleProcess = async (runId: number) => {
+  const handleProcess = async (runId: number, isReprocess: boolean = false) => {
+    if (isReprocess) {
+      if (!confirm(
+        'WARNING: Reprocess will DELETE all existing payslips and regenerate them from raw attendance data.\n\n' +
+        'ALL manual edits (days absent, late minutes, earnings, deductions) will be LOST.\n\n' +
+        'Use "Recalculate" instead if you only want to update rates/salaries without losing edits.\n\n' +
+        'Are you sure you want to reprocess?'
+      )) return;
+    }
     setProcessing(runId);
     try {
       const result = await payrollApi.processRun(runId);
@@ -514,24 +587,7 @@ export function PayrollPage() {
     }
   };
 
-  const handleRecalculate = async (runId: number) => {
-    if (!confirm('Recalculate all payslips using current employee salaries? This will update all earnings and deductions.')) {
-      return;
-    }
-    setRecalculating(runId);
-    try {
-      const result = await payrollApi.recalculateRun(runId);
-      alert(`Payroll recalculated! ${result.updated_count} payslips updated.`);
-      loadPayrollRuns();
-      if (selectedRun?.id === runId) {
-        loadPayslips(runId);
-      }
-    } catch (error: any) {
-      alert(error.response?.data?.detail || 'Failed to recalculate payroll');
-    } finally {
-      setRecalculating(null);
-    }
-  };
+
 
   const handleEditRun = (run: PayrollRun) => {
     if (run.status !== 'draft') {
@@ -696,35 +752,48 @@ export function PayrollPage() {
     try {
       // Get current employee settings for comparison
       const empSettings = (selectedPayslip as any).employee_settings || {};
+      const proratePayload = showProrate
+        ? buildProratePayload(
+          proratePeriods,
+          (selectedPayslip as any).period_start || '',
+          (selectedPayslip as any).period_end || ''
+        )
+        : null;
+      const effectiveEarnings = proratePayload ? { ...editEarnings, ...proratePayload.earnings } : editEarnings;
+      const effectiveDeductions = proratePayload ? { ...editDeductions, ...proratePayload.deductions } : editDeductions;
+      const effectiveAttendance = proratePayload ? { ...editAttendance, ...proratePayload.attendance } : editAttendance;
+      const isProrating = Boolean(proratePayload);
 
       // Update attendance first (may recalculate deductions)
       const hasAttendanceChanges =
-        editAttendance.days_worked !== selectedPayslip.days_worked ||
-        editAttendance.days_absent !== selectedPayslip.days_absent ||
-        editAttendance.late_count !== selectedPayslip.late_count ||
-        editAttendance.total_late_minutes !== selectedPayslip.total_late_minutes ||
-        editAttendance.overtime_hours !== selectedPayslip.overtime_hours ||
-        editAttendance.work_hours_per_day !== (selectedPayslip.deductions?.work_hours_per_day_used || 8);
+        effectiveAttendance.days_worked !== selectedPayslip.days_worked ||
+        effectiveAttendance.days_absent !== selectedPayslip.days_absent ||
+        effectiveAttendance.late_count !== selectedPayslip.late_count ||
+        effectiveAttendance.total_late_minutes !== selectedPayslip.total_late_minutes ||
+        effectiveAttendance.overtime_hours !== selectedPayslip.overtime_hours ||
+        effectiveAttendance.work_hours_per_day !== (selectedPayslip.deductions?.work_hours_per_day_used || 8);
 
       // Check if employee settings changed (these need to be saved to employee record)
       const hasEmployeeSettingsChanges =
-        editAttendance.is_flexible !== (empSettings.is_flexible || false) ||
-        editAttendance.call_time !== (empSettings.call_time || "08:00") ||
-        editAttendance.time_out !== (empSettings.time_out || "17:00") ||
-        editAttendance.buffer_minutes !== (empSettings.buffer_minutes ?? 10);
+        effectiveAttendance.is_flexible !== (empSettings.is_flexible || false) ||
+        effectiveAttendance.call_time !== (empSettings.call_time || "08:00") ||
+        effectiveAttendance.time_out !== (empSettings.time_out || "17:00") ||
+        effectiveAttendance.buffer_minutes !== (empSettings.buffer_minutes ?? 10);
 
       let updatedPayslip = { ...selectedPayslip };
       let presetMessage = '';
 
       // Always recalculate deductions when days_absent, late_minutes, or work_hours change
       const shouldRecalculate =
-        editAttendance.days_absent !== selectedPayslip.days_absent ||
-        editAttendance.total_late_minutes !== selectedPayslip.total_late_minutes ||
-        editAttendance.work_hours_per_day !== (selectedPayslip.deductions?.work_hours_per_day_used || 8);
+        !isProrating && (
+          effectiveAttendance.days_absent !== selectedPayslip.days_absent ||
+          effectiveAttendance.total_late_minutes !== selectedPayslip.total_late_minutes ||
+          effectiveAttendance.work_hours_per_day !== (selectedPayslip.deductions?.work_hours_per_day_used || 8)
+        );
 
       if (hasAttendanceChanges || hasEmployeeSettingsChanges) {
         const attendanceData = {
-          ...editAttendance,
+          ...effectiveAttendance,
           recalculate_deductions: shouldRecalculate
         };
 
@@ -738,31 +807,55 @@ export function PayrollPage() {
         }
         // Check if preset was saved
         if (attendanceResult.preset_saved) {
-          presetMessage = attendanceResult.preset_message || `Default days saved as ${editAttendance.days_worked} for future payrolls`;
+          presetMessage = attendanceResult.preset_message || `Default days saved as ${effectiveAttendance.days_worked} for future payrolls`;
         }
       }
 
       // Update earnings
-      await payrollApi.updatePayslipEarnings(selectedPayslip.id, editEarnings);
+      await payrollApi.updatePayslipEarnings(selectedPayslip.id, effectiveEarnings);
 
-      // Update all deductions (government + attendance-based)
-      // Calculate amounts from rates × days/minutes
-      const daysAbsent = editAttendance.days_absent ?? selectedPayslip.days_absent ?? 0;
-      const lateMinutes = editAttendance.total_late_minutes ?? selectedPayslip.total_late_minutes ?? 0;
-      const dailyRate = editDeductions.absences_daily_rate_used ?? selectedPayslip.deductions?.absences_daily_rate_used ?? 0;
-      const minuteRate = editDeductions.late_minute_rate_used ?? selectedPayslip.deductions?.late_minute_rate_used ?? 0;
+      // Update deductions (government + loans + rates)
+      // If attendance was recalculated, don't overwrite backend-calculated absences/lates
+      const daysAbsent = effectiveAttendance.days_absent ?? selectedPayslip.days_absent ?? 0;
+      const lateMinutes = effectiveAttendance.total_late_minutes ?? selectedPayslip.total_late_minutes ?? 0;
+      const dailyRate = effectiveDeductions.absences_daily_rate_used ?? selectedPayslip.deductions?.absences_daily_rate_used ?? 0;
+      const minuteRate = effectiveDeductions.late_minute_rate_used ?? selectedPayslip.deductions?.late_minute_rate_used ?? 0;
 
-      const allDeductions = {
-        sss: editDeductions.sss ?? 0,
-        philhealth: editDeductions.philhealth ?? 0,
-        pagibig: editDeductions.pagibig ?? 0,
-        tax: editDeductions.tax ?? 0,
-        loans: editDeductions.loans ?? 0,
+      const allDeductions: Record<string, number> = {
+        sss: effectiveDeductions.sss ?? selectedPayslip.deductions?.sss ?? 0,
+        philhealth: effectiveDeductions.philhealth ?? selectedPayslip.deductions?.philhealth ?? 0,
+        pagibig: effectiveDeductions.pagibig ?? selectedPayslip.deductions?.pagibig ?? 0,
+        tax: effectiveDeductions.tax ?? selectedPayslip.deductions?.tax ?? 0,
+        sss_loan: effectiveDeductions.sss_loan ?? selectedPayslip.deductions?.sss_loan ?? 0,
+        pagibig_loan: effectiveDeductions.pagibig_loan ?? selectedPayslip.deductions?.pagibig_loan ?? 0,
+        other_loan: effectiveDeductions.other_loan ?? selectedPayslip.deductions?.other_loan ?? 0,
         absences_daily_rate_used: dailyRate,
         late_minute_rate_used: minuteRate,
-        absences_amount: daysAbsent * dailyRate,
-        late_amount: lateMinutes * minuteRate,
+        work_hours_per_day_used: effectiveAttendance.work_hours_per_day ?? selectedPayslip.deductions?.work_hours_per_day_used ?? 8,
       };
+
+      const cutoff = selectedRun?.cutoff || 1;
+      if (cutoff === 1) {
+        allDeductions.sss = 0;
+        allDeductions.philhealth = 0;
+        allDeductions.pagibig = 0;
+      } else {
+        allDeductions.sss_loan = 0;
+        allDeductions.pagibig_loan = 0;
+        allDeductions.other_loan = 0;
+      }
+
+      // Prorate has per-period attendance deductions; do not let the generic rate x days formula overwrite them.
+      if (isProrating) {
+        allDeductions.absences_amount = effectiveDeductions.absences_amount ?? 0;
+        allDeductions.late_amount = effectiveDeductions.late_amount ?? 0;
+        allDeductions.absences_days = effectiveDeductions.absences_days ?? daysAbsent;
+        allDeductions.late_minutes = effectiveDeductions.late_minutes ?? lateMinutes;
+      } else if (!shouldRecalculate) {
+        allDeductions.absences_amount = daysAbsent * dailyRate;
+        allDeductions.late_amount = lateMinutes * minuteRate;
+      }
+
       await payrollApi.updatePayslipDeductions(selectedPayslip.id, allDeductions);
 
       // Update additional fields (internal use only, not printed)
@@ -782,6 +875,8 @@ export function PayrollPage() {
       }
 
       setEditMode(false);
+      // Refresh history if panel is open
+      if (showHistory) loadPayslipHistory(selectedPayslip.id);
       if (presetMessage) {
         alert(`Payslip updated!\n\n${presetMessage}`);
       } else {
@@ -799,6 +894,146 @@ export function PayrollPage() {
     setEditEarnings({});
     setEditDeductions({});
     setEditAttendance({});
+    setShowProrate(false);
+    setProratePeriods([defaultPeriod(4), defaultPeriod(8)]);
+  };
+
+  // ---- Shared ICAN Formula Helpers ----
+  const icanDailyRate = (monthly: number) => Math.round((monthly * 12 / 261) * 100) / 100;
+  const icanMinuteRate = (daily: number, hours: number) => hours > 0 ? Math.round((daily / hours / 60) * 10000) / 10000 : 0;
+  const icanOtRate = (daily: number, hours: number) => hours > 0 ? Math.round((daily / hours * 1.30) * 100) / 100 : 0;
+  const dayBefore = (dateStr: string) => { const d = new Date(dateStr); d.setDate(d.getDate() - 1); return d.toISOString().split('T')[0]; };
+
+  // Count working days between two dates (Mon-Fri default, or use employee schedule)
+  const countWorkingDays = (startStr: string, endStr: string, workDays?: Record<string, boolean>) => {
+    const start = new Date(startStr);
+    const end = new Date(endStr);
+    let count = 0;
+    const d = new Date(start);
+    while (d <= end) {
+      const dow = d.getDay(); // 0=Sun, 1=Mon, ..., 6=Sat
+      if (workDays) {
+        const dayMap: Record<number, string> = { 0: 'work_sunday', 1: 'work_monday', 2: 'work_tuesday', 3: 'work_wednesday', 4: 'work_thursday', 5: 'work_friday', 6: 'work_saturday' };
+        if (workDays[dayMap[dow]] !== false) count++;
+      } else {
+        if (dow >= 1 && dow <= 5) count++; // Mon-Fri
+      }
+      d.setDate(d.getDate() + 1);
+    }
+    return count;
+  };
+
+  // Auto-compute OT pay from hours
+  const computeOtPay = (otHours: number, basicSemi?: number, workHours?: number) => {
+    const basic = basicSemi ?? editEarnings.basic_semi ?? selectedPayslip?.earnings?.basic_semi ?? 0;
+    const daily = icanDailyRate(basic * 2);
+    const hrs = workHours ?? editAttendance.work_hours_per_day ?? 8;
+    return Math.round(icanOtRate(daily, hrs) * otHours * 100) / 100;
+  };
+
+  const buildProratePayload = (periods: ProratePeriod[], periodStart: string, periodEnd: string) => {
+    const computed = periods.map((p, i) => {
+      const end = i < periods.length - 1
+        ? (periods[i + 1].startDate ? dayBefore(periods[i + 1].startDate) : '')
+        : periodEnd;
+      const dr = icanDailyRate(p.basicSalary);
+      const minuteRate = p.workHours > 0 ? dr / p.workHours / 60 : 0;
+      return {
+        end, dailyRate: dr,
+        basicEarn: dr * p.daysWorked,
+        allowEarn: icanDailyRate(p.allowance) * p.daysWorked,
+        prodEarn: icanDailyRate(p.productivity) * p.daysWorked,
+        langEarn: icanDailyRate(p.language) * p.daysWorked,
+        otPay: icanOtRate(dr, p.workHours) * p.otHours,
+        absentDed: Math.round(dr * p.daysAbsent * 100) / 100,
+        lateDed: Math.round(minuteRate * p.lateMinutes * 100) / 100,
+      };
+    });
+
+    const sum = (fn: (c: typeof computed[0]) => number) => Math.round(computed.reduce((s, c) => s + fn(c), 0) * 100) / 100;
+    const sumP = (fn: (p: ProratePeriod) => number) => periods.reduce((s, p) => s + fn(p), 0);
+    const grandBasic = sum(c => c.basicEarn);
+    const grandAllow = sum(c => c.allowEarn);
+    const grandProd = sum(c => c.prodEarn);
+    const grandLang = sum(c => c.langEarn);
+    const grandOt = sum(c => c.otPay);
+    const grandRegHol = sumP(p => p.regularHoliday);
+    const grandRegHolOt = sumP(p => p.regularHolidayOt);
+    const grandSnwh = sumP(p => p.snwh);
+    const grandSnwhOt = sumP(p => p.snwhOt);
+    const grandDaysWorked = sumP(p => p.daysWorked);
+    const grandDaysAbsent = sumP(p => p.daysAbsent);
+    const grandLateMins = sumP(p => p.lateMinutes);
+    const grandOtHours = sumP(p => p.otHours);
+    const grandAbsent = sum(c => c.absentDed);
+    const grandLate = sum(c => c.lateDed);
+    const lastPeriod = periods[periods.length - 1];
+    const lastDr = icanDailyRate(lastPeriod.basicSalary);
+    const lastMr = icanMinuteRate(lastDr, lastPeriod.workHours);
+
+    const prorateInfo = periods.map((p, i) => {
+      const minuteRate = p.workHours > 0 ? computed[i].dailyRate / p.workHours / 60 : 0;
+      const totalEarn = computed[i].basicEarn + computed[i].allowEarn + computed[i].prodEarn + computed[i].langEarn + computed[i].otPay + p.regularHoliday + p.regularHolidayOt + p.snwh + p.snwhOt;
+      return {
+        period: i + 1,
+        startDate: i === 0 ? periodStart : p.startDate,
+        endDate: computed[i].end,
+        daysWorked: p.daysWorked, daysAbsent: p.daysAbsent, lateMinutes: p.lateMinutes, otHours: p.otHours,
+        monthlyBasic: p.basicSalary, workHours: p.workHours,
+        monthlyAllowance: p.allowance, monthlyProductivity: p.productivity, monthlyLanguage: p.language,
+        dailyRate: Math.round(computed[i].dailyRate * 100) / 100,
+        minuteRate: Math.round(minuteRate * 10000) / 10000,
+        basicEarned: Math.round(computed[i].basicEarn * 100) / 100,
+        allowanceEarned: Math.round(computed[i].allowEarn * 100) / 100,
+        productivityEarned: Math.round(computed[i].prodEarn * 100) / 100,
+        languageEarned: Math.round(computed[i].langEarn * 100) / 100,
+        otPay: Math.round(computed[i].otPay * 100) / 100,
+        regularHoliday: p.regularHoliday,
+        regularHolidayOt: p.regularHolidayOt,
+        snwh: p.snwh,
+        snwhOt: p.snwhOt,
+        totalEarnings: Math.round(totalEarn * 100) / 100,
+        absentDeduction: computed[i].absentDed,
+        lateDeduction: computed[i].lateDed,
+      };
+    });
+
+    return {
+      earnings: {
+      basic_semi: grandBasic,
+      allowance_semi: grandAllow,
+      productivity_incentive_semi: grandProd,
+      language_incentive_semi: grandLang,
+      regular_holiday: grandRegHol,
+      regular_holiday_ot: grandRegHolOt,
+      snwh: grandSnwh,
+      snwh_ot: grandSnwhOt,
+      overtime: grandOt,
+      _prorate_info: prorateInfo as any,
+      },
+      deductions: {
+        absences_daily_rate_used: lastDr,
+        late_minute_rate_used: lastMr,
+        absences_amount: grandAbsent,
+        late_amount: grandLate,
+        absences_days: grandDaysAbsent,
+        late_minutes: grandLateMins,
+      },
+      attendance: {
+        days_worked: grandDaysWorked,
+        days_absent: grandDaysAbsent,
+        total_late_minutes: grandLateMins,
+        overtime_hours: grandOtHours,
+      },
+    };
+  };
+
+  // Sync prorate periods → editEarnings + editAttendance (called on every prorate change)
+  const syncProrateToEarnings = (periods: ProratePeriod[], periodStart: string, periodEnd: string, _workDaySchedule?: Record<string, boolean>) => {
+    const payload = buildProratePayload(periods, periodStart, periodEnd);
+    setEditEarnings(prev => ({ ...prev, ...payload.earnings }));
+    setEditDeductions(prev => ({ ...prev, ...payload.deductions }));
+    setEditAttendance(prev => ({ ...prev, ...payload.attendance }));
   };
 
   const formatCurrency = (amount: number) => {
@@ -939,6 +1174,38 @@ export function PayrollPage() {
     }
   };
 
+  const loadPayslipHistory = async (payslipId: number) => {
+    setHistoryLoading(true);
+    try {
+      const data = await payrollApi.getPayslipHistory(payslipId);
+      setHistoryItems(data.items);
+    } catch (error) {
+      console.error('Failed to load history:', error);
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
+
+  const handleRestore = async (auditLogId: number, description: string) => {
+    if (!selectedPayslip) return;
+    if (!confirm(`Restore payslip to this state?\n\n${description}\n\nThis will overwrite current values. A restore entry will be created in history so you can undo this.`)) return;
+    setRestoringId(auditLogId);
+    try {
+      const result = await payrollApi.restorePayslip(selectedPayslip.id, auditLogId);
+      alert(result.message);
+      // Reload payslip and history
+      const fresh = await payrollApi.getPayslip(selectedPayslip.id) as PayslipData;
+      setSelectedPayslip(fresh);
+      setEditMode(false);
+      loadPayslipHistory(selectedPayslip.id);
+      if (selectedRun) loadPayslips(selectedRun.id);
+    } catch (error: any) {
+      alert(error.response?.data?.detail || 'Failed to restore payslip');
+    } finally {
+      setRestoringId(null);
+    }
+  };
+
   const SortIcon = ({ column, currentSort, currentOrder }: { column: string; currentSort: string; currentOrder: 'asc' | 'desc' }) => (
     <span className="ml-1 inline-block">
       {currentSort === column ? (
@@ -953,11 +1220,50 @@ export function PayrollPage() {
   if (selectedPayslip) {
     const cutoff = selectedRun?.cutoff || 1;
 
+    // Live-computed totals for edit mode
+    const liveEarnings = editMode ? (
+      (editEarnings.basic_semi ?? selectedPayslip.earnings?.basic_semi ?? 0) +
+      (editEarnings.allowance_semi ?? selectedPayslip.earnings?.allowance_semi ?? 0) +
+      (editEarnings.productivity_incentive_semi ?? selectedPayslip.earnings?.productivity_incentive_semi ?? 0) +
+      (editEarnings.language_incentive_semi ?? selectedPayslip.earnings?.language_incentive_semi ?? 0) +
+      (editEarnings.regular_holiday ?? selectedPayslip.earnings?.regular_holiday ?? 0) +
+      (editEarnings.regular_holiday_ot ?? selectedPayslip.earnings?.regular_holiday_ot ?? 0) +
+      (editEarnings.snwh ?? selectedPayslip.earnings?.snwh ?? 0) +
+      (editEarnings.snwh_ot ?? selectedPayslip.earnings?.snwh_ot ?? 0) +
+      (editEarnings.overtime ?? selectedPayslip.earnings?.overtime ?? 0)
+    ) : selectedPayslip.total_earnings;
+
+    const liveDaysAbsent = editAttendance.days_absent ?? selectedPayslip.days_absent ?? 0;
+    const liveLateMinutes = editAttendance.total_late_minutes ?? selectedPayslip.total_late_minutes ?? 0;
+    const liveDailyRate = editDeductions.absences_daily_rate_used ?? selectedPayslip.deductions?.absences_daily_rate_used ?? 0;
+    const liveMinuteRate = editDeductions.late_minute_rate_used ?? selectedPayslip.deductions?.late_minute_rate_used ?? 0;
+    const liveAbsenceAmt = liveDaysAbsent * liveDailyRate;
+    const liveLateAmt = liveLateMinutes * liveMinuteRate;
+
+    const liveDeductions = editMode ? (() => {
+      const absLate = liveAbsenceAmt + liveLateAmt;
+      if (cutoff === 1) {
+        return absLate +
+          (editDeductions.tax ?? selectedPayslip.deductions?.tax ?? 0) +
+          (editDeductions.sss_loan ?? selectedPayslip.deductions?.sss_loan ?? 0) +
+          (editDeductions.pagibig_loan ?? selectedPayslip.deductions?.pagibig_loan ?? 0) +
+          (editDeductions.other_loan ?? selectedPayslip.deductions?.other_loan ?? 0);
+      } else {
+        return absLate +
+          (editDeductions.tax ?? selectedPayslip.deductions?.tax ?? 0) +
+          (editDeductions.sss ?? selectedPayslip.deductions?.sss ?? 0) +
+          (editDeductions.philhealth ?? selectedPayslip.deductions?.philhealth ?? 0) +
+          (editDeductions.pagibig ?? selectedPayslip.deductions?.pagibig ?? 0);
+      }
+    })() : selectedPayslip.total_deductions;
+
+    const liveNetPay = editMode ? (liveEarnings - liveDeductions) : selectedPayslip.net_pay;
+
     return (
       <div className="space-y-6">
         <div className="flex items-center gap-4">
           <button
-            onClick={() => { setSelectedPayslip(null); setEditMode(false); }}
+            onClick={() => { setSelectedPayslip(null); setEditMode(false); setShowHistory(false); setHistoryItems([]); }}
             className="text-gray-600 hover:text-gray-900"
           >
             <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -983,6 +1289,18 @@ export function PayrollPage() {
             >
               PNG
             </button>
+            <button
+              onClick={() => {
+                setShowHistory(!showHistory);
+                if (!showHistory) loadPayslipHistory(selectedPayslip.id);
+              }}
+              className={`btn-secondary flex items-center gap-2 ${showHistory ? 'bg-blue-100 border-blue-400' : ''}`}
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              History
+            </button>
             {selectedRun?.status === 'review' && !editMode && (
               <button onClick={handleEditPayslip} className="btn-secondary">
                 Edit Payslip
@@ -990,6 +1308,64 @@ export function PayrollPage() {
             )}
           </div>
         </div>
+
+        {/* Version History Panel */}
+        {showHistory && (
+          <div className="card bg-gray-50 border-l-4 border-blue-500">
+            <h3 className="font-semibold text-gray-900 mb-3 flex items-center gap-2">
+              <svg className="w-5 h-5 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              Edit History
+              <span className="text-xs font-normal text-gray-500">({historyItems.length} changes)</span>
+            </h3>
+            {historyLoading ? (
+              <p className="text-sm text-gray-500">Loading history...</p>
+            ) : historyItems.length === 0 ? (
+              <p className="text-sm text-gray-500">No edit history yet. Changes will appear here after saving.</p>
+            ) : (
+              <div className="space-y-2 max-h-80 overflow-y-auto">
+                {historyItems.map((item) => (
+                  <div key={item.id} className={`flex items-start gap-3 p-3 rounded border ${item.action === 'payslip_restore' ? 'bg-amber-50 border-amber-200' : 'bg-white border-gray-200'}`}>
+                    <div className="flex-shrink-0 mt-0.5">
+                      {item.action === 'payslip_restore' ? (
+                        <span className="inline-block w-2 h-2 rounded-full bg-amber-500"></span>
+                      ) : (
+                        <span className="inline-block w-2 h-2 rounded-full bg-blue-500"></span>
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 text-xs text-gray-500">
+                        <span>{new Date(item.timestamp).toLocaleString('en-PH', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })}</span>
+                        <span className="text-gray-300">|</span>
+                        <span>{item.user_email}</span>
+                      </div>
+                      <p className="text-sm text-gray-800 mt-0.5">
+                        {item.action === 'payslip_restore' ? (
+                          <span className="font-medium text-amber-700">{item.description || item.reason}</span>
+                        ) : (
+                          <span>{item.description || item.change_type?.replace(/_/g, ' ')}</span>
+                        )}
+                      </p>
+                      {item.snapshot && (
+                        <p className="text-xs text-gray-400 mt-0.5">
+                          Net Pay: {formatCurrency(item.snapshot.net_pay || 0)}
+                        </p>
+                      )}
+                    </div>
+                    <button
+                      onClick={() => handleRestore(item.id, item.description || item.reason || 'this state')}
+                      disabled={restoringId === item.id}
+                      className="flex-shrink-0 px-2 py-1 text-xs bg-white border border-gray-300 rounded hover:bg-blue-50 hover:border-blue-400 text-gray-600 hover:text-blue-700 disabled:opacity-50"
+                    >
+                      {restoringId === item.id ? 'Restoring...' : 'Restore'}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         <div className="card">
           {/* Header */}
@@ -1044,10 +1420,34 @@ export function PayrollPage() {
               )}
             </div>
             <div className="grid grid-cols-5 gap-3">
-              <div className="text-center p-3 bg-gray-50 rounded" title="Set in Employee Management">
-                <p className="text-2xl font-bold text-purple-600">{selectedPayslip.deductions?.work_hours_per_day_used || 8}</p>
-                <p className="text-xs text-gray-500">Work Hrs/Day</p>
-                {editMode && <p className="text-xs text-blue-500">From Employee</p>}
+              <div className="text-center p-3 bg-gray-50 rounded">
+                {editMode ? (
+                  <>
+                    <select
+                      value={editAttendance.work_hours_per_day ?? selectedPayslip.deductions?.work_hours_per_day_used ?? 8}
+                      onChange={(e) => {
+                        const newHrs = parseInt(e.target.value);
+                        const basicSemi = editEarnings.basic_semi ?? selectedPayslip.earnings?.basic_semi ?? 0;
+                        const dr = icanDailyRate(basicSemi * 2);
+                        const otHours = editAttendance.overtime_hours ?? selectedPayslip.overtime_hours ?? 0;
+                        setEditAttendance({ ...editAttendance, work_hours_per_day: newHrs });
+                        setEditDeductions(prev => ({ ...prev, late_minute_rate_used: icanMinuteRate(dr, newHrs), work_hours_per_day_used: newHrs }));
+                        setEditEarnings(prev => ({ ...prev, overtime: computeOtPay(otHours, basicSemi, newHrs) }));
+                      }}
+                      className="w-full h-12 text-center text-xl font-bold text-purple-600 bg-white border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 appearance-none"
+                    >
+                      <option value={4}>4</option>
+                      <option value={6}>6</option>
+                      <option value={8}>8</option>
+                    </select>
+                    <p className="text-xs text-gray-500 mt-1">Hrs/Day</p>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-2xl font-bold text-purple-600">{selectedPayslip.deductions?.work_hours_per_day_used || 8}</p>
+                    <p className="text-xs text-gray-500">Hrs/Day</p>
+                  </>
+                )}
               </div>
               <div className="text-center p-3 bg-gray-50 rounded">
                 {editMode ? (
@@ -1127,10 +1527,21 @@ export function PayrollPage() {
                       step="0.5"
                       min="0"
                       value={editAttendance.overtime_hours ?? selectedPayslip.overtime_hours}
-                      onChange={(e) => setEditAttendance({ ...editAttendance, overtime_hours: parseFloat(e.target.value) || 0 })}
+                      onChange={(e) => {
+                        const otHours = parseFloat(e.target.value) || 0;
+                        setEditAttendance({ ...editAttendance, overtime_hours: otHours });
+                        // Auto-compute OT pay
+                        const otPay = computeOtPay(otHours);
+                        setEditEarnings(prev => ({ ...prev, overtime: otPay }));
+                      }}
                       className="w-full h-12 text-center text-xl font-bold text-green-600 bg-white border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500"
                     />
                     <p className="text-xs text-gray-500 mt-1">OT Hours</p>
+                    {(editAttendance.overtime_hours ?? selectedPayslip.overtime_hours ?? 0) > 0 && (
+                      <p className="text-xs text-green-600 font-medium mt-0.5">
+                        = {formatCurrency(editEarnings.overtime ?? 0)}
+                      </p>
+                    )}
                   </>
                 ) : (
                   <>
@@ -1151,18 +1562,375 @@ export function PayrollPage() {
                   <p>
                     <span className="font-medium">Minute Rate:</span> {formatCurrency(selectedPayslip.deductions.absences_daily_rate_used)} ÷ {selectedPayslip.earnings?._calculation_info?.work_hours_per_day || 8}hrs ÷ 60 = <span className="font-bold">{formatCurrency(selectedPayslip.deductions.late_minute_rate_used || 0)}</span>
                   </p>
+                  <p>
+                    <span className="font-medium">OT Rate:</span> {formatCurrency(selectedPayslip.deductions.absences_daily_rate_used)} ÷ {selectedPayslip.earnings?._calculation_info?.work_hours_per_day || 8}hrs × 130% = <span className="font-bold">{formatCurrency((selectedPayslip.deductions.absences_daily_rate_used / (selectedPayslip.earnings?._calculation_info?.work_hours_per_day || 8)) * 1.30)}/hr</span>
+                  </p>
                 </div>
               </div>
             )}
           </div>
 
-          {/* Earnings & Deductions */}
+          {/* Prorate Mode — Replaces Earnings + Attendance Deductions */}
+          {editMode && showProrate && selectedPayslip && (() => {
+            const empSettings = (selectedPayslip as any).employee_settings || {};
+            const periodStart = (selectedPayslip as any).period_start || '';
+            const periodEnd = (selectedPayslip as any).period_end || '';
+            const workDays = {
+              work_monday: empSettings.work_monday ?? true, work_tuesday: empSettings.work_tuesday ?? true,
+              work_wednesday: empSettings.work_wednesday ?? true, work_thursday: empSettings.work_thursday ?? true,
+              work_friday: empSettings.work_friday ?? true, work_saturday: empSettings.work_saturday ?? false,
+              work_sunday: empSettings.work_sunday ?? false,
+            };
+
+            const updatePeriod = (idx: number, field: string, value: any) => {
+              const updated = proratePeriods.map((p, i) => i === idx ? { ...p, [field]: value } : p);
+              setProratePeriods(updated);
+              syncProrateToEarnings(updated, periodStart, periodEnd, workDays);
+            };
+            const addPeriod = () => {
+              const updated = [...proratePeriods, defaultPeriod(8)];
+              setProratePeriods(updated);
+              syncProrateToEarnings(updated, periodStart, periodEnd, workDays);
+            };
+            const removePeriod = (idx: number) => {
+              if (proratePeriods.length <= 2) return;
+              const updated = proratePeriods.filter((_, i) => i !== idx);
+              setProratePeriods(updated);
+              syncProrateToEarnings(updated, periodStart, periodEnd, workDays);
+            };
+
+            // Compute each period
+            const computed = proratePeriods.map((p, i) => {
+              const start = i === 0 ? periodStart : p.startDate;
+              const end = i < proratePeriods.length - 1
+                ? (proratePeriods[i + 1].startDate ? (() => { const d = new Date(proratePeriods[i + 1].startDate); d.setDate(d.getDate() - 1); return d.toISOString().split('T')[0]; })() : '')
+                : periodEnd;
+              const valid = !!(start && end && start <= end);
+              const schedDays = valid ? countWorkingDays(start, end, workDays) : 0;
+
+              const dailyRate = (p.basicSalary * 12) / 261;
+              const minuteRate = p.workHours > 0 ? dailyRate / p.workHours / 60 : 0;
+              const otHourlyRate = p.workHours > 0 ? (dailyRate / p.workHours) * 1.30 : 0;
+              const dailyAllow = (p.allowance * 12) / 261;
+              const dailyProd = (p.productivity * 12) / 261;
+              const dailyLang = (p.language * 12) / 261;
+
+              const basicEarn = Math.round(dailyRate * p.daysWorked * 100) / 100;
+              const allowEarn = Math.round(dailyAllow * p.daysWorked * 100) / 100;
+              const prodEarn = Math.round(dailyProd * p.daysWorked * 100) / 100;
+              const langEarn = Math.round(dailyLang * p.daysWorked * 100) / 100;
+              const otPay = Math.round(otHourlyRate * p.otHours * 100) / 100;
+
+              const totalEarn = basicEarn + allowEarn + prodEarn + langEarn + p.regularHoliday + p.regularHolidayOt + p.snwh + p.snwhOt + otPay;
+              const absentDed = Math.round(dailyRate * p.daysAbsent * 100) / 100;
+              const lateDed = Math.round(minuteRate * p.lateMinutes * 100) / 100;
+              const totalDed = absentDed + lateDed;
+
+              return { start, end, valid, schedDays, dailyRate, minuteRate, otHourlyRate, basicEarn, allowEarn, prodEarn, langEarn, otPay, totalEarn, absentDed, lateDed, totalDed };
+            });
+
+            const allValid = proratePeriods.every((p, i) => i === 0 || (p.startDate > periodStart && p.startDate <= periodEnd));
+            const hasAnyRate = proratePeriods.some(p => p.basicSalary > 0);
+
+            // Grand totals
+            const grandBasic = computed.reduce((s, c) => s + c.basicEarn, 0);
+            const grandAllow = computed.reduce((s, c) => s + c.allowEarn, 0);
+            const grandProd = computed.reduce((s, c) => s + c.prodEarn, 0);
+            const grandLang = computed.reduce((s, c) => s + c.langEarn, 0);
+            const grandRegHol = proratePeriods.reduce((s, p) => s + p.regularHoliday, 0);
+            const grandRegHolOt = proratePeriods.reduce((s, p) => s + p.regularHolidayOt, 0);
+            const grandSnwh = proratePeriods.reduce((s, p) => s + p.snwh, 0);
+            const grandSnwhOt = proratePeriods.reduce((s, p) => s + p.snwhOt, 0);
+            const grandOt = computed.reduce((s, c) => s + c.otPay, 0);
+            const grandTotalEarn = computed.reduce((s, c) => s + c.totalEarn, 0);
+            const grandAbsent = computed.reduce((s, c) => s + c.absentDed, 0);
+            const grandLate = computed.reduce((s, c) => s + c.lateDed, 0);
+            const grandTotalDed = grandAbsent + grandLate;
+            const grandDaysWorked = proratePeriods.reduce((s, p) => s + p.daysWorked, 0);
+            const grandDaysAbsent = proratePeriods.reduce((s, p) => s + p.daysAbsent, 0);
+            const grandLateMins = proratePeriods.reduce((s, p) => s + p.lateMinutes, 0);
+            const grandOtHours = proratePeriods.reduce((s, p) => s + p.otHours, 0);
+            return (
+              <div className="bg-purple-50 border-2 border-purple-300 rounded-lg p-4 mb-4">
+                <div className="flex justify-between items-center mb-3">
+                  <h4 className="font-bold text-purple-900 text-sm">Prorate Calculator — {proratePeriods.length} Periods</h4>
+                  <div className="flex items-center gap-2">
+                    <button onClick={addPeriod} className="text-xs px-2 py-1 bg-purple-200 text-purple-800 rounded hover:bg-purple-300 font-semibold">+ Add Period</button>
+                    <button onClick={() => setShowProrate(false)} className="text-purple-400 hover:text-purple-600 text-lg font-bold">✕</button>
+                  </div>
+                </div>
+
+                {/* Period Cards */}
+                <div className="space-y-3">
+                  {proratePeriods.map((period, idx) => {
+                    const c = computed[idx];
+                    return (
+                      <div key={idx} className="bg-white rounded-lg border border-purple-200 overflow-hidden">
+                        {/* Period header */}
+                        <div className="bg-purple-100 px-3 py-2 flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <span className="w-6 h-6 bg-purple-600 text-white rounded text-xs font-bold flex items-center justify-center">{idx + 1}</span>
+                            <span className="text-sm font-bold text-purple-900">Period {idx + 1}{idx === 0 ? ' (Original)' : ''}</span>
+                            {c.valid && <span className="text-xs text-purple-600">({c.start} to {c.end})</span>}
+                          </div>
+                          <div className="flex items-center gap-2">
+                            {c.valid && <span className="text-xs bg-purple-200 text-purple-800 px-2 py-0.5 rounded font-semibold">{c.schedDays} sched. days</span>}
+                            {idx > 0 && proratePeriods.length > 2 && (
+                              <button onClick={() => removePeriod(idx)} className="text-red-400 hover:text-red-600 text-xs font-bold">Remove</button>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="p-3">
+                          {/* Row 1: Date + Monthly rates */}
+                          <div className="grid grid-cols-6 gap-2 mb-3">
+                            {idx === 0 ? (
+                              <div><label className="text-[10px] text-gray-500 block">Starts</label><p className="text-xs font-medium text-gray-700 py-1">{periodStart}</p></div>
+                            ) : (
+                              <div><label className="text-[10px] text-gray-500 block">Effective date</label>
+                                <input type="date" min={periodStart} max={periodEnd} value={period.startDate}
+                                  onChange={(e) => updatePeriod(idx, 'startDate', e.target.value)}
+                                  className="w-full px-1 py-1 border border-purple-300 rounded text-xs" /></div>
+                            )}
+                            <div><label className="text-[10px] text-gray-500 block">Monthly Basic</label>
+                              <input type="number" step="0.01" value={period.basicSalary || ''} onChange={(e) => updatePeriod(idx, 'basicSalary', parseFloat(e.target.value) || 0)}
+                                className="w-full px-2 py-1 border rounded text-xs text-right" placeholder="0" /></div>
+                            <div><label className="text-[10px] text-gray-500 block">Hrs/Day</label>
+                              <select value={period.workHours} onChange={(e) => updatePeriod(idx, 'workHours', parseInt(e.target.value))}
+                                className="w-full px-1 py-1 border rounded text-xs">
+                                <option value={4}>4</option><option value={6}>6</option><option value={8}>8</option>
+                              </select></div>
+                            <div><label className="text-[10px] text-gray-500 block">Allowance</label>
+                              <input type="number" step="0.01" value={period.allowance || ''} onChange={(e) => updatePeriod(idx, 'allowance', parseFloat(e.target.value) || 0)}
+                                className="w-full px-2 py-1 border rounded text-xs text-right" placeholder="0" /></div>
+                            <div><label className="text-[10px] text-gray-500 block">Productivity</label>
+                              <input type="number" step="0.01" value={period.productivity || ''} onChange={(e) => updatePeriod(idx, 'productivity', parseFloat(e.target.value) || 0)}
+                                className="w-full px-2 py-1 border rounded text-xs text-right" placeholder="0" /></div>
+                            <div><label className="text-[10px] text-gray-500 block">Language</label>
+                              <input type="number" step="0.01" value={period.language || ''} onChange={(e) => updatePeriod(idx, 'language', parseFloat(e.target.value) || 0)}
+                                className="w-full px-2 py-1 border rounded text-xs text-right" placeholder="0" /></div>
+                          </div>
+
+                          {/* Row 2: Attendance */}
+                          <div className="grid grid-cols-4 gap-2 mb-3">
+                            <div><label className="text-[10px] text-gray-500 block">Days Worked</label>
+                              <input type="number" step="1" min="0" value={period.daysWorked || ''} onChange={(e) => updatePeriod(idx, 'daysWorked', parseInt(e.target.value) || 0)}
+                                className="w-full px-2 py-1 border rounded text-xs text-center font-bold text-green-700" placeholder="0" /></div>
+                            <div><label className="text-[10px] text-gray-500 block">Days Absent</label>
+                              <input type="number" step="1" min="0" value={period.daysAbsent || ''} onChange={(e) => updatePeriod(idx, 'daysAbsent', parseInt(e.target.value) || 0)}
+                                className="w-full px-2 py-1 border rounded text-xs text-center font-bold text-red-600" placeholder="0" /></div>
+                            <div><label className="text-[10px] text-gray-500 block">Late Mins</label>
+                              <input type="number" step="1" min="0" value={period.lateMinutes || ''} onChange={(e) => updatePeriod(idx, 'lateMinutes', parseInt(e.target.value) || 0)}
+                                className="w-full px-2 py-1 border rounded text-xs text-center font-bold text-orange-600" placeholder="0" /></div>
+                            <div><label className="text-[10px] text-gray-500 block">OT Hours</label>
+                              <input type="number" step="0.5" min="0" value={period.otHours || ''} onChange={(e) => updatePeriod(idx, 'otHours', parseFloat(e.target.value) || 0)}
+                                className="w-full px-2 py-1 border rounded text-xs text-center font-bold text-blue-600" placeholder="0" /></div>
+                          </div>
+
+                          {/* Row 3: Holiday pay inputs */}
+                          <div className="grid grid-cols-4 gap-2 mb-3">
+                            <div><label className="text-[10px] text-gray-500 block">Reg Holiday</label>
+                              <input type="number" step="0.01" value={period.regularHoliday || ''} onChange={(e) => updatePeriod(idx, 'regularHoliday', parseFloat(e.target.value) || 0)}
+                                className="w-full px-2 py-1 border rounded text-xs text-right" placeholder="0" /></div>
+                            <div><label className="text-[10px] text-gray-500 block">Reg Hol OT</label>
+                              <input type="number" step="0.01" value={period.regularHolidayOt || ''} onChange={(e) => updatePeriod(idx, 'regularHolidayOt', parseFloat(e.target.value) || 0)}
+                                className="w-full px-2 py-1 border rounded text-xs text-right" placeholder="0" /></div>
+                            <div><label className="text-[10px] text-gray-500 block">SNWH</label>
+                              <input type="number" step="0.01" value={period.snwh || ''} onChange={(e) => updatePeriod(idx, 'snwh', parseFloat(e.target.value) || 0)}
+                                className="w-full px-2 py-1 border rounded text-xs text-right" placeholder="0" /></div>
+                            <div><label className="text-[10px] text-gray-500 block">SNWH OT</label>
+                              <input type="number" step="0.01" value={period.snwhOt || ''} onChange={(e) => updatePeriod(idx, 'snwhOt', parseFloat(e.target.value) || 0)}
+                                className="w-full px-2 py-1 border rounded text-xs text-right" placeholder="0" /></div>
+                          </div>
+
+                          {/* Earnings breakdown — always visible */}
+                          <div className="bg-green-50 rounded p-2 text-xs space-y-1 mb-2 border border-green-200">
+                            <p className="font-bold text-green-800 text-[10px] uppercase">Earnings</p>
+                            <div className="flex justify-between"><span className="text-gray-600">Basic (Semi)</span><span className="font-bold">{formatCurrency(c.basicEarn)}</span></div>
+                            <div className="flex justify-between"><span className="text-gray-600">Allowance</span><span className="font-bold">{formatCurrency(c.allowEarn)}</span></div>
+                            <div className="flex justify-between"><span className="text-gray-600">Productivity</span><span className="font-bold">{formatCurrency(c.prodEarn)}</span></div>
+                            <div className="flex justify-between"><span className="text-gray-600">Language</span><span className="font-bold">{formatCurrency(c.langEarn)}</span></div>
+                            {(period.regularHoliday > 0 || period.regularHolidayOt > 0 || period.snwh > 0 || period.snwhOt > 0 || c.otPay > 0) && (
+                              <>
+                                {period.regularHoliday > 0 && <div className="flex justify-between"><span className="text-gray-600">Reg Holiday</span><span className="font-bold">{formatCurrency(period.regularHoliday)}</span></div>}
+                                {period.regularHolidayOt > 0 && <div className="flex justify-between"><span className="text-gray-600">Reg Hol OT</span><span className="font-bold">{formatCurrency(period.regularHolidayOt)}</span></div>}
+                                {period.snwh > 0 && <div className="flex justify-between"><span className="text-gray-600">SNWH</span><span className="font-bold">{formatCurrency(period.snwh)}</span></div>}
+                                {period.snwhOt > 0 && <div className="flex justify-between"><span className="text-gray-600">SNWH OT</span><span className="font-bold">{formatCurrency(period.snwhOt)}</span></div>}
+                                {c.otPay > 0 && <div className="flex justify-between"><span className="text-gray-600">Overtime</span><span className="font-bold">{formatCurrency(c.otPay)}</span></div>}
+                              </>
+                            )}
+                            <div className="flex justify-between font-bold text-green-900 border-t border-green-300 pt-1"><span>Total Earnings</span><span>{formatCurrency(c.totalEarn)}</span></div>
+                          </div>
+
+                          {/* Attendance deductions — always visible */}
+                          <div className="bg-red-50 rounded p-2 text-xs space-y-1 mb-2 border border-red-200">
+                            <p className="font-bold text-red-800 text-[10px] uppercase">Attendance Deductions</p>
+                            <div className="flex justify-between items-center">
+                              <span className="text-red-700">Absent: <strong>{period.daysAbsent}</strong> days × {formatCurrency(c.dailyRate)}/day</span>
+                              <span className="font-bold text-red-600">-{formatCurrency(c.absentDed)}</span>
+                            </div>
+                            <div className="flex justify-between items-center">
+                              <span className="text-red-700">Late: <strong>{period.lateMinutes}</strong> mins × {formatCurrency(c.minuteRate)}/min</span>
+                              <span className="font-bold text-red-600">-{formatCurrency(c.lateDed)}</span>
+                            </div>
+                            <div className="flex justify-between font-bold text-red-900 border-t border-red-300 pt-1"><span>Total Deductions</span><span>-{formatCurrency(c.totalDed)}</span></div>
+                          </div>
+
+                          {/* Period Net Total */}
+                          <div className="bg-purple-100 rounded p-2 border border-purple-300">
+                            <div className="flex justify-between text-sm font-bold text-purple-900">
+                              <span>Period {idx + 1} Net</span>
+                              <span>{formatCurrency(Math.round((c.totalEarn - c.totalDed) * 100) / 100)}</span>
+                            </div>
+                          </div>
+
+                          {/* Rate reference (collapsible) */}
+                          {period.basicSalary > 0 && (
+                            <details className="mt-2 text-[10px] text-gray-500">
+                              <summary className="cursor-pointer hover:text-gray-700">Rate formulas</summary>
+                              <div className="mt-1 space-y-0.5 pl-2">
+                                <p>Daily: {formatCurrency(period.basicSalary)} × 12 / 261 = <strong>{formatCurrency(c.dailyRate)}</strong></p>
+                                <p>Minute: {formatCurrency(c.dailyRate)} / {period.workHours}hrs / 60 = <strong>{formatCurrency(c.minuteRate)}</strong></p>
+                                <p>OT: {formatCurrency(c.dailyRate)} / {period.workHours}hrs × 130% = <strong>{formatCurrency(c.otHourlyRate)}/hr</strong></p>
+                              </div>
+                            </details>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Grand Total + Apply */}
+                {allValid && hasAnyRate && (
+                  <div className="mt-3 bg-purple-100 p-4 rounded-lg border border-purple-300">
+                    <p className="text-sm font-bold text-purple-900 mb-3">Combined Totals ({proratePeriods.length} periods)</p>
+                    <div className="grid grid-cols-2 gap-4">
+                      {/* Earnings column */}
+                      <div>
+                        <p className="text-xs font-bold text-green-800 mb-1">Earnings</p>
+                        <div className="space-y-0.5 text-xs">
+                          <div className="flex justify-between"><span>Basic</span><strong>{formatCurrency(Math.round(grandBasic * 100) / 100)}</strong></div>
+                          {grandAllow > 0 && <div className="flex justify-between"><span>Allowance</span><strong>{formatCurrency(Math.round(grandAllow * 100) / 100)}</strong></div>}
+                          {grandProd > 0 && <div className="flex justify-between"><span>Productivity</span><strong>{formatCurrency(Math.round(grandProd * 100) / 100)}</strong></div>}
+                          {grandLang > 0 && <div className="flex justify-between"><span>Language</span><strong>{formatCurrency(Math.round(grandLang * 100) / 100)}</strong></div>}
+                          {grandRegHol > 0 && <div className="flex justify-between"><span>Reg Holiday</span><strong>{formatCurrency(grandRegHol)}</strong></div>}
+                          {grandRegHolOt > 0 && <div className="flex justify-between"><span>Reg Hol OT</span><strong>{formatCurrency(grandRegHolOt)}</strong></div>}
+                          {grandSnwh > 0 && <div className="flex justify-between"><span>SNWH</span><strong>{formatCurrency(grandSnwh)}</strong></div>}
+                          {grandSnwhOt > 0 && <div className="flex justify-between"><span>SNWH OT</span><strong>{formatCurrency(grandSnwhOt)}</strong></div>}
+                          {grandOt > 0 && <div className="flex justify-between"><span>Overtime</span><strong>{formatCurrency(Math.round(grandOt * 100) / 100)}</strong></div>}
+                          <div className="flex justify-between font-bold text-green-900 border-t pt-1"><span>Total Earnings</span><span>{formatCurrency(Math.round(grandTotalEarn * 100) / 100)}</span></div>
+                        </div>
+                      </div>
+                      {/* Deductions + Attendance column */}
+                      <div>
+                        <p className="text-xs font-bold text-red-800 mb-1">Attendance Deductions</p>
+                        <div className="space-y-0.5 text-xs">
+                          <div className="flex justify-between"><span>Absent ({grandDaysAbsent} days)</span><strong className="text-red-600">-{formatCurrency(Math.round(grandAbsent * 100) / 100)}</strong></div>
+                          <div className="flex justify-between"><span>Late ({grandLateMins} mins)</span><strong className="text-red-600">-{formatCurrency(Math.round(grandLate * 100) / 100)}</strong></div>
+                          <div className="flex justify-between font-bold text-red-900 border-t pt-1"><span>Total Deductions</span><span>-{formatCurrency(Math.round(grandTotalDed * 100) / 100)}</span></div>
+                        </div>
+                        <div className="mt-2 pt-2 border-t">
+                          <p className="text-xs text-purple-700">Days Worked: <strong>{grandDaysWorked}</strong> | OT: <strong>{grandOtHours}hrs</strong></p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Combined Net Summary */}
+                    <div className="mt-3 bg-white rounded-lg border-2 border-purple-400 p-4">
+                      <div className="grid grid-cols-3 gap-4 text-center">
+                        <div>
+                          <p className="text-[10px] text-gray-500 uppercase font-bold">Total Earnings</p>
+                          <p className="text-lg font-bold text-green-700">{formatCurrency(Math.round(grandTotalEarn * 100) / 100)}</p>
+                          <p className="text-[10px] text-gray-400">{computed.map((c, i) => `P${i+1}: ${formatCurrency(Math.round(c.totalEarn * 100) / 100)}`).join(' + ')}</p>
+                        </div>
+                        <div>
+                          <p className="text-[10px] text-gray-500 uppercase font-bold">Att. Deductions</p>
+                          <p className="text-lg font-bold text-red-600">-{formatCurrency(Math.round(grandTotalDed * 100) / 100)}</p>
+                        </div>
+                        <div>
+                          <p className="text-[10px] text-gray-500 uppercase font-bold">Period Net</p>
+                          <p className="text-lg font-bold text-purple-800">{formatCurrency(Math.round((grandTotalEarn - grandTotalDed) * 100) / 100)}</p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                <button
+                  onClick={() => setShowProrate(false)}
+                  className="mt-3 w-full py-2 bg-purple-200 text-purple-800 text-sm font-bold rounded-lg hover:bg-purple-300 transition-colors"
+                >
+                  Switch to Manual Edit
+                </button>
+              </div>
+            );
+          })()}
+
+          {/* Earnings & Deductions (hidden when prorate is open) */}
+          {!(editMode && showProrate) && (
           <div className="grid md:grid-cols-2 gap-6">
             {/* Earnings */}
             <div>
               <h3 className="font-semibold text-gray-900 mb-3 flex items-center gap-2">
                 <span className="w-3 h-3 bg-green-500 rounded-full"></span>
                 Earnings
+                {editMode && !showProrate && (
+                  <button
+                    onClick={() => {
+                      const empSettings = (selectedPayslip as any).employee_settings || {};
+                      const periodStart = (selectedPayslip as any).period_start || '';
+                      const periodEnd = (selectedPayslip as any).period_end || '';
+                      const workDays = {
+                        work_monday: empSettings.work_monday ?? true,
+                        work_tuesday: empSettings.work_tuesday ?? true,
+                        work_wednesday: empSettings.work_wednesday ?? true,
+                        work_thursday: empSettings.work_thursday ?? true,
+                        work_friday: empSettings.work_friday ?? true,
+                        work_saturday: empSettings.work_saturday ?? false,
+                        work_sunday: empSettings.work_sunday ?? false,
+                      };
+                      // Check if payslip already has saved prorate data — pre-fill
+                      const savedProrate = selectedPayslip?.earnings?._prorate_info;
+                      if (savedProrate && Array.isArray(savedProrate) && savedProrate.length >= 2) {
+                        const restored: ProratePeriod[] = savedProrate.map((p: any, i: number) => ({
+                          startDate: i === 0 ? '' : (p.startDate || ''),
+                          basicSalary: p.monthlyBasic || 0,
+                          workHours: p.workHours || 8,
+                          allowance: p.monthlyAllowance || 0,
+                          productivity: p.monthlyProductivity || 0,
+                          language: p.monthlyLanguage || 0,
+                          daysWorked: p.daysWorked || 0,
+                          daysAbsent: p.daysAbsent || 0,
+                          lateMinutes: p.lateMinutes || 0,
+                          otHours: p.otHours || 0,
+                          regularHoliday: p.regularHoliday || 0,
+                          regularHolidayOt: p.regularHolidayOt || 0,
+                          snwh: p.snwh || 0,
+                          snwhOt: p.snwhOt || 0,
+                        }));
+                        setProratePeriods(restored);
+                        syncProrateToEarnings(restored, periodStart, periodEnd, workDays);
+                      } else {
+                        const es = (selectedPayslip as any).employee_settings || {};
+                        const last: ProratePeriod = {
+                          ...defaultPeriod(es.work_hours_per_day || 8),
+                          basicSalary: es.basic_salary || (editEarnings.basic_semi || 0) * 2,
+                          allowance: es.allowance || editEarnings.allowance_semi || 0,
+                          productivity: es.productivity_incentive || editEarnings.productivity_incentive_semi || 0,
+                          language: es.language_incentive || editEarnings.language_incentive_semi || 0,
+                        };
+                        const initialPeriods = [defaultPeriod(4), last];
+                        setProratePeriods(initialPeriods);
+                        syncProrateToEarnings(initialPeriods, periodStart, periodEnd, workDays);
+                      }
+                      setShowProrate(true);
+                    }}
+                    className="ml-auto text-xs px-2 py-1 bg-purple-100 text-purple-700 rounded hover:bg-purple-200 transition-colors font-semibold"
+                  >
+                    {selectedPayslip?.earnings?._prorate_info ? 'Edit Prorate' : 'Prorate'}
+                  </button>
+                )}
               </h3>
               <div className="space-y-2">
                 {editMode ? (
@@ -1170,16 +1938,15 @@ export function PayrollPage() {
                     {/* Regular Earnings - Compact Grid */}
                     <div className="grid grid-cols-2 gap-2">
                       <div className="flex justify-between items-center">
-                        <span className="text-gray-600 text-sm">Basic</span>
+                        <span className="text-gray-600 text-sm">Basic (Semi)</span>
                         <input type="number" step="0.01" value={editEarnings.basic_semi || 0}
                           onChange={(e) => {
                             const newBasicSemi = parseFloat(e.target.value) || 0;
-                            const monthlyBasic = newBasicSemi * 2;
-                            const dailyRate = (monthlyBasic * 12) / 261;
-                            const workHours = editAttendance.work_hours_per_day || 8;
-                            const minuteRate = dailyRate / workHours / 60;
-                            setEditEarnings({ ...editEarnings, basic_semi: newBasicSemi });
-                            setEditDeductions({ ...editDeductions, absences_daily_rate_used: Math.round(dailyRate * 100) / 100, late_minute_rate_used: Math.round(minuteRate * 100) / 100 });
+                            const dr = icanDailyRate(newBasicSemi * 2);
+                            const hrs = editAttendance.work_hours_per_day || 8;
+                            const otHours = editAttendance.overtime_hours ?? selectedPayslip?.overtime_hours ?? 0;
+                            setEditEarnings({ ...editEarnings, basic_semi: newBasicSemi, overtime: computeOtPay(otHours, newBasicSemi, hrs) });
+                            setEditDeductions({ ...editDeductions, absences_daily_rate_used: dr, late_minute_rate_used: icanMinuteRate(dr, hrs) });
                           }}
                           className="w-24 px-2 py-1 border border-gray-300 rounded text-right text-sm" />
                       </div>
@@ -1300,15 +2067,15 @@ export function PayrollPage() {
                       <span className="font-medium">{formatCurrency(selectedPayslip.earnings.basic_semi || 0)}</span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-gray-600">Allowance (Semi)</span>
+                      <span className="text-gray-600">Allowance</span>
                       <span className="font-medium">{formatCurrency(selectedPayslip.earnings.allowance_semi || 0)}</span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-gray-600">Productivity (Semi)</span>
+                      <span className="text-gray-600">Productivity</span>
                       <span className="font-medium">{formatCurrency(selectedPayslip.earnings.productivity_incentive_semi || 0)}</span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-gray-600">Language (Semi)</span>
+                      <span className="text-gray-600">Language</span>
                       <span className="font-medium">{formatCurrency(selectedPayslip.earnings.language_incentive_semi || 0)}</span>
                     </div>
                     {(selectedPayslip.earnings.regular_holiday || 0) > 0 && (
@@ -1341,25 +2108,25 @@ export function PayrollPage() {
                         <span className="font-medium text-green-600">+{formatCurrency(selectedPayslip.earnings.overtime)}</span>
                       </div>
                     )}
-                    {(selectedPayslip.earnings.absent_deduction || 0) > 0 && (
+                    {(selectedPayslip.deductions?.absences_amount || 0) > 0 && (
                       <div className="text-red-600">
                         <div className="flex justify-between">
                           <span>Absent Deduction</span>
-                          <span className="font-medium">-{formatCurrency(selectedPayslip.earnings.absent_deduction)}</span>
+                          <span className="font-medium">-{formatCurrency(selectedPayslip.deductions.absences_amount)}</span>
                         </div>
                         {(selectedPayslip.deductions?.absences_daily_rate_used || 0) > 0 && (
                           <div className="text-xs text-gray-500 text-right mt-1 space-y-0.5">
-                            <p>Daily Rate: {formatCurrency(selectedPayslip.earnings?._calculation_info?.monthly_basic || 0)} × 12 ÷ 261 = {formatCurrency(selectedPayslip.deductions.absences_daily_rate_used || 0)}</p>
+                            <p>Daily Rate: {formatCurrency(selectedPayslip.earnings?._calculation_info?.monthly_basic || (editEarnings.basic_semi || selectedPayslip.earnings?.basic_semi || 0) * 2)} × 12 ÷ 261 = {formatCurrency(selectedPayslip.deductions.absences_daily_rate_used || 0)}</p>
                             <p>{selectedPayslip.days_absent || 0} days × {formatCurrency(selectedPayslip.deductions.absences_daily_rate_used || 0)} = {formatCurrency((selectedPayslip.days_absent || 0) * (selectedPayslip.deductions.absences_daily_rate_used || 0))}</p>
                           </div>
                         )}
                       </div>
                     )}
-                    {(selectedPayslip.earnings.late_deduction || 0) > 0 && (
+                    {(selectedPayslip.deductions?.late_amount || 0) > 0 && (
                       <div className="text-red-600">
                         <div className="flex justify-between">
                           <span>Late Deduction</span>
-                          <span className="font-medium">-{formatCurrency(selectedPayslip.earnings.late_deduction)}</span>
+                          <span className="font-medium">-{formatCurrency(selectedPayslip.deductions.late_amount)}</span>
                         </div>
                         {(selectedPayslip.deductions?.late_minute_rate_used || 0) > 0 && (
                           <div className="text-xs text-gray-500 text-right mt-1 space-y-0.5">
@@ -1369,11 +2136,46 @@ export function PayrollPage() {
                         )}
                       </div>
                     )}
+
+                    {/* Prorate Breakdown (saved with payslip) */}
+                    {selectedPayslip.earnings?._prorate_info && Array.isArray(selectedPayslip.earnings._prorate_info) && (
+                      <div className="mt-3 bg-purple-50 border border-purple-200 rounded-lg p-3">
+                        <p className="text-xs font-bold text-purple-800 mb-2">Prorated — {selectedPayslip.earnings._prorate_info.length} Periods</p>
+                        <div className="space-y-2">
+                          {(selectedPayslip.earnings._prorate_info as any[]).map((p: any, i: number) => {
+                            const dateRange = [p.startDate, p.endDate].filter(Boolean).join(' to ');
+                            return (
+                              <div key={i} className="bg-white rounded p-2 border border-purple-100 text-xs">
+                                <div className="flex justify-between items-center mb-1">
+                                  <span className="font-bold text-purple-700">Period {p.period}{dateRange ? `: ${dateRange}` : ''}</span>
+                                  <span className="text-purple-500 font-medium">{p.daysWorked}d worked | {p.workHours}hrs/day</span>
+                                </div>
+                                <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-gray-600">
+                                  <div className="flex justify-between"><span>Monthly Basic:</span><span className="font-medium">{formatCurrency(p.monthlyBasic)}</span></div>
+                                  <div className="flex justify-between"><span>Daily Rate:</span><span className="font-medium">{formatCurrency(p.dailyRate)}</span></div>
+                                  <div className="flex justify-between text-green-700"><span>Basic Earned:</span><span className="font-medium">{formatCurrency(p.basicEarned)}</span></div>
+                                  {(p.allowanceEarned || 0) > 0 && <div className="flex justify-between text-green-700"><span>Allowance:</span><span className="font-medium">{formatCurrency(p.allowanceEarned)}</span></div>}
+                                  {(p.productivityEarned || 0) > 0 && <div className="flex justify-between text-green-700"><span>Productivity:</span><span className="font-medium">{formatCurrency(p.productivityEarned)}</span></div>}
+                                  {(p.languageEarned || 0) > 0 && <div className="flex justify-between text-green-700"><span>Language:</span><span className="font-medium">{formatCurrency(p.languageEarned)}</span></div>}
+                                  {(p.otPay || 0) > 0 && <div className="flex justify-between text-green-700"><span>OT Pay:</span><span className="font-medium">{formatCurrency(p.otPay)}</span></div>}
+                                  {(p.regularHoliday || 0) > 0 && <div className="flex justify-between text-green-700"><span>Holiday:</span><span className="font-medium">{formatCurrency(p.regularHoliday)}</span></div>}
+                                  {(p.daysAbsent || 0) > 0 && <div className="flex justify-between text-red-600"><span>Absent ({p.daysAbsent}d):</span><span className="font-medium">-{formatCurrency(p.absentDeduction)}</span></div>}
+                                  {(p.lateMinutes || 0) > 0 && <div className="flex justify-between text-red-600"><span>Late ({p.lateMinutes}m):</span><span className="font-medium">-{formatCurrency(p.lateDeduction)}</span></div>}
+                                </div>
+                                <div className="flex justify-between font-bold text-purple-800 border-t border-purple-100 pt-1 mt-1">
+                                  <span>Period Total:</span><span>{formatCurrency(p.totalEarnings)}</span>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
                   </>
                 )}
                 <div className="border-t pt-2 flex justify-between font-semibold">
                   <span>Total Earnings</span>
-                  <span>{formatCurrency(selectedPayslip.total_earnings)}</span>
+                  <span>{formatCurrency(editMode ? liveEarnings : selectedPayslip.total_earnings)}</span>
                 </div>
               </div>
             </div>
@@ -1444,19 +2246,54 @@ export function PayrollPage() {
                         className="w-28 px-2 py-1.5 border border-gray-300 rounded text-right text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                       />
                     </div>
-                    <div className="flex justify-between items-center">
-                      <span className="text-gray-600">Loans</span>
-                      <input
-                        type="number"
-                        step="0.01"
-                        value={editDeductions.loans ?? 0}
-                        onChange={(e) => {
-                          const val = e.target.value === '' ? 0 : parseFloat(e.target.value);
-                          setEditDeductions({ ...editDeductions, loans: isNaN(val) ? 0 : val });
-                        }}
-                        className="w-28 px-2 py-1.5 border border-gray-300 rounded text-right text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                      />
-                    </div>
+                    {cutoff === 1 && (
+                      <>
+                        <div className="flex justify-between items-center">
+                          <span className="text-gray-600">SSS Loan</span>
+                          <input
+                            type="number"
+                            step="0.01"
+                            value={editDeductions.sss_loan ?? 0}
+                            onChange={(e) => {
+                              const val = e.target.value === '' ? 0 : parseFloat(e.target.value);
+                              setEditDeductions({ ...editDeductions, sss_loan: isNaN(val) ? 0 : val });
+                            }}
+                            className="w-28 px-2 py-1.5 border border-gray-300 rounded text-right text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                          />
+                        </div>
+                        <div className="flex justify-between items-center">
+                          <span className="text-gray-600">Pag-IBIG Loan</span>
+                          <input
+                            type="number"
+                            step="0.01"
+                            value={editDeductions.pagibig_loan ?? 0}
+                            onChange={(e) => {
+                              const val = e.target.value === '' ? 0 : parseFloat(e.target.value);
+                              setEditDeductions({ ...editDeductions, pagibig_loan: isNaN(val) ? 0 : val });
+                            }}
+                            className="w-28 px-2 py-1.5 border border-gray-300 rounded text-right text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                          />
+                        </div>
+                        <div className="flex justify-between items-center">
+                          <span className="text-gray-600">Other Loans</span>
+                          <input
+                            type="number"
+                            step="0.01"
+                            value={editDeductions.other_loan ?? 0}
+                            onChange={(e) => {
+                              const val = e.target.value === '' ? 0 : parseFloat(e.target.value);
+                              setEditDeductions({ ...editDeductions, other_loan: isNaN(val) ? 0 : val });
+                            }}
+                            className="w-28 px-2 py-1.5 border border-gray-300 rounded text-right text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                          />
+                        </div>
+                      </>
+                    )}
+                    {cutoff === 2 && (
+                      <div className="p-2 bg-blue-50 rounded text-sm text-blue-700">
+                        Loans deducted on 1st cutoff only
+                      </div>
+                    )}
                   </>
                 ) : (
                   <>
@@ -1480,26 +2317,126 @@ export function PayrollPage() {
                       <span className="text-gray-600">Withholding Tax</span>
                       <span className="font-medium">{formatCurrency(selectedPayslip.deductions.tax || 0)}</span>
                     </div>
-                    {(selectedPayslip.deductions.loans || 0) > 0 && (
-                      <div className="flex justify-between">
-                        <span className="text-gray-600">Loans</span>
-                        <span className="font-medium">{formatCurrency(selectedPayslip.deductions.loans)}</span>
-                      </div>
-                    )}
                     {cutoff === 1 && (
-                      <div className="p-2 bg-blue-50 rounded text-sm text-blue-700 mt-2">
-                        SSS, PhilHealth, Pag-IBIG deducted on 2nd cutoff only
-                      </div>
+                      <>
+                        <div className="flex justify-between">
+                          <span className="text-gray-600">SSS Loan</span>
+                          <span className={`font-medium ${(selectedPayslip.deductions.sss_loan || 0) > 0 ? '' : 'text-gray-400'}`}>
+                            {formatCurrency(selectedPayslip.deductions.sss_loan || 0)}
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-gray-600">Pag-IBIG Loan</span>
+                          <span className={`font-medium ${(selectedPayslip.deductions.pagibig_loan || 0) > 0 ? '' : 'text-gray-400'}`}>
+                            {formatCurrency(selectedPayslip.deductions.pagibig_loan || 0)}
+                          </span>
+                        </div>
+                        {(selectedPayslip.deductions.other_loan || 0) > 0 && (
+                          <div className="flex justify-between">
+                            <span className="text-gray-600">Other Loans</span>
+                            <span className="font-medium">
+                              {formatCurrency(selectedPayslip.deductions.other_loan || 0)}
+                            </span>
+                          </div>
+                        )}
+                        <div className="p-2 bg-blue-50 rounded text-sm text-blue-700 mt-2">
+                          SSS, PhilHealth, Pag-IBIG deducted on 2nd cutoff only
+                        </div>
+                      </>
                     )}
                   </>
                 )}
                 <div className="border-t pt-2 flex justify-between font-semibold">
                   <span>Total Deductions</span>
-                  <span className="text-red-600">{formatCurrency(selectedPayslip.total_deductions)}</span>
+                  <span className="text-red-600">{formatCurrency(editMode ? liveDeductions : selectedPayslip.total_deductions)}</span>
                 </div>
               </div>
             </div>
           </div>
+          )}
+
+          {/* Gov't Deductions when prorate is open (earnings/attendance handled by prorate above) */}
+          {editMode && showProrate && (
+            <div className="mt-4">
+              <h3 className="font-semibold text-gray-900 mb-3 flex items-center gap-2">
+                <span className="w-3 h-3 bg-red-500 rounded-full"></span>
+                Government Deductions
+                <span className="text-xs font-normal text-gray-500">({getCutoffLabel(cutoff)})</span>
+              </h3>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                {cutoff === 1 ? (
+                  <>
+                    <div className="flex justify-between items-center">
+                      <span className="text-gray-600 text-sm">Tax</span>
+                      <input type="number" step="0.01" value={editDeductions.tax ?? selectedPayslip.deductions?.tax ?? 0}
+                        onChange={(e) => setEditDeductions({ ...editDeductions, tax: parseFloat(e.target.value) || 0 })}
+                        className="w-24 px-2 py-1 border border-gray-300 rounded text-right text-sm" />
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-gray-600 text-sm">SSS Loan</span>
+                      <input type="number" step="0.01" value={editDeductions.sss_loan ?? selectedPayslip.deductions?.sss_loan ?? 0}
+                        onChange={(e) => setEditDeductions({ ...editDeductions, sss_loan: parseFloat(e.target.value) || 0 })}
+                        className="w-24 px-2 py-1 border border-gray-300 rounded text-right text-sm" />
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-gray-600 text-sm">HDMF Loan</span>
+                      <input type="number" step="0.01" value={editDeductions.pagibig_loan ?? selectedPayslip.deductions?.pagibig_loan ?? 0}
+                        onChange={(e) => setEditDeductions({ ...editDeductions, pagibig_loan: parseFloat(e.target.value) || 0 })}
+                        className="w-24 px-2 py-1 border border-gray-300 rounded text-right text-sm" />
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-gray-600 text-sm">Other Loan</span>
+                      <input type="number" step="0.01" value={editDeductions.other_loan ?? selectedPayslip.deductions?.other_loan ?? 0}
+                        onChange={(e) => setEditDeductions({ ...editDeductions, other_loan: parseFloat(e.target.value) || 0 })}
+                        className="w-24 px-2 py-1 border border-gray-300 rounded text-right text-sm" />
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="flex justify-between items-center">
+                      <span className="text-gray-600 text-sm">Tax</span>
+                      <input type="number" step="0.01" value={editDeductions.tax ?? selectedPayslip.deductions?.tax ?? 0}
+                        onChange={(e) => setEditDeductions({ ...editDeductions, tax: parseFloat(e.target.value) || 0 })}
+                        className="w-24 px-2 py-1 border border-gray-300 rounded text-right text-sm" />
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-gray-600 text-sm">SSS</span>
+                      <input type="number" step="0.01" value={editDeductions.sss ?? selectedPayslip.deductions?.sss ?? 0}
+                        onChange={(e) => setEditDeductions({ ...editDeductions, sss: parseFloat(e.target.value) || 0 })}
+                        className="w-24 px-2 py-1 border border-gray-300 rounded text-right text-sm" />
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-gray-600 text-sm">PhilHealth</span>
+                      <input type="number" step="0.01" value={editDeductions.philhealth ?? selectedPayslip.deductions?.philhealth ?? 0}
+                        onChange={(e) => setEditDeductions({ ...editDeductions, philhealth: parseFloat(e.target.value) || 0 })}
+                        className="w-24 px-2 py-1 border border-gray-300 rounded text-right text-sm" />
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-gray-600 text-sm">Pag-IBIG</span>
+                      <input type="number" step="0.01" value={editDeductions.pagibig ?? selectedPayslip.deductions?.pagibig ?? 0}
+                        onChange={(e) => setEditDeductions({ ...editDeductions, pagibig: parseFloat(e.target.value) || 0 })}
+                        className="w-24 px-2 py-1 border border-gray-300 rounded text-right text-sm" />
+                    </div>
+                  </>
+                )}
+              </div>
+              {/* Net Pay Summary */}
+              <div className="mt-4 p-3 bg-gray-100 rounded-lg">
+                <div className="flex justify-between text-sm">
+                  <span>Total Earnings (from prorate)</span>
+                  <span className="font-bold text-green-700">{formatCurrency(liveEarnings)}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span>Total Deductions</span>
+                  <span className="font-bold text-red-600">-{formatCurrency(liveDeductions)}</span>
+                </div>
+                <div className="flex justify-between text-lg font-bold border-t mt-2 pt-2">
+                  <span>Net Pay</span>
+                  <span className="text-blue-700">{formatCurrency(liveNetPay)}</span>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Flexible Schedule Toggle - Only in Edit Mode */}
           {editMode && (
@@ -1532,10 +2469,10 @@ export function PayrollPage() {
           <div className="mt-4 p-4 bg-primary-50 rounded-lg">
             <div className="flex justify-between items-center">
               <span className="text-lg font-semibold text-gray-900">Net Pay</span>
-              <span className="text-2xl font-bold text-primary-600">{formatCurrency(selectedPayslip.net_pay)}</span>
+              <span className="text-2xl font-bold text-primary-600">{formatCurrency(editMode ? liveNetPay : selectedPayslip.net_pay)}</span>
             </div>
             <p className="text-xs text-gray-600 text-right mt-2">
-              = {formatCurrency(selectedPayslip.earnings.basic_semi)} (Earnings) - {formatCurrency(selectedPayslip.total_deductions)} (Deductions)
+              = {formatCurrency(editMode ? liveEarnings : selectedPayslip.total_earnings)} (Earnings) - {formatCurrency(editMode ? liveDeductions : selectedPayslip.total_deductions)} (Deductions)
             </p>
           </div>
 
@@ -1603,15 +2540,7 @@ export function PayrollPage() {
                     // Reload the payslip details
                     const detailResponse = await payrollApi.getPayslip(selectedPayslip.id);
                     setSelectedPayslip(detailResponse as PayslipData);
-                    alert(`Recalculated!\n\n` +
-                      `Monthly: ₱${result.monthly_basic.toLocaleString()}\n` +
-                      `Basic Semi: ₱${result.basic_semi.toLocaleString()}\n` +
-                      `Allowance Semi: ₱${result.allowance_semi.toLocaleString()}\n` +
-                      `Work Hours: ${result.work_hours}\n` +
-                      `Daily Rate: ₱${result.daily_rate.toFixed(2)}\n` +
-                      `Minute Rate: ₱${result.minute_rate.toFixed(4)}\n\n` +
-                      `Absent: ${result.days_absent} days = ₱${result.absent_deduction.toFixed(2)}\n` +
-                      `Late: ${result.late_minutes} mins = ₱${result.late_deduction.toFixed(2)}\n\n` +
+                    alert(`Recalculated totals from the current saved fields.\n\n` +
                       `Total Earnings: ₱${result.total_earnings.toLocaleString()}\n` +
                       `Total Deductions: ₱${result.total_deductions.toLocaleString()}\n` +
                       `Net Pay: ₱${result.net_pay.toLocaleString()}`);
@@ -1667,14 +2596,29 @@ export function PayrollPage() {
           </div>
           <div className="flex gap-2">
             {selectedRun.status !== 'draft' && payslips.length > 0 && (
-              <button
-                onClick={() => handleRecalculate(selectedRun.id)}
-                className="btn-secondary"
-                disabled={recalculating === selectedRun.id}
-                title="Recalculate all payslips using current employee salaries"
-              >
-                {recalculating === selectedRun.id ? 'Recalculating...' : 'Recalculate'}
-              </button>
+              <>
+                <button
+                  onClick={async () => {
+                    if (!confirm('Recalculate payroll totals from the current payslip rows?\n\nThis will not reset or overwrite individual payslips.')) return;
+                    setRecalculating(selectedRun.id);
+                    try {
+                      const result = await payrollApi.recalculateRun(selectedRun.id);
+                      alert(`Recalculated totals from ${result.updated_count} payslips.\n\nTotal Gross: ₱${result.total_gross.toLocaleString()}\nTotal Net: ₱${result.total_net.toLocaleString()}`);
+                      loadPayrollRuns();
+                      loadPayslips(selectedRun.id);
+                    } catch (error: any) {
+                      alert(error.response?.data?.detail || 'Failed to recalculate');
+                    } finally {
+                      setRecalculating(null);
+                    }
+                  }}
+                  className="btn-secondary"
+                  disabled={recalculating === selectedRun.id}
+                  title="Recalculate totals from current payslip rows without changing payslips."
+                >
+                  {recalculating === selectedRun.id ? 'Recalculating...' : 'Recalculate'}
+                </button>
+              </>
             )}
             {selectedRun.status === 'review' && (
               <>
@@ -1784,9 +2728,295 @@ export function PayrollPage() {
             </div>
           ) : (
             <div className="overflow-x-auto">
+              {/* Bulk Action Bar */}
+              {selectedPayslipIds.size > 0 && (
+                <div className="mb-3 p-3 bg-blue-50 border border-blue-200 rounded-lg flex items-center gap-3 flex-wrap">
+                  <span className="text-sm font-bold text-blue-800">{selectedPayslipIds.size} selected</span>
+                  <div className="h-4 w-px bg-blue-300" />
+                  <button
+                    disabled={bulkProcessing}
+                    onClick={async () => {
+                      if (!confirm(`Recalculate ${selectedPayslipIds.size} payslips using current employee rates?`)) return;
+                      setBulkProcessing(true);
+                      let success = 0, fail = 0;
+                      for (const id of selectedPayslipIds) {
+                        try { await payrollApi.recalculatePayslip(id); success++; } catch { fail++; }
+                      }
+                      setBulkProcessing(false);
+                      alert(`Recalculated: ${success} success${fail > 0 ? `, ${fail} failed` : ''}`);
+                      if (selectedRun) loadPayslips(selectedRun.id);
+                    }}
+                    className="text-xs px-3 py-1.5 bg-blue-600 text-white rounded font-semibold hover:bg-blue-700 disabled:opacity-50"
+                  >
+                    {bulkProcessing ? 'Processing...' : 'Recalculate'}
+                  </button>
+                  <button
+                    disabled={bulkProcessing}
+                    onClick={async () => {
+                      setBulkProcessing(true);
+                      for (const id of selectedPayslipIds) {
+                        try { await payrollApi.downloadPayslipPdf(id); } catch {}
+                      }
+                      setBulkProcessing(false);
+                    }}
+                    className="text-xs px-3 py-1.5 bg-gray-600 text-white rounded font-semibold hover:bg-gray-700 disabled:opacity-50"
+                  >
+                    Download PDFs
+                  </button>
+                  <button
+                    onClick={() => {
+                      setBulkFields(prev => {
+                        const reset: Record<string, { enabled: boolean; value: number }> = {};
+                        for (const k of Object.keys(prev)) reset[k] = { enabled: false, value: k === 'workHours' ? 8 : 0 };
+                        return reset;
+                      });
+                      setShowBulkEdit(!showBulkEdit);
+                    }}
+                    className={`text-xs px-3 py-1.5 rounded font-semibold ${showBulkEdit ? 'bg-purple-600 text-white' : 'bg-purple-100 text-purple-700 hover:bg-purple-200'}`}
+                  >
+                    {showBulkEdit ? 'Close Editor' : 'Bulk Edit'}
+                  </button>
+                  <button
+                    onClick={() => { setSelectedPayslipIds(new Set()); setShowBulkEdit(false); }}
+                    className="text-xs px-3 py-1.5 bg-white text-gray-600 border border-gray-300 rounded font-semibold hover:bg-gray-50"
+                  >
+                    Clear
+                  </button>
+                </div>
+              )}
+
+              {/* Bulk Edit Panel */}
+              {showBulkEdit && selectedPayslipIds.size > 0 && (() => {
+                const cutoff = selectedRun?.cutoff || 1;
+                const toggleField = (key: string) => setBulkFields(prev => ({ ...prev, [key]: { ...prev[key], enabled: !prev[key].enabled } }));
+                const setFieldValue = (key: string, val: number) => setBulkFields(prev => ({ ...prev, [key]: { ...prev[key], value: val } }));
+
+                // Auto-compute rates from bulk basic salary
+                const bulkMonthly = bulkFields.basicSalary.value;
+                const bulkDaily = bulkMonthly > 0 ? Math.round((bulkMonthly * 12 / 261) * 100) / 100 : 0;
+                const bulkWorkHrs = bulkFields.workHours.value || 8;
+                const bulkMinute = bulkDaily > 0 && bulkWorkHrs > 0 ? Math.round((bulkDaily / bulkWorkHrs / 60) * 10000) / 10000 : 0;
+                const bulkOtRate = bulkDaily > 0 && bulkWorkHrs > 0 ? Math.round((bulkDaily / bulkWorkHrs * 1.30) * 100) / 100 : 0;
+
+                const enabledCount = Object.values(bulkFields).filter(f => f.enabled).length;
+
+                const renderField = (key: string, label: string, step = '0.01', prefix = '') => (
+                  <div className="flex items-center gap-2">
+                    <input type="checkbox" checked={bulkFields[key].enabled} onChange={() => toggleField(key)}
+                      className="w-4 h-4 text-purple-600 rounded border-gray-300 cursor-pointer" />
+                    <span className={`text-sm w-28 ${bulkFields[key].enabled ? 'text-gray-800 font-medium' : 'text-gray-400'}`}>{label}</span>
+                    {prefix && <span className="text-gray-400 text-xs">{prefix}</span>}
+                    <input type="number" step={step} value={bulkFields[key].value || ''}
+                      disabled={!bulkFields[key].enabled}
+                      onChange={(e) => setFieldValue(key, parseFloat(e.target.value) || 0)}
+                      className={`w-28 px-2 py-1 border rounded text-sm text-right ${bulkFields[key].enabled ? 'border-purple-300 bg-white' : 'border-gray-200 bg-gray-50 text-gray-400'}`}
+                      placeholder="0" />
+                  </div>
+                );
+
+                return (
+                  <div className="mb-4 bg-purple-50 border-2 border-purple-300 rounded-lg p-4">
+                    <div className="flex justify-between items-center mb-3">
+                      <h4 className="font-bold text-purple-900 text-sm">Bulk Edit — Apply to {selectedPayslipIds.size} payslip{selectedPayslipIds.size !== 1 ? 's' : ''}</h4>
+                      <p className="text-xs text-purple-600">Check fields to include, uncheck to skip</p>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      {/* Column 1: Earnings */}
+                      <div className="bg-white p-3 rounded border border-purple-200">
+                        <p className="text-xs font-bold text-green-800 uppercase mb-2">Earnings (Monthly)</p>
+                        <div className="space-y-2">
+                          {renderField('basicSalary', 'Basic Salary', '0.01', '₱')}
+                          {renderField('allowance', 'Allowance', '0.01', '₱')}
+                          {renderField('productivity', 'Productivity', '0.01', '₱')}
+                          {renderField('language', 'Language', '0.01', '₱')}
+                        </div>
+                        {bulkFields.basicSalary.enabled && bulkMonthly > 0 && (
+                          <div className="mt-2 pt-2 border-t text-[10px] text-gray-500 space-y-0.5">
+                            <p>Semi: {formatCurrency(bulkMonthly / 2)}</p>
+                            <p>Daily: {formatCurrency(bulkDaily)} | Minute: {formatCurrency(bulkMinute)}</p>
+                            <p>OT/hr: {formatCurrency(bulkOtRate)}</p>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Column 2: Attendance */}
+                      <div className="bg-white p-3 rounded border border-purple-200">
+                        <p className="text-xs font-bold text-blue-800 uppercase mb-2">Attendance / Schedule</p>
+                        <div className="space-y-2">
+                          <div className="flex items-center gap-2">
+                            <input type="checkbox" checked={bulkFields.workHours.enabled} onChange={() => toggleField('workHours')}
+                              className="w-4 h-4 text-purple-600 rounded border-gray-300 cursor-pointer" />
+                            <span className={`text-sm w-28 ${bulkFields.workHours.enabled ? 'text-gray-800 font-medium' : 'text-gray-400'}`}>Work Hrs/Day</span>
+                            <select value={bulkFields.workHours.value} disabled={!bulkFields.workHours.enabled}
+                              onChange={(e) => setFieldValue('workHours', parseInt(e.target.value))}
+                              className={`w-28 px-2 py-1 border rounded text-sm ${bulkFields.workHours.enabled ? 'border-purple-300 bg-white' : 'border-gray-200 bg-gray-50 text-gray-400'}`}>
+                              <option value={4}>4 hrs</option><option value={6}>6 hrs</option><option value={8}>8 hrs</option>
+                            </select>
+                          </div>
+                          {renderField('daysWorked', 'Days Worked', '1')}
+                          {renderField('daysAbsent', 'Days Absent', '1')}
+                          {renderField('lateMinutes', 'Late Minutes', '1')}
+                          {renderField('otHours', 'OT Hours', '0.5')}
+                        </div>
+                      </div>
+
+                      {/* Column 3: Deductions */}
+                      <div className="bg-white p-3 rounded border border-purple-200">
+                        <p className="text-xs font-bold text-red-800 uppercase mb-2">Deductions</p>
+                        <div className="space-y-2">
+                          {renderField('tax', 'Tax', '0.01', '₱')}
+                          {cutoff === 1 ? (
+                            <>
+                              {renderField('sss_loan', 'SSS Loan', '0.01', '₱')}
+                              {renderField('pagibig_loan', 'HDMF Loan', '0.01', '₱')}
+                              {renderField('other_loan', 'Other Loan', '0.01', '₱')}
+                            </>
+                          ) : (
+                            <>
+                              {renderField('sss', 'SSS', '0.01', '₱')}
+                              {renderField('philhealth', 'PhilHealth', '0.01', '₱')}
+                              {renderField('pagibig', 'Pag-IBIG', '0.01', '₱')}
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Save to Employee toggle */}
+                    <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg flex items-center gap-3">
+                      <input type="checkbox" checked={bulkUpdateEmployee} onChange={(e) => setBulkUpdateEmployee(e.target.checked)}
+                        className="w-4 h-4 text-blue-600 rounded border-gray-300 cursor-pointer" />
+                      <div>
+                        <span className="text-sm font-semibold text-blue-800">Also update Employee records</span>
+                        <p className="text-[10px] text-blue-600">Salary, allowance, incentives, and work hours will be saved permanently so the next cutoff uses them</p>
+                      </div>
+                    </div>
+
+                    {/* Apply Button */}
+                    <div className="mt-3 flex items-center gap-3">
+                      <button
+                        disabled={bulkProcessing || enabledCount === 0}
+                        onClick={async () => {
+                          if (enabledCount === 0) return;
+                          const fieldNames = Object.entries(bulkFields).filter(([, f]) => f.enabled).map(([k]) => k);
+                          if (!confirm(`Apply ${fieldNames.length} field(s) to ${selectedPayslipIds.size} payslip(s)?\n\nFields: ${fieldNames.join(', ')}`)) return;
+
+                          setBulkProcessing(true);
+                          let success = 0, fail = 0;
+
+                          for (const psId of selectedPayslipIds) {
+                            try {
+                              // Build earnings update
+                              const earningsUpdate: Record<string, number> = {};
+                              if (bulkFields.basicSalary.enabled) earningsUpdate.basic_semi = Math.round(bulkFields.basicSalary.value / 2 * 100) / 100;
+                              if (bulkFields.allowance.enabled) earningsUpdate.allowance_semi = bulkFields.allowance.value;
+                              if (bulkFields.productivity.enabled) earningsUpdate.productivity_incentive_semi = bulkFields.productivity.value;
+                              if (bulkFields.language.enabled) earningsUpdate.language_incentive_semi = bulkFields.language.value;
+
+                              // Build attendance update
+                              const attendanceUpdate: Record<string, any> = {};
+                              const wh = bulkFields.workHours.enabled ? bulkFields.workHours.value : 8;
+                              if (bulkFields.workHours.enabled) attendanceUpdate.work_hours_per_day = wh;
+                              if (bulkFields.daysWorked.enabled) attendanceUpdate.days_worked = bulkFields.daysWorked.value;
+                              if (bulkFields.daysAbsent.enabled) attendanceUpdate.days_absent = bulkFields.daysAbsent.value;
+                              if (bulkFields.lateMinutes.enabled) attendanceUpdate.total_late_minutes = bulkFields.lateMinutes.value;
+                              if (bulkFields.otHours.enabled) attendanceUpdate.overtime_hours = bulkFields.otHours.value;
+                              if (bulkFields.daysAbsent.enabled || bulkFields.lateMinutes.enabled || bulkFields.workHours.enabled) {
+                                attendanceUpdate.recalculate_deductions = true;
+                              }
+
+                              // Build deductions update
+                              const deductionsUpdate: Record<string, number> = {};
+                              if (bulkFields.tax.enabled) deductionsUpdate.tax = bulkFields.tax.value;
+                              if (bulkFields.sss.enabled) deductionsUpdate.sss = bulkFields.sss.value;
+                              if (bulkFields.philhealth.enabled) deductionsUpdate.philhealth = bulkFields.philhealth.value;
+                              if (bulkFields.pagibig.enabled) deductionsUpdate.pagibig = bulkFields.pagibig.value;
+                              if (bulkFields.sss_loan.enabled) deductionsUpdate.sss_loan = bulkFields.sss_loan.value;
+                              if (bulkFields.pagibig_loan.enabled) deductionsUpdate.pagibig_loan = bulkFields.pagibig_loan.value;
+                              if (bulkFields.other_loan.enabled) deductionsUpdate.other_loan = bulkFields.other_loan.value;
+
+                              // Add rates if basic salary changed
+                              if (bulkFields.basicSalary.enabled) {
+                                deductionsUpdate.absences_daily_rate_used = bulkDaily;
+                                deductionsUpdate.late_minute_rate_used = bulkMinute;
+                              }
+                              if (bulkFields.workHours.enabled) {
+                                deductionsUpdate.work_hours_per_day_used = wh;
+                              }
+
+                              // Auto-compute OT if both basic and OT hours are set
+                              if (bulkFields.basicSalary.enabled && bulkFields.otHours.enabled) {
+                                earningsUpdate.overtime = Math.round(bulkOtRate * bulkFields.otHours.value * 100) / 100;
+                              }
+
+                              // Send updates
+                              if (Object.keys(attendanceUpdate).length > 0) {
+                                await payrollApi.updatePayslipAttendance(psId, attendanceUpdate);
+                              }
+                              if (Object.keys(earningsUpdate).length > 0) {
+                                await payrollApi.updatePayslipEarnings(psId, earningsUpdate);
+                              }
+                              if (Object.keys(deductionsUpdate).length > 0) {
+                                await payrollApi.updatePayslipDeductions(psId, deductionsUpdate);
+                              }
+
+                              // Also update Employee record so next cutoff uses new rates
+                              if (bulkUpdateEmployee) {
+                                const ps = filteredPayslips.find(p => p.id === psId);
+                                if (ps?.employee_id) {
+                                  const empUpdate: Record<string, any> = {};
+                                  if (bulkFields.basicSalary.enabled) {
+                                    empUpdate.basic_salary = bulkFields.basicSalary.value;
+                                    empUpdate.daily_rate = bulkDaily;
+                                    empUpdate.hourly_rate = Math.round(bulkDaily / (bulkFields.workHours.enabled ? bulkFields.workHours.value : 8) * 100) / 100;
+                                  }
+                                  if (bulkFields.allowance.enabled) empUpdate.allowance = bulkFields.allowance.value;
+                                  if (bulkFields.productivity.enabled) empUpdate.productivity_incentive = bulkFields.productivity.value;
+                                  if (bulkFields.language.enabled) empUpdate.language_incentive = bulkFields.language.value;
+                                  if (bulkFields.workHours.enabled) empUpdate.work_hours_per_day = bulkFields.workHours.value;
+                                  if (Object.keys(empUpdate).length > 0) {
+                                    try { await employeesApi.update(ps.employee_id, empUpdate); } catch {}
+                                  }
+                                }
+                              }
+
+                              success++;
+                            } catch { fail++; }
+                          }
+
+                          setBulkProcessing(false);
+                          alert(`Updated ${success} payslip(s)${fail > 0 ? `, ${fail} failed` : ''}${bulkUpdateEmployee ? '\nEmployee records also updated for next cutoff.' : ''}`);
+                          if (selectedRun) loadPayslips(selectedRun.id);
+                          setShowBulkEdit(false);
+                        }}
+                        className="px-5 py-2 bg-purple-600 text-white text-sm font-bold rounded-lg hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                      >
+                        {bulkProcessing ? `Processing ${selectedPayslipIds.size} payslips...` : `Apply to ${selectedPayslipIds.size} Payslip${selectedPayslipIds.size !== 1 ? 's' : ''}`}
+                      </button>
+                      <span className="text-xs text-purple-600">{enabledCount} field{enabledCount !== 1 ? 's' : ''} selected</span>
+                    </div>
+                  </div>
+                );
+              })()}
+
               <table className="min-w-full divide-y divide-gray-200">
                 <thead className="bg-gray-50">
                   <tr>
+                    <th className="px-2 py-3 w-10">
+                      <input
+                        type="checkbox"
+                        checked={filteredPayslips.length > 0 && selectedPayslipIds.size === filteredPayslips.length}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setSelectedPayslipIds(new Set(filteredPayslips.map(p => p.id)));
+                          } else {
+                            setSelectedPayslipIds(new Set());
+                          }
+                        }}
+                        className="w-4 h-4 text-blue-600 rounded border-gray-300 cursor-pointer"
+                      />
+                    </th>
                     <th
                       className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase cursor-pointer hover:bg-gray-100"
                       onClick={() => handlePayslipSort('employee_name')}
@@ -1841,7 +3071,19 @@ export function PayrollPage() {
                     }
 
                     return (
-                    <tr key={payslip.id} className={rowClass}>
+                    <tr key={payslip.id} className={`${rowClass} ${selectedPayslipIds.has(payslip.id) ? '!bg-blue-50' : ''}`}>
+                      <td className="px-2 py-3">
+                        <input
+                          type="checkbox"
+                          checked={selectedPayslipIds.has(payslip.id)}
+                          onChange={(e) => {
+                            const next = new Set(selectedPayslipIds);
+                            if (e.target.checked) next.add(payslip.id); else next.delete(payslip.id);
+                            setSelectedPayslipIds(next);
+                          }}
+                          className="w-4 h-4 text-blue-600 rounded border-gray-300 cursor-pointer"
+                        />
+                      </td>
                       <td className="px-4 py-3">
                         <div className="font-medium text-gray-900">{payslip.employee_name}</div>
                         <div className="text-sm text-gray-500">
@@ -1877,7 +3119,14 @@ export function PayrollPage() {
                       <td className="px-4 py-3">
                         <div className="flex gap-2">
                           <button
-                            onClick={() => setSelectedPayslip(payslip)}
+                            onClick={async () => {
+                              try {
+                                const fresh = await payrollApi.getPayslip(payslip.id) as PayslipData;
+                                setSelectedPayslip(fresh);
+                              } catch {
+                                setSelectedPayslip(payslip);
+                              }
+                            }}
                             className="text-primary-600 hover:text-primary-800 text-sm font-medium"
                           >
                             View/Edit
@@ -2584,11 +3833,11 @@ export function PayrollPage() {
                     <input
                       type="number"
                       step="0.01"
-                      value={editSettings.overtime_rate || 1.25}
-                      onChange={(e) => setEditSettings({ ...editSettings, overtime_rate: parseFloat(e.target.value) || 1.25 })}
+                      value={editSettings.overtime_rate || 1.30}
+                      onChange={(e) => setEditSettings({ ...editSettings, overtime_rate: parseFloat(e.target.value) || 1.30 })}
                       className="form-input"
                     />
-                    <p className="text-xs text-gray-500 mt-1">e.g., 1.25 = 125% of hourly rate</p>
+                    <p className="text-xs text-gray-500 mt-1">e.g., 1.30 = 130% of hourly rate</p>
                   </div>
                   <div>
                     <label className="form-label">Night Differential</label>
@@ -2876,11 +4125,23 @@ export function PayrollPage() {
                         )}
                         {run.status === 'review' && (
                           <button
-                            onClick={() => handleProcess(run.id)}
-                            disabled={processing === run.id}
+                            onClick={async () => {
+                              if (!confirm('Recalculate payroll totals from the current payslip rows?\n\nThis will not reset or overwrite individual payslips.')) return;
+                              setRecalculating(run.id);
+                              try {
+                                const result = await payrollApi.recalculateRun(run.id);
+                                alert(`Recalculated totals from ${result.updated_count} payslips.`);
+                                loadPayrollRuns();
+                              } catch (error: any) {
+                                alert(error.response?.data?.detail || 'Failed to recalculate');
+                              } finally {
+                                setRecalculating(null);
+                              }
+                            }}
+                            disabled={recalculating === run.id}
                             className="text-blue-600 hover:text-blue-800 text-sm font-medium"
                           >
-                            Reprocess
+                            {recalculating === run.id ? 'Processing...' : 'Recalculate Totals'}
                           </button>
                         )}
                         <button

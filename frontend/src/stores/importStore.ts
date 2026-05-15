@@ -32,6 +32,8 @@ interface ImportResult {
   message: string;
   filename: string;
   batch_id: string;
+  date_from?: string | null;
+  date_to?: string | null;
   summary: {
     total_records: number;
     imported: number;

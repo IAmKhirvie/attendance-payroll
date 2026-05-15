@@ -899,35 +899,95 @@ def parse_time_ampm(time_str: str) -> Optional[str]:
     return None
 
 
+def normalize_name(name: str) -> str:
+    """Normalize a name for comparison."""
+    import unicodedata
+    name = name.lower().strip()
+    # Remove periods, commas, extra spaces
+    name = re.sub(r'[.,]', ' ', name)
+    name = ' '.join(name.split())
+    # Replace ñ with n
+    name = name.replace('ñ', 'n')
+    # Remove accents
+    name = unicodedata.normalize('NFD', name)
+    name = ''.join(c for c in name if unicodedata.category(c) != 'Mn')
+    return name
+
+
 def find_employee_by_fullname(db: Session, name: str) -> Optional[Employee]:
-    """Find employee by matching full name (fuzzy match)."""
+    """
+    Find employee by matching full name (fuzzy match).
+
+    Handles various name formats:
+    - "Last, First, Middle" (payroll format)
+    - "First Middle Last" (database format)
+    - "Ma. Jalyn Paula Galicia" matches "De Galicia, Ma. Jalyn Paula"
+    """
     if not name:
         return None
 
     name = str(name).strip()
+    normalized_input = normalize_name(name)
 
     # Parse name (Last, First, Middle format)
     name_parts = [p.strip() for p in name.split(',')]
     if len(name_parts) >= 2:
-        last_name = name_parts[0].lower()
-        first_name = name_parts[1].lower()
+        last_name = normalize_name(name_parts[0])
+        first_name = normalize_name(name_parts[1])
+        # Handle "De Galicia" -> also try just "Galicia"
+        last_name_simple = last_name.split()[-1] if ' ' in last_name else last_name
     else:
         parts = name.split()
-        first_name = parts[0].lower() if parts else name.lower()
-        last_name = parts[-1].lower() if len(parts) > 1 else ''
+        first_name = normalize_name(parts[0]) if parts else normalize_name(name)
+        last_name = normalize_name(parts[-1]) if len(parts) > 1 else ''
+        last_name_simple = last_name
 
-    all_employees = db.query(Employee).all()
+    # Get all words from the input name for flexible matching
+    all_input_words = set(normalized_input.split())
+
+    all_employees = db.query(Employee).filter(Employee.is_active == True).all()
+
+    # Score each employee and find best match
+    best_match = None
+    best_score = 0
+
     for emp in all_employees:
-        emp_first = (emp.first_name or '').lower()
-        emp_last = (emp.last_name or '').lower()
-        emp_full = emp.full_name.lower() if hasattr(emp, 'full_name') else f"{emp_first} {emp_last}"
+        emp_first = normalize_name(emp.first_name or '')
+        emp_last = normalize_name(emp.last_name or '')
+        emp_full = normalize_name(emp.full_name)
+        emp_words = set(emp_full.split())
 
-        if first_name in emp_full and last_name in emp_full:
-            return emp
-        if first_name in emp_first and last_name in emp_last:
+        score = 0
+
+        # Exact full name match
+        if normalized_input == emp_full:
             return emp
 
-    return None
+        # Check first name match
+        if first_name and (first_name in emp_first or emp_first in first_name):
+            score += 3
+
+        # Check last name match (try both full and simple)
+        if last_name:
+            if last_name == emp_last or last_name in emp_last or emp_last in last_name:
+                score += 3
+            elif last_name_simple == emp_last or last_name_simple in emp_last:
+                score += 2
+
+        # Check word overlap
+        common_words = all_input_words.intersection(emp_words)
+        score += len(common_words)
+
+        # Check if all first name parts are in employee's first name
+        first_parts = first_name.split()
+        if all(p in emp_first for p in first_parts):
+            score += 2
+
+        if score > best_score and score >= 3:  # Minimum score threshold
+            best_score = score
+            best_match = emp
+
+    return best_match
 
 
 def import_payslip_file(
@@ -939,10 +999,20 @@ def import_payslip_file(
     Import payslip data from Excel file.
 
     For each employee in the file:
-    1. Updates their Employee record (basic salary, allowance, deductions, etc.)
-    2. Creates/updates their Payslip record
+    1. Updates their Employee record (salary, schedule, deductions, etc.)
+    2. Auto-recalculates late minutes after schedule updates
 
-    Just upload the file - everything gets imported and updated.
+    File columns used:
+    - Col 2: Employee name
+    - Col 3: Job Title/Position
+    - Col 4: Employment Type
+    - Col 5: Work hours (e.g., "8hrs")
+    - Col 6: Call time (e.g., "10am", "8am")
+    - Col 7: Time out (e.g., "7pm", "5pm")
+    - Col 11-14: Basic, Allowance, Prod Incentive, Lang Incentive
+    - Col 55-57: SSS EE, PhilHealth EE, Pag-IBIG EE
+
+    Just upload the file - everything gets imported and updated!
     """
     results = {
         "success": True,
@@ -951,7 +1021,8 @@ def import_payslip_file(
         "not_found": [],
         "errors": [],
         "employees_updated": [],
-        "payslips_created": []
+        "payslips_created": [],
+        "schedules_updated": 0
     }
 
     try:
@@ -972,6 +1043,24 @@ def import_payslip_file(
         except:
             return default
 
+    def get_str(row, col, default=''):
+        if col >= len(row):
+            return default
+        val = row.iloc[col]
+        if pd.isna(val):
+            return default
+        return str(val).strip()
+
+    def parse_work_hours(hrs_str):
+        """Parse work hours like '8hrs', '4hrs' to integer."""
+        if not hrs_str:
+            return None
+        hrs_str = str(hrs_str).lower().strip()
+        match = re.match(r'^(\d+)', hrs_str)
+        if match:
+            return int(match.group(1))
+        return None
+
     # Process each employee row (data starts at row 2, index 2)
     for row_idx in range(2, len(df)):
         row = df.iloc[row_idx]
@@ -991,31 +1080,104 @@ def import_payslip_file(
                 continue
 
             # === GET ALL DATA FROM FILE ===
+            # Schedule info
+            job_title = get_str(row, 3)
+            emp_type = get_str(row, 4)
+            work_hours_str = get_str(row, 5)
+            call_time_str = get_str(row, 6)  # e.g., "10am"
+            time_out_str = get_str(row, 7)   # e.g., "7pm"
+
+            # Salary info
             basic_monthly = get_num(row, 11)
             allowance_monthly = get_num(row, 12)
             prod_monthly = get_num(row, 13)
             lang_monthly = get_num(row, 14)
 
+            # Government deductions
             sss_ee = get_num(row, 55)
             phil_ee = get_num(row, 56)
             pagibig_ee = get_num(row, 57)
 
             # === UPDATE EMPLOYEE RECORD ===
-            employee.basic_salary = str(basic_monthly)
-            employee.allowance = str(allowance_monthly)
-            employee.productivity_incentive = str(prod_monthly)
-            employee.language_incentive = str(lang_monthly)
-            employee.sss_contribution = str(sss_ee)
-            employee.philhealth_contribution = str(phil_ee)
-            employee.pagibig_contribution = str(pagibig_ee)
+            updated_fields = []
+
+            # Update salary
+            if basic_monthly > 0:
+                employee.basic_salary = str(basic_monthly)
+                updated_fields.append('basic_salary')
+            if allowance_monthly > 0:
+                employee.allowance = str(allowance_monthly)
+                updated_fields.append('allowance')
+            if prod_monthly > 0:
+                employee.productivity_incentive = str(prod_monthly)
+                updated_fields.append('productivity_incentive')
+            if lang_monthly > 0:
+                employee.language_incentive = str(lang_monthly)
+                updated_fields.append('language_incentive')
+
+            # Update deductions
+            if sss_ee > 0:
+                employee.sss_contribution = str(sss_ee)
+            if phil_ee > 0:
+                employee.philhealth_contribution = str(phil_ee)
+            if pagibig_ee > 0:
+                employee.pagibig_contribution = str(pagibig_ee)
+
+            # Update schedule (convert "10am" to "10:00 AM")
+            schedule_changed = False
+            if call_time_str:
+                new_call_time = parse_time_ampm(call_time_str)
+                if new_call_time and employee.call_time != new_call_time:
+                    employee.call_time = new_call_time
+                    updated_fields.append('call_time')
+                    schedule_changed = True
+
+            if time_out_str:
+                new_time_out = parse_time_ampm(time_out_str)
+                if new_time_out and employee.time_out != new_time_out:
+                    employee.time_out = new_time_out
+                    updated_fields.append('time_out')
+                    schedule_changed = True
+
+            # Update work hours
+            work_hours = parse_work_hours(work_hours_str)
+            if work_hours and employee.work_hours_per_day != work_hours:
+                employee.work_hours_per_day = work_hours
+                updated_fields.append('work_hours_per_day')
+
+            # Update position if provided
+            if job_title and employee.position != job_title:
+                employee.position = job_title
+                updated_fields.append('position')
+
+            # Update employment type
+            if emp_type:
+                new_type = None
+                emp_type_lower = emp_type.lower()
+                if 'part' in emp_type_lower:
+                    new_type = 'part_time'
+                elif 'full' in emp_type_lower:
+                    new_type = 'full_time'
+                elif 'fixed' in emp_type_lower:
+                    new_type = 'contract'
+                if new_type and employee.employment_type != new_type:
+                    employee.employment_type = new_type
+                    updated_fields.append('employment_type')
+
+            if schedule_changed:
+                results["schedules_updated"] += 1
 
             results["employees_updated"].append({
                 "name": emp_name,
                 "employee_no": employee.employee_no,
                 "basic_monthly": basic_monthly,
+                "call_time": employee.call_time,
+                "time_out": employee.time_out,
+                "work_hours": work_hours,
                 "sss": sss_ee,
                 "philhealth": phil_ee,
-                "pagibig": pagibig_ee
+                "pagibig": pagibig_ee,
+                "updated_fields": updated_fields
             })
 
             results["imported"] += 1
@@ -1025,5 +1187,16 @@ def import_payslip_file(
 
     db.commit()
 
-    results["message"] = f"Imported {results['imported']} employees. Updated their salary and deduction info."
+    # Auto-recalculate late minutes if schedules were updated
+    if results["schedules_updated"] > 0:
+        try:
+            from app.services.attendance_recalc import recalculate_all_late_minutes
+            recalc_result = recalculate_all_late_minutes(db)
+            results["late_recalculation"] = recalc_result
+        except Exception as e:
+            results["late_recalculation_error"] = str(e)
+
+    results["message"] = f"Imported {results['imported']} employees. Updated salary, schedule, and deductions."
+    if results["schedules_updated"] > 0:
+        results["message"] += f" Updated {results['schedules_updated']} schedules and recalculated late minutes."
     return results

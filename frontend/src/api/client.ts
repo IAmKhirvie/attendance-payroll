@@ -333,7 +333,14 @@ export const payrollApi = {
     page_size?: number;
     payroll_run_id?: number;
     employee_id?: number;
-  }): Promise<PaginatedResponse<Payslip>> => {
+  }): Promise<PaginatedResponse<Payslip> & {
+    summary?: {
+      employee_count: number;
+      total_gross: number;
+      total_deductions: number;
+      total_net: number;
+    };
+  }> => {
     const response = await api.get('/payroll/payslips', { params });
     return response.data;
   },
@@ -383,7 +390,7 @@ export const payrollApi = {
     return response.data;
   },
 
-  updatePayslipEarnings: async (id: number, earnings: Record<string, number>): Promise<{ message: string; total_earnings: number; net_pay: number }> => {
+  updatePayslipEarnings: async (id: number, earnings: Record<string, any>): Promise<{ message: string; total_earnings: number; net_pay: number }> => {
     const response = await api.patch(`/payroll/payslips/${id}/earnings`, earnings);
     return response.data;
   },
@@ -403,18 +410,21 @@ export const payrollApi = {
     return response.data;
   },
 
+  getPayslipHistory: async (id: number): Promise<{ items: Array<{
+    id: number; timestamp: string; user_email: string; action: string;
+    change_type: string; description: string; snapshot: any; old_snapshot: any; reason: string;
+  }>; total: number }> => {
+    const response = await api.get(`/payroll/payslips/${id}/history`);
+    return response.data;
+  },
+
+  restorePayslip: async (payslipId: number, auditLogId: number): Promise<{ message: string; total_earnings: number; total_deductions: number; net_pay: number }> => {
+    const response = await api.post(`/payroll/payslips/${payslipId}/restore/${auditLogId}`);
+    return response.data;
+  },
+
   recalculatePayslip: async (id: number): Promise<{
     message: string;
-    monthly_basic: number;
-    basic_semi: number;
-    allowance_semi: number;
-    work_hours: number;
-    daily_rate: number;
-    minute_rate: number;
-    days_absent: number;
-    absent_deduction: number;
-    late_minutes: number;
-    late_deduction: number;
     total_earnings: number;
     total_deductions: number;
     net_pay: number;

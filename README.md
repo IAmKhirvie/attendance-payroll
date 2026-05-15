@@ -106,11 +106,11 @@ venv\Scripts\activate
 pip install -r requirements.txt
 
 # Start the backend server
-uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+uvicorn app.main:app --host 0.0.0.0 --port 8500 --reload
 ```
 
-The API will be available at `http://localhost:8000`
-API Documentation: `http://localhost:8000/docs`
+The API will be available at `http://localhost:8500`
+API Documentation: `http://localhost:8500/docs`
 
 ### 3. Frontend Setup
 
@@ -126,10 +126,10 @@ npm run dev -- --host 0.0.0.0
 
 # For production build
 npm run build
-npm run preview -- --host 0.0.0.0 --port 4000
+npm run preview -- --host 0.0.0.0 --port 4500
 ```
 
-The app will be available at `http://localhost:4000`
+The app will be available at `http://localhost:4500`
 
 ### 4. Access from Other Devices (Local Network)
 
@@ -143,8 +143,8 @@ The app will be available at `http://localhost:4000`
    ```
 
 2. Access from other devices:
-   - Frontend: `http://<your-ip>:4000`
-   - API: `http://<your-ip>:8000`
+   - Frontend: `http://<your-ip>:4500`
+   - API: `http://<your-ip>:8500`
 
 ### 5. Quick Start Scripts
 

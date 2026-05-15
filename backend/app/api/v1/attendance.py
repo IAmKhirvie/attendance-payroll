@@ -19,6 +19,7 @@ from app.schemas.attendance import (
     DeviceCreate, DeviceResponse
 )
 from app.services.email_service import email_service
+from app.core.file_security import validate_file_mime, SPREADSHEET_MIMES, sanitize_filename
 import logging
 
 logger = logging.getLogger(__name__)
@@ -439,8 +440,8 @@ async def import_attendance_file(
     auto_generate_payroll_bool = auto_generate_payroll.lower() == "true"
     force_reimport_bool = force_reimport.lower() == "true"
 
-    # Validate file extension
-    filename = file.filename or "upload.xls"
+    # Validate and sanitize filename
+    filename = sanitize_filename(file.filename or "upload.xls")
     ext = os.path.splitext(filename)[1].lower()
     if ext not in ['.xls', '.xlsx']:
         raise HTTPException(
@@ -448,10 +449,27 @@ async def import_attendance_file(
             detail="Invalid file format. Only XLS and XLSX files are supported."
         )
 
+    # Read file content for validation
+    content = await file.read()
+
+    # Validate MIME type (security check)
+    is_valid, error = validate_file_mime(content, SPREADSHEET_MIMES, filename)
+    if not is_valid:
+        logger.warning(f"Blocked invalid file upload: {error}")
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid file type. The file content does not match a valid spreadsheet format."
+        )
+
     # Check for duplicate import (same filename)
     existing_import = db.query(ImportBatch).filter(ImportBatch.filename == filename).first()
     if existing_import:
-        if force_reimport_bool:
+        if (existing_import.total_records or 0) == 0:
+            # Previous parser versions could create empty batches for valid files.
+            # Treat those as failed attempts so the file can be imported normally.
+            db.delete(existing_import)
+            db.commit()
+        elif force_reimport_bool:
             # Delete the old import batch (cascade will delete ImportRecord entries)
             db.delete(existing_import)
             db.commit()
@@ -461,9 +479,8 @@ async def import_attendance_file(
                 detail=f"This file has already been imported on {existing_import.created_at.strftime('%b %d, %Y at %I:%M %p')}. Delete the previous import from History or enable 'Replace existing import' to re-import."
             )
 
-    # Save uploaded file temporarily
+    # Save uploaded file temporarily (content already read above)
     with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp:
-        content = await file.read()
         tmp.write(content)
         tmp_path = tmp.name
 
@@ -477,6 +494,15 @@ async def import_attendance_file(
 
         # Save import batch to history
         records = result['records']
+        if not records:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "No attendance rows were found in this file. "
+                    "Please check that it is an NGTimereport attendance export."
+                )
+            )
+
         date_from = min((r['date'] for r in records if r['date']), default=None)
         date_to = max((r['date'] for r in records if r['date']), default=None)
 
@@ -599,6 +625,8 @@ async def import_attendance_file(
             "message": message,
             "filename": filename,
             "batch_id": result['batch_id'],
+            "date_from": date_from.isoformat() if date_from else None,
+            "date_to": date_to.isoformat() if date_to else None,
             "summary": {
                 "total_records": result['total_records'],
                 "imported": result['imported'],
@@ -612,7 +640,11 @@ async def import_attendance_file(
             "records": formatted_records,
             "payroll": payroll_result
         }
+    except HTTPException:
+        db.rollback()
+        raise
     except Exception as e:
+        db.rollback()
         raise HTTPException(
             status_code=500,
             detail=f"Failed to import file: {str(e)}"
@@ -623,6 +655,32 @@ async def import_attendance_file(
 
 
 # === Corrections ===
+
+@router.post("/recalculate-late")
+async def recalculate_late_minutes(
+    employee_id: Optional[int] = None,
+    current_admin: User = Depends(get_current_admin),
+    db: Session = Depends(get_db)
+):
+    """
+    Recalculate late_minutes for all attendance records using current employee schedules.
+    This is useful after updating employee call_times.
+
+    Args:
+        employee_id: Optional - recalculate only for this employee
+    """
+    from app.services.attendance_recalc import recalculate_all_late_minutes
+
+    # Delegate to service function (avoids code duplication)
+    result = recalculate_all_late_minutes(db, employee_id)
+
+    # Add message to result
+    result["message"] = f"Recalculated late minutes for {result['records_checked']} attendance records"
+    # Return more changes for API response (50 vs service's 20)
+    result["changes"] = result.get("changes", [])[:50]
+
+    return result
+
 
 @router.post("/corrections", response_model=CorrectionRequestResponse, status_code=status.HTTP_201_CREATED)
 async def create_correction_request(

@@ -18,6 +18,10 @@ from app.api.v1 import api_router
 from app.models.user import User, Role, UserStatus
 from app.models.settings import SystemSettings
 from app.core.security import hash_password
+from app.core.security_middleware import (
+    SecurityHeadersMiddleware,
+    RequestValidationMiddleware,
+)
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -93,6 +97,16 @@ app = FastAPI(
     redoc_url="/redoc",
     lifespan=lifespan
 )
+
+# Security middleware - adds security headers (CSP, X-Frame-Options, etc.)
+# Enable HSTS in production when using HTTPS
+app.add_middleware(
+    SecurityHeadersMiddleware,
+    enable_hsts=settings.ENVIRONMENT == "production",
+)
+
+# Request validation middleware - detects SQL injection and XSS
+app.add_middleware(RequestValidationMiddleware)
 
 # CORS middleware - configurable via CORS_ORIGINS env var
 # For local network: CORS_ORIGINS="*"

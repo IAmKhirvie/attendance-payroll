@@ -226,6 +226,7 @@ async def get_loan(
 @router.post("", response_model=LoanResponse, status_code=status.HTTP_201_CREATED)
 async def create_loan(
     data: LoanCreate,
+    skip_salary_check: bool = Query(False, description="Skip salary percentage validation"),
     current_admin: User = Depends(get_current_admin),
     db: Session = Depends(get_db)
 ):
@@ -239,6 +240,37 @@ async def create_loan(
     loan_type = db.query(LoanTypeConfig).filter(LoanTypeConfig.id == data.loan_type_id).first()
     if not loan_type:
         raise HTTPException(status_code=404, detail="Loan type not found")
+
+    # Validate loan deduction against employee's salary (unless skipped)
+    if not skip_salary_check and employee.basic_salary and employee.basic_salary > 0:
+        # Get current active loan deductions
+        existing_loans = db.query(Loan).filter(
+            Loan.employee_id == data.employee_id,
+            Loan.status == LoanStatus.ACTIVE
+        ).all()
+        current_monthly_deductions = sum(l.monthly_deduction for l in existing_loans)
+
+        # Total including new loan
+        total_monthly_deductions = current_monthly_deductions + data.monthly_deduction
+
+        # Calculate semi-monthly gross (salary + allowances divided by 2)
+        semi_monthly_gross = (employee.basic_salary + (employee.allowance or Decimal("0"))) / 2
+
+        # Check if deduction exceeds 50% of semi-monthly gross
+        max_deduction_percent = Decimal("0.50")  # 50% limit
+        max_allowed = semi_monthly_gross * max_deduction_percent
+
+        # Calculate what percentage of 1st cutoff salary the deductions would be
+        deduction_percent = (total_monthly_deductions / semi_monthly_gross * 100) if semi_monthly_gross > 0 else Decimal("0")
+
+        if total_monthly_deductions > max_allowed:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Total loan deductions (₱{total_monthly_deductions:,.2f}/month) would exceed 50% of semi-monthly gross (₱{semi_monthly_gross:,.2f}). "
+                       f"Current deduction percentage: {deduction_percent:.1f}%. "
+                       f"Maximum allowed: ₱{max_allowed:,.2f}/month. "
+                       f"Use skip_salary_check=true to override this validation."
+            )
 
     # Calculate total amount (simple interest for now)
     interest_rate = data.interest_rate if data.interest_rate else loan_type.default_interest_rate
