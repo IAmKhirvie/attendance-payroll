@@ -833,7 +833,7 @@ export function AttendancePage() {
                   <p className="text-xs text-gray-600">Skipped</p>
                 </div>
                 <div className="card text-center py-3">
-                  <p className="text-2xl font-bold text-purple-600">{importResult.summary.employees_found}</p>
+                  <p className="text-2xl font-bold text-green-700">{importResult.summary.employees_found}</p>
                   <p className="text-xs text-gray-600">Employees</p>
                 </div>
               </div>
@@ -1038,7 +1038,7 @@ export function AttendancePage() {
                   <p className="text-xs text-gray-600">Skipped</p>
                 </div>
                 <div className="card text-center py-3">
-                  <p className="text-2xl font-bold text-purple-600">{selectedImport.summary.employees_found}</p>
+                  <p className="text-2xl font-bold text-green-700">{selectedImport.summary.employees_found}</p>
                   <p className="text-xs text-gray-600">Employees</p>
                 </div>
               </div>

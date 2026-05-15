@@ -791,7 +791,7 @@ export function SettingsPage() {
                             log.action.includes('CREATE') ? 'bg-blue-100 text-blue-700' :
                             log.action.includes('UPDATE') ? 'bg-yellow-100 text-yellow-700' :
                             log.action.includes('DELETE') ? 'bg-red-100 text-red-700' :
-                            log.action.includes('BACKUP') ? 'bg-purple-100 text-purple-700' :
+                            log.action.includes('BACKUP') ? 'bg-green-100 text-green-700' :
                             'bg-gray-100 text-gray-700'
                           }`}>
                             {log.action.replace(/_/g, ' ')}

@@ -2335,7 +2335,8 @@ async def download_payslip_pdf(
 def generate_payslip_png(payslip: Payslip, company_name: str = "I CAN LANGUAGE CENTER INC.") -> bytes:
     """
     Generate PNG payslip image matching I CAN LANGUAGE CENTER format.
-    Size: 400x520 pixels (4x5.2 inches at 100 DPI) - fits 2x2 on letter paper.
+    Size: 1600x2080 pixels by default, drawn from a 400x520 logical layout.
+    The higher resolution keeps text sharp when the payslip is printed or zoomed.
     """
     from PIL import Image, ImageDraw, ImageFont
 
@@ -2352,20 +2353,51 @@ def generate_payslip_png(payslip: Payslip, company_name: str = "I CAN LANGUAGE C
     if prorate_data and isinstance(prorate_data, list) and len(prorate_data) >= 2:
         extra_rows += 0  # Compact prorate fits in base height
     width, height = 400, 520 + (extra_rows * 14)
-    img = Image.new('RGB', (width, height), 'white')
-    draw = ImageDraw.Draw(img)
+    scale = 4
+    img = Image.new('RGB', (width * scale, height * scale), 'white')
+
+    class ScaledDraw:
+        """Draw with logical 400px coordinates onto a high-resolution image."""
+
+        def __init__(self, image_draw, draw_scale):
+            self.image_draw = image_draw
+            self.draw_scale = draw_scale
+
+        def _point(self, point):
+            return tuple(int(round(v * self.draw_scale)) for v in point)
+
+        def _points(self, points):
+            return [self._point(point) for point in points]
+
+        def text(self, xy, text, fill=None, font=None, anchor=None):
+            self.image_draw.text(self._point(xy), text, fill=fill, font=font, anchor=anchor)
+
+        def line(self, xy, fill=None, width=1):
+            self.image_draw.line(self._points(xy), fill=fill, width=max(1, int(width * self.draw_scale)))
+
+        def rectangle(self, xy, fill=None, outline=None, width=1):
+            self.image_draw.rectangle(
+                self._points(xy),
+                fill=fill,
+                outline=outline,
+                width=max(1, int(width * self.draw_scale)),
+            )
+
+    draw = ScaledDraw(ImageDraw.Draw(img), scale)
 
     # Load fonts
     try:
-        font_title = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 14)
-        font_bold = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 11)
-        font_normal = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 10)
-        font_small = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 9)
+        font_title = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 14 * scale)
+        font_bold = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 11 * scale)
+        font_normal = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 10 * scale)
+        font_small = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 9 * scale)
+        font_tiny = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 7 * scale)
     except:
         font_title = ImageFont.load_default()
         font_bold = font_title
         font_normal = font_title
         font_small = font_title
+        font_tiny = font_title
 
     y = 10
     margin = 12
@@ -2500,7 +2532,7 @@ def generate_payslip_png(payslip: Payslip, company_name: str = "I CAN LANGUAGE C
         # ---- COMPACT PRORATED LAYOUT (fits same height as normal) ----
         rh = 12  # Tight row height
         try:
-            font_xs = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 8)
+            font_xs = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 8 * scale)
         except:
             font_xs = font_small
 
@@ -2567,18 +2599,6 @@ def generate_payslip_png(payslip: Payslip, company_name: str = "I CAN LANGUAGE C
             prorate_row("Overtime", [p['ot'] for p in periods_data])
         if any(p['hol'] > 0 for p in periods_data):
             prorate_row("Holiday", [p['hol'] for p in periods_data])
-        if any(p['absent'] > 0 for p in periods_data):
-            prorate_row("Absent Ded", [p['absent'] for p in periods_data], 'red')
-        if any(p['late'] > 0 for p in periods_data):
-            prorate_row("Late Ded", [p['late'] for p in periods_data], 'red')
-
-        # Period totals row
-        draw.text((c1, y), "Period Total", fill='#6b21a8', font=font_bold)
-        for vi, p in enumerate(periods_data):
-            col_x = c2 if vi == 0 else c3
-            draw.text((col_x + 75, y), fmt(p['total']), fill='#6b21a8', font=font_bold, anchor='rt')
-        y += rh + 2
-
     else:
         # ---- NORMAL (NON-PRORATED) PAYSLIP LAYOUT ----
         # Row 1: Basic Salary (monthly) / Basic (semi)
@@ -2635,32 +2655,10 @@ def generate_payslip_png(payslip: Payslip, company_name: str = "I CAN LANGUAGE C
             draw.text((right_val, y), fmt(snwh_ot), fill='black', font=font_normal, anchor='rt')
             y += row_height
 
-    # Total Allowance/Incentives summary
-    if allowance_val > 0 or prod_val > 0 or lang_val > 0:
-        y += 4
-        if allowance_val > 0:
-            draw.text((left_col, y), "Total Allowance", fill='black', font=font_bold)
-            draw.text((amt_x, y), fmt(allowance_val), fill='black', font=font_bold, anchor='rt')
-            y += row_height
-        if prod_val > 0:
-            draw.text((left_col, y), "Total Productivity", fill='black', font=font_bold)
-            draw.text((amt_x, y), fmt(prod_val), fill='black', font=font_bold, anchor='rt')
-            y += row_height
-        if lang_val > 0:
-            draw.text((left_col, y), "Total Language", fill='black', font=font_bold)
-            draw.text((amt_x, y), fmt(lang_val), fill='black', font=font_bold, anchor='rt')
-            y += row_height
-
-    y += 8
-
     # === ABSENCES/LATES ===
     absent_amt = float(deductions.get('absences_amount', 0) or 0)
     late_amt = float(deductions.get('late_amount', 0) or 0)
-    absences_total = absent_amt + late_amt
-
-    draw.text((left_col, y), "Abs / Late", fill='black', font=font_small)
-    draw.text((left_val, y), fmt(absences_total), fill='black', font=font_normal, anchor='rt')
-    y += row_height + 8
+    y += 14
 
     # Divider
     draw.line([(margin, y), (width - margin, y)], fill='black', width=1)
@@ -2674,41 +2672,58 @@ def generate_payslip_png(payslip: Payslip, company_name: str = "I CAN LANGUAGE C
     sss_loan = float(deductions.get('sss_loan', 0))
     pagibig_loan = float(deductions.get('pagibig_loan', 0))
     other_loan = float(deductions.get('other_loan', 0))
+    absent_days = float(payslip.days_absent or deductions.get('absent_days', 0) or 0)
+    absent_rate = absent_amt / absent_days if absent_days else daily_rate
+    late_minutes = int(payslip.total_late_minutes or deductions.get('late_minutes', 0) or 0)
+    late_hours = late_minutes / 60
+    late_rate = (late_amt / late_hours) if late_hours else hourly_rate
+    attendance_val = mid_x - 20
 
-    if cutoff == 2:
-        draw.text((right_col, y), "SSS", fill='black', font=font_small)
-        draw.text((right_val, y), fmt(sss), fill='black', font=font_normal, anchor='rt')
-        y += row_height
+    deductions_y = y
+    draw.text((left_col, deductions_y), "Attendance Deductions", fill='black', font=font_bold)
+    draw.text((left_col, deductions_y + 16), "Absent Deduction", fill='black', font=font_small)
+    draw.text((attendance_val, deductions_y + 16), fmt(absent_amt), fill='black', font=font_normal, anchor='rt')
+    draw.text(
+        (left_col, deductions_y + 26),
+        f"{absent_days:g} day(s) x {fmt(absent_rate)}",
+        fill='black',
+        font=font_tiny,
+    )
+    draw.text((left_col, deductions_y + 42), "Late Deduction", fill='black', font=font_small)
+    draw.text((attendance_val, deductions_y + 42), fmt(late_amt), fill='black', font=font_normal, anchor='rt')
+    draw.text(
+        (left_col, deductions_y + 52),
+        f"{late_hours:.2f}h x {fmt(late_rate)}/hr",
+        fill='black',
+        font=font_tiny,
+    )
 
-        draw.text((right_col, y), "PHIL", fill='black', font=font_small)
-        draw.text((right_val, y), fmt(philhealth), fill='black', font=font_normal, anchor='rt')
-        y += row_height
+    other_y = deductions_y
+    if cutoff == 1:
+        draw.text((right_col, other_y), "Loans", fill='black', font=font_bold)
+        other_y += 16
+        for label, amount in (
+            ("SSS Loan", sss_loan),
+            ("HDMF Loan", pagibig_loan),
+            ("Other Loan", other_loan),
+        ):
+            draw.text((right_col, other_y), label, fill='black', font=font_small)
+            draw.text((right_val, other_y), fmt(amount), fill='black', font=font_normal, anchor='rt')
+            other_y += row_height
+    else:
+        draw.text((right_col, other_y), "GOV'T Deductions", fill='black', font=font_bold)
+        other_y += 16
+        for label, amount in (
+            ("SSS", sss),
+            ("PHIL", philhealth),
+            ("HDMF", hdmf),
+            ("Wtax", wtax),
+        ):
+            draw.text((right_col, other_y), label, fill='black', font=font_small)
+            draw.text((right_val, other_y), fmt(amount), fill='black', font=font_normal, anchor='rt')
+            other_y += row_height
 
-        draw.text((right_col, y), "HDMF", fill='black', font=font_small)
-        draw.text((right_val, y), fmt(hdmf), fill='black', font=font_normal, anchor='rt')
-        y += row_height
-
-    draw.text((right_col, y), "Wtax", fill='black', font=font_small)
-    draw.text((right_val, y), fmt(wtax), fill='black', font=font_normal, anchor='rt')
-    y += row_height
-
-    # Loan deductions (1st cutoff only)
-    if cutoff == 1 and sss_loan > 0:
-        draw.text((right_col, y), "SSS Loan", fill='black', font=font_small)
-        draw.text((right_val, y), fmt(sss_loan), fill='black', font=font_normal, anchor='rt')
-        y += row_height
-
-    if cutoff == 1 and pagibig_loan > 0:
-        draw.text((right_col, y), "HDMF Loan", fill='black', font=font_small)
-        draw.text((right_val, y), fmt(pagibig_loan), fill='black', font=font_normal, anchor='rt')
-        y += row_height
-
-    if cutoff == 1 and other_loan > 0:
-        draw.text((right_col, y), "Other Loan", fill='black', font=font_small)
-        draw.text((right_val, y), fmt(other_loan), fill='black', font=font_normal, anchor='rt')
-        y += row_height
-
-    y += 8
+    y = max(deductions_y + 66, other_y) + 8
 
     # === NET PAY ===
     draw.rectangle([(right_col - 5, y - 2), (right_val + 5, y + 18)], outline='black', width=2)
@@ -2752,16 +2767,22 @@ def generate_payslips_sheet(payslips: list, company_name: str = "I CAN LANGUAGE 
     """Generate a single PNG image with up to 4 payslips arranged in 2x2 grid."""
     from PIL import Image
 
-    slip_w = 400
-    # Find the max height across all payslips (varies with loan rows)
+    slip_w = 0
+    # Find the max dimensions across all payslips (varies with loan and detail rows).
     slip_images = []
-    max_h = 520
+    max_h = 0
     for payslip in payslips[:4]:
         slip_bytes = generate_payslip_png(payslip, company_name)
         slip_img = Image.open(io.BytesIO(slip_bytes))
+        if slip_img.width > slip_w:
+            slip_w = slip_img.width
         if slip_img.height > max_h:
             max_h = slip_img.height
         slip_images.append(slip_img)
+
+    if not slip_images:
+        slip_w = 400
+        max_h = 520
 
     # 2 columns, 2 rows - use max height so all cells are uniform
     cols, rows = 2, 2
@@ -2899,7 +2920,6 @@ async def download_all_payslips_pdf(
     settings = db.query(SystemSettings).first()
     company_name = settings.company_name if settings else "I CAN LANGUAGE CENTER INC."
 
-    slip_w = 400
     cols, rows_per_page = 2, 2
     per_page = cols * rows_per_page
 
@@ -2912,6 +2932,7 @@ async def download_all_payslips_pdf(
     pages = []
     for page_idx in range(0, len(slip_images), per_page):
         batch = slip_images[page_idx:page_idx + per_page]
+        slip_w = max(s.width for s in batch)
 
         # Find max height per row for this page
         row_heights = []
@@ -2937,9 +2958,9 @@ async def download_all_payslips_pdf(
 
     buffer = io.BytesIO()
     if len(pages) == 1:
-        pages[0].save(buffer, format='PDF', resolution=100.0)
+        pages[0].save(buffer, format='PDF', resolution=400.0)
     else:
-        pages[0].save(buffer, format='PDF', resolution=100.0, save_all=True, append_images=pages[1:])
+        pages[0].save(buffer, format='PDF', resolution=400.0, save_all=True, append_images=pages[1:])
     buffer.seek(0)
 
     period_code = payroll_run.period_start.strftime('%y%m')

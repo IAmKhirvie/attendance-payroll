@@ -26,7 +26,7 @@ PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # Start Backend
 echo "Starting Backend API..."
 cd "$PROJECT_DIR/backend"
-nohup "$PROJECT_DIR/backend/venv/bin/uvicorn" app.main:app --host 0.0.0.0 --port $BACKEND_PORT > /tmp/payroll-backend.log 2>&1 &
+nohup "$PROJECT_DIR/backend/venv/bin/python" -m uvicorn app.main:app --host 0.0.0.0 --port $BACKEND_PORT > /tmp/payroll-backend.log 2>&1 &
 BACKEND_PID=$!
 echo "Backend started (PID: $BACKEND_PID)"
 
