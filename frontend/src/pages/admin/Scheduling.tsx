@@ -311,7 +311,7 @@ export default function SchedulingPage() {
                     key={emp.id}
                     style={{
                       background: editingEmployee?.id === emp.id
-                        ? 'linear-gradient(135deg, #e0e7ff 0%, #c7d2fe 100%)'
+                        ? 'linear-gradient(135deg, #dcfce7 0%, #bbf7d0 100%)'
                         : undefined
                     }}
                   >

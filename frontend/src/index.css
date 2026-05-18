@@ -11,10 +11,10 @@
   --bg-accent: #faf9f6;
 
   /* Rich color palette */
-  --primary: #4f46e5;
-  --primary-light: #6366f1;
-  --primary-dark: #3730a3;
-  --primary-gradient: linear-gradient(135deg, #4f46e5 0%, #7c3aed 50%, #a855f7 100%);
+  --primary: #166534;
+  --primary-light: #15803d;
+  --primary-dark: #14532d;
+  --primary-gradient: linear-gradient(135deg, #166534 0%, #15803d 50%, #16a34a 100%);
 
   --secondary: #0891b2;
   --secondary-light: #22d3ee;
@@ -33,7 +33,7 @@
   --info: #3b82f6;
   --info-light: #dbeafe;
 
-  --text-primary: #1e1b4b;
+  --text-primary: #14532d;
   --text-secondary: #4b5563;
   --text-muted: #9ca3af;
 
