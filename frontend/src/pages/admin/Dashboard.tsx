@@ -147,7 +147,7 @@ export function AdminDashboard() {
                     <p className="text-lg text-gray-400">No imports yet</p>
                   )}
                 </div>
-                <div className="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center">
+                <div className="w-12 h-12 bg-indigo-100 rounded-lg flex items-center justify-center">
                   <svg className="w-6 h-6 text-green-700" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                   </svg>
@@ -222,12 +222,12 @@ export function AdminDashboard() {
                 </div>
               </div>
 
-              <div className="flex items-start gap-3 p-4 bg-green-50 rounded-lg">
-                <div className="w-8 h-8 bg-green-600 text-white rounded-full flex items-center justify-center font-bold shrink-0">3</div>
+              <div className="flex items-start gap-3 p-4 bg-purple-50 rounded-lg">
+                <div className="w-8 h-8 bg-purple-600 text-white rounded-full flex items-center justify-center font-bold shrink-0">3</div>
                 <div>
                   <h3 className="font-medium text-gray-900">Download Payslips</h3>
                   <p className="text-sm text-gray-600 mt-1">Print or download payslips as PNG/PDF for distribution</p>
-                  <Link to="/admin/payroll" className="text-sm text-green-600 hover:underline mt-2 inline-block">
+                  <Link to="/admin/payroll" className="text-sm text-purple-600 hover:underline mt-2 inline-block">
                     View Payslips →
                   </Link>
                 </div>
@@ -261,9 +261,9 @@ export function AdminDashboard() {
 
               <Link
                 to="/admin/employees"
-                className="flex flex-col items-center p-4 bg-green-50 hover:bg-green-100 rounded-lg transition-colors"
+                className="flex flex-col items-center p-4 bg-purple-50 hover:bg-purple-100 rounded-lg transition-colors"
               >
-                <svg className="w-8 h-8 text-green-600 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <svg className="w-8 h-8 text-purple-600 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
                 </svg>
                 <span className="text-sm font-medium text-gray-900">Manage Employees</span>

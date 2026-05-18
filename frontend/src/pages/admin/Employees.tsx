@@ -1807,7 +1807,7 @@ export function EmployeesPage() {
                     <p className="text-sm text-gray-500">Productivity Incentive</p>
                     <p className="font-bold text-lg">{formatCurrency(selectedEmployee.productivity_incentive)}</p>
                   </div>
-                  <div className="p-3 bg-green-50 rounded">
+                  <div className="p-3 bg-purple-50 rounded">
                     <p className="text-sm text-gray-500">Language Incentive</p>
                     <p className="font-bold text-lg">{formatCurrency(selectedEmployee.language_incentive)}</p>
                   </div>

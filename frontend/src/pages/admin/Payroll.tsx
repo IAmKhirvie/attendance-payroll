@@ -1050,7 +1050,7 @@ export function PayrollPage() {
       processing: 'bg-blue-100 text-blue-800',
       review: 'bg-yellow-100 text-yellow-800',
       approved: 'bg-green-100 text-green-800',
-      locked: 'bg-green-100 text-green-800',
+      locked: 'bg-purple-100 text-purple-800',
     };
     return (
       <span className={`px-2 py-1 text-xs font-medium rounded ${colors[status] || 'bg-gray-100'}`}>
@@ -1434,7 +1434,7 @@ export function PayrollPage() {
                         setEditDeductions(prev => ({ ...prev, late_minute_rate_used: icanMinuteRate(dr, newHrs), work_hours_per_day_used: newHrs }));
                         setEditEarnings(prev => ({ ...prev, overtime: computeOtPay(otHours, basicSemi, newHrs) }));
                       }}
-                      className="w-full h-12 text-center text-xl font-bold text-green-600 bg-white border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 appearance-none"
+                      className="w-full h-12 text-center text-xl font-bold text-purple-600 bg-white border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 appearance-none"
                     >
                       <option value={4}>4</option>
                       <option value={6}>6</option>
@@ -1444,7 +1444,7 @@ export function PayrollPage() {
                   </>
                 ) : (
                   <>
-                    <p className="text-2xl font-bold text-green-600">{selectedPayslip.deductions?.work_hours_per_day_used || 8}</p>
+                    <p className="text-2xl font-bold text-purple-600">{selectedPayslip.deductions?.work_hours_per_day_used || 8}</p>
                     <p className="text-xs text-gray-500">Hrs/Day</p>
                   </>
                 )}
@@ -1651,12 +1651,12 @@ export function PayrollPage() {
             const grandLateMins = proratePeriods.reduce((s, p) => s + p.lateMinutes, 0);
             const grandOtHours = proratePeriods.reduce((s, p) => s + p.otHours, 0);
             return (
-              <div className="bg-green-50 border-2 border-green-300 rounded-lg p-4 mb-4">
+              <div className="bg-purple-50 border-2 border-purple-300 rounded-lg p-4 mb-4">
                 <div className="flex justify-between items-center mb-3">
-                  <h4 className="font-bold text-green-900 text-sm">Prorate Calculator — {proratePeriods.length} Periods</h4>
+                  <h4 className="font-bold text-purple-900 text-sm">Prorate Calculator — {proratePeriods.length} Periods</h4>
                   <div className="flex items-center gap-2">
-                    <button onClick={addPeriod} className="text-xs px-2 py-1 bg-green-200 text-green-800 rounded hover:bg-green-300 font-semibold">+ Add Period</button>
-                    <button onClick={() => setShowProrate(false)} className="text-green-400 hover:text-green-600 text-lg font-bold">✕</button>
+                    <button onClick={addPeriod} className="text-xs px-2 py-1 bg-purple-200 text-purple-800 rounded hover:bg-purple-300 font-semibold">+ Add Period</button>
+                    <button onClick={() => setShowProrate(false)} className="text-purple-400 hover:text-purple-600 text-lg font-bold">✕</button>
                   </div>
                 </div>
 
@@ -1665,16 +1665,16 @@ export function PayrollPage() {
                   {proratePeriods.map((period, idx) => {
                     const c = computed[idx];
                     return (
-                      <div key={idx} className="bg-white rounded-lg border border-green-200 overflow-hidden">
+                      <div key={idx} className="bg-white rounded-lg border border-purple-200 overflow-hidden">
                         {/* Period header */}
-                        <div className="bg-green-100 px-3 py-2 flex items-center justify-between">
+                        <div className="bg-purple-100 px-3 py-2 flex items-center justify-between">
                           <div className="flex items-center gap-2">
-                            <span className="w-6 h-6 bg-green-600 text-white rounded text-xs font-bold flex items-center justify-center">{idx + 1}</span>
-                            <span className="text-sm font-bold text-green-900">Period {idx + 1}{idx === 0 ? ' (Original)' : ''}</span>
-                            {c.valid && <span className="text-xs text-green-600">({c.start} to {c.end})</span>}
+                            <span className="w-6 h-6 bg-purple-600 text-white rounded text-xs font-bold flex items-center justify-center">{idx + 1}</span>
+                            <span className="text-sm font-bold text-purple-900">Period {idx + 1}{idx === 0 ? ' (Original)' : ''}</span>
+                            {c.valid && <span className="text-xs text-purple-600">({c.start} to {c.end})</span>}
                           </div>
                           <div className="flex items-center gap-2">
-                            {c.valid && <span className="text-xs bg-green-200 text-green-800 px-2 py-0.5 rounded font-semibold">{c.schedDays} sched. days</span>}
+                            {c.valid && <span className="text-xs bg-purple-200 text-purple-800 px-2 py-0.5 rounded font-semibold">{c.schedDays} sched. days</span>}
                             {idx > 0 && proratePeriods.length > 2 && (
                               <button onClick={() => removePeriod(idx)} className="text-red-400 hover:text-red-600 text-xs font-bold">Remove</button>
                             )}
@@ -1690,7 +1690,7 @@ export function PayrollPage() {
                               <div><label className="text-[10px] text-gray-500 block">Effective date</label>
                                 <input type="date" min={periodStart} max={periodEnd} value={period.startDate}
                                   onChange={(e) => updatePeriod(idx, 'startDate', e.target.value)}
-                                  className="w-full px-1 py-1 border border-green-300 rounded text-xs" /></div>
+                                  className="w-full px-1 py-1 border border-purple-300 rounded text-xs" /></div>
                             )}
                             <div><label className="text-[10px] text-gray-500 block">Monthly Basic</label>
                               <input type="number" step="0.01" value={period.basicSalary || ''} onChange={(e) => updatePeriod(idx, 'basicSalary', parseFloat(e.target.value) || 0)}
@@ -1777,8 +1777,8 @@ export function PayrollPage() {
                           </div>
 
                           {/* Period Net Total */}
-                          <div className="bg-green-100 rounded p-2 border border-green-300">
-                            <div className="flex justify-between text-sm font-bold text-green-900">
+                          <div className="bg-purple-100 rounded p-2 border border-purple-300">
+                            <div className="flex justify-between text-sm font-bold text-purple-900">
                               <span>Period {idx + 1} Net</span>
                               <span>{formatCurrency(Math.round((c.totalEarn - c.totalDed) * 100) / 100)}</span>
                             </div>
@@ -1803,8 +1803,8 @@ export function PayrollPage() {
 
                 {/* Grand Total + Apply */}
                 {allValid && hasAnyRate && (
-                  <div className="mt-3 bg-green-100 p-4 rounded-lg border border-green-300">
-                    <p className="text-sm font-bold text-green-900 mb-3">Combined Totals ({proratePeriods.length} periods)</p>
+                  <div className="mt-3 bg-purple-100 p-4 rounded-lg border border-purple-300">
+                    <p className="text-sm font-bold text-purple-900 mb-3">Combined Totals ({proratePeriods.length} periods)</p>
                     <div className="grid grid-cols-2 gap-4">
                       {/* Earnings column */}
                       <div>
@@ -1831,13 +1831,13 @@ export function PayrollPage() {
                           <div className="flex justify-between font-bold text-red-900 border-t pt-1"><span>Total Deductions</span><span>-{formatCurrency(Math.round(grandTotalDed * 100) / 100)}</span></div>
                         </div>
                         <div className="mt-2 pt-2 border-t">
-                          <p className="text-xs text-green-700">Days Worked: <strong>{grandDaysWorked}</strong> | OT: <strong>{grandOtHours}hrs</strong></p>
+                          <p className="text-xs text-purple-700">Days Worked: <strong>{grandDaysWorked}</strong> | OT: <strong>{grandOtHours}hrs</strong></p>
                         </div>
                       </div>
                     </div>
 
                     {/* Combined Net Summary */}
-                    <div className="mt-3 bg-white rounded-lg border-2 border-green-400 p-4">
+                    <div className="mt-3 bg-white rounded-lg border-2 border-purple-400 p-4">
                       <div className="grid grid-cols-3 gap-4 text-center">
                         <div>
                           <p className="text-[10px] text-gray-500 uppercase font-bold">Total Earnings</p>
@@ -1850,7 +1850,7 @@ export function PayrollPage() {
                         </div>
                         <div>
                           <p className="text-[10px] text-gray-500 uppercase font-bold">Period Net</p>
-                          <p className="text-lg font-bold text-green-800">{formatCurrency(Math.round((grandTotalEarn - grandTotalDed) * 100) / 100)}</p>
+                          <p className="text-lg font-bold text-purple-800">{formatCurrency(Math.round((grandTotalEarn - grandTotalDed) * 100) / 100)}</p>
                         </div>
                       </div>
                     </div>
@@ -1859,7 +1859,7 @@ export function PayrollPage() {
 
                 <button
                   onClick={() => setShowProrate(false)}
-                  className="mt-3 w-full py-2 bg-green-200 text-green-800 text-sm font-bold rounded-lg hover:bg-green-300 transition-colors"
+                  className="mt-3 w-full py-2 bg-purple-200 text-purple-800 text-sm font-bold rounded-lg hover:bg-purple-300 transition-colors"
                 >
                   Switch to Manual Edit
                 </button>
@@ -1926,7 +1926,7 @@ export function PayrollPage() {
                       }
                       setShowProrate(true);
                     }}
-                    className="ml-auto text-xs px-2 py-1 bg-green-100 text-green-700 rounded hover:bg-green-200 transition-colors font-semibold"
+                    className="ml-auto text-xs px-2 py-1 bg-purple-100 text-purple-700 rounded hover:bg-purple-200 transition-colors font-semibold"
                   >
                     {selectedPayslip?.earnings?._prorate_info ? 'Edit Prorate' : 'Prorate'}
                   </button>
@@ -2139,16 +2139,16 @@ export function PayrollPage() {
 
                     {/* Prorate Breakdown (saved with payslip) */}
                     {selectedPayslip.earnings?._prorate_info && Array.isArray(selectedPayslip.earnings._prorate_info) && (
-                      <div className="mt-3 bg-green-50 border border-green-200 rounded-lg p-3">
-                        <p className="text-xs font-bold text-green-800 mb-2">Prorated — {selectedPayslip.earnings._prorate_info.length} Periods</p>
+                      <div className="mt-3 bg-purple-50 border border-purple-200 rounded-lg p-3">
+                        <p className="text-xs font-bold text-purple-800 mb-2">Prorated — {selectedPayslip.earnings._prorate_info.length} Periods</p>
                         <div className="space-y-2">
                           {(selectedPayslip.earnings._prorate_info as any[]).map((p: any, i: number) => {
                             const dateRange = [p.startDate, p.endDate].filter(Boolean).join(' to ');
                             return (
-                              <div key={i} className="bg-white rounded p-2 border border-green-100 text-xs">
+                              <div key={i} className="bg-white rounded p-2 border border-purple-100 text-xs">
                                 <div className="flex justify-between items-center mb-1">
-                                  <span className="font-bold text-green-700">Period {p.period}{dateRange ? `: ${dateRange}` : ''}</span>
-                                  <span className="text-green-500 font-medium">{p.daysWorked}d worked | {p.workHours}hrs/day</span>
+                                  <span className="font-bold text-purple-700">Period {p.period}{dateRange ? `: ${dateRange}` : ''}</span>
+                                  <span className="text-purple-500 font-medium">{p.daysWorked}d worked | {p.workHours}hrs/day</span>
                                 </div>
                                 <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-gray-600">
                                   <div className="flex justify-between"><span>Monthly Basic:</span><span className="font-medium">{formatCurrency(p.monthlyBasic)}</span></div>
@@ -2162,7 +2162,7 @@ export function PayrollPage() {
                                   {(p.daysAbsent || 0) > 0 && <div className="flex justify-between text-red-600"><span>Absent ({p.daysAbsent}d):</span><span className="font-medium">-{formatCurrency(p.absentDeduction)}</span></div>}
                                   {(p.lateMinutes || 0) > 0 && <div className="flex justify-between text-red-600"><span>Late ({p.lateMinutes}m):</span><span className="font-medium">-{formatCurrency(p.lateDeduction)}</span></div>}
                                 </div>
-                                <div className="flex justify-between font-bold text-green-800 border-t border-green-100 pt-1 mt-1">
+                                <div className="flex justify-between font-bold text-purple-800 border-t border-purple-100 pt-1 mt-1">
                                   <span>Period Total:</span><span>{formatCurrency(p.totalEarnings)}</span>
                                 </div>
                               </div>
@@ -2663,7 +2663,7 @@ export function PayrollPage() {
             </div>
           )}
           <div className="card text-center">
-            <p className="text-2xl font-bold text-green-600">{selectedRun.employee_count || 0}</p>
+            <p className="text-2xl font-bold text-purple-600">{selectedRun.employee_count || 0}</p>
             <p className="text-sm text-gray-500">Employees</p>
           </div>
         </div>
@@ -2772,7 +2772,7 @@ export function PayrollPage() {
                       });
                       setShowBulkEdit(!showBulkEdit);
                     }}
-                    className={`text-xs px-3 py-1.5 rounded font-semibold ${showBulkEdit ? 'bg-green-600 text-white' : 'bg-green-100 text-green-700 hover:bg-green-200'}`}
+                    className={`text-xs px-3 py-1.5 rounded font-semibold ${showBulkEdit ? 'bg-purple-600 text-white' : 'bg-purple-100 text-purple-700 hover:bg-purple-200'}`}
                   >
                     {showBulkEdit ? 'Close Editor' : 'Bulk Edit'}
                   </button>
@@ -2803,27 +2803,27 @@ export function PayrollPage() {
                 const renderField = (key: string, label: string, step = '0.01', prefix = '') => (
                   <div className="flex items-center gap-2">
                     <input type="checkbox" checked={bulkFields[key].enabled} onChange={() => toggleField(key)}
-                      className="w-4 h-4 text-green-600 rounded border-gray-300 cursor-pointer" />
+                      className="w-4 h-4 text-purple-600 rounded border-gray-300 cursor-pointer" />
                     <span className={`text-sm w-28 ${bulkFields[key].enabled ? 'text-gray-800 font-medium' : 'text-gray-400'}`}>{label}</span>
                     {prefix && <span className="text-gray-400 text-xs">{prefix}</span>}
                     <input type="number" step={step} value={bulkFields[key].value || ''}
                       disabled={!bulkFields[key].enabled}
                       onChange={(e) => setFieldValue(key, parseFloat(e.target.value) || 0)}
-                      className={`w-28 px-2 py-1 border rounded text-sm text-right ${bulkFields[key].enabled ? 'border-green-300 bg-white' : 'border-gray-200 bg-gray-50 text-gray-400'}`}
+                      className={`w-28 px-2 py-1 border rounded text-sm text-right ${bulkFields[key].enabled ? 'border-purple-300 bg-white' : 'border-gray-200 bg-gray-50 text-gray-400'}`}
                       placeholder="0" />
                   </div>
                 );
 
                 return (
-                  <div className="mb-4 bg-green-50 border-2 border-green-300 rounded-lg p-4">
+                  <div className="mb-4 bg-purple-50 border-2 border-purple-300 rounded-lg p-4">
                     <div className="flex justify-between items-center mb-3">
-                      <h4 className="font-bold text-green-900 text-sm">Bulk Edit — Apply to {selectedPayslipIds.size} payslip{selectedPayslipIds.size !== 1 ? 's' : ''}</h4>
-                      <p className="text-xs text-green-600">Check fields to include, uncheck to skip</p>
+                      <h4 className="font-bold text-purple-900 text-sm">Bulk Edit — Apply to {selectedPayslipIds.size} payslip{selectedPayslipIds.size !== 1 ? 's' : ''}</h4>
+                      <p className="text-xs text-purple-600">Check fields to include, uncheck to skip</p>
                     </div>
 
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                       {/* Column 1: Earnings */}
-                      <div className="bg-white p-3 rounded border border-green-200">
+                      <div className="bg-white p-3 rounded border border-purple-200">
                         <p className="text-xs font-bold text-green-800 uppercase mb-2">Earnings (Monthly)</p>
                         <div className="space-y-2">
                           {renderField('basicSalary', 'Basic Salary', '0.01', '₱')}
@@ -2841,16 +2841,16 @@ export function PayrollPage() {
                       </div>
 
                       {/* Column 2: Attendance */}
-                      <div className="bg-white p-3 rounded border border-green-200">
+                      <div className="bg-white p-3 rounded border border-purple-200">
                         <p className="text-xs font-bold text-blue-800 uppercase mb-2">Attendance / Schedule</p>
                         <div className="space-y-2">
                           <div className="flex items-center gap-2">
                             <input type="checkbox" checked={bulkFields.workHours.enabled} onChange={() => toggleField('workHours')}
-                              className="w-4 h-4 text-green-600 rounded border-gray-300 cursor-pointer" />
+                              className="w-4 h-4 text-purple-600 rounded border-gray-300 cursor-pointer" />
                             <span className={`text-sm w-28 ${bulkFields.workHours.enabled ? 'text-gray-800 font-medium' : 'text-gray-400'}`}>Work Hrs/Day</span>
                             <select value={bulkFields.workHours.value} disabled={!bulkFields.workHours.enabled}
                               onChange={(e) => setFieldValue('workHours', parseInt(e.target.value))}
-                              className={`w-28 px-2 py-1 border rounded text-sm ${bulkFields.workHours.enabled ? 'border-green-300 bg-white' : 'border-gray-200 bg-gray-50 text-gray-400'}`}>
+                              className={`w-28 px-2 py-1 border rounded text-sm ${bulkFields.workHours.enabled ? 'border-purple-300 bg-white' : 'border-gray-200 bg-gray-50 text-gray-400'}`}>
                               <option value={4}>4 hrs</option><option value={6}>6 hrs</option><option value={8}>8 hrs</option>
                             </select>
                           </div>
@@ -2862,7 +2862,7 @@ export function PayrollPage() {
                       </div>
 
                       {/* Column 3: Deductions */}
-                      <div className="bg-white p-3 rounded border border-green-200">
+                      <div className="bg-white p-3 rounded border border-purple-200">
                         <p className="text-xs font-bold text-red-800 uppercase mb-2">Deductions</p>
                         <div className="space-y-2">
                           {renderField('tax', 'Tax', '0.01', '₱')}
@@ -2990,11 +2990,11 @@ export function PayrollPage() {
                           if (selectedRun) loadPayslips(selectedRun.id);
                           setShowBulkEdit(false);
                         }}
-                        className="px-5 py-2 bg-green-600 text-white text-sm font-bold rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                        className="px-5 py-2 bg-purple-600 text-white text-sm font-bold rounded-lg hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                       >
                         {bulkProcessing ? `Processing ${selectedPayslipIds.size} payslips...` : `Apply to ${selectedPayslipIds.size} Payslip${selectedPayslipIds.size !== 1 ? 's' : ''}`}
                       </button>
-                      <span className="text-xs text-green-600">{enabledCount} field{enabledCount !== 1 ? 's' : ''} selected</span>
+                      <span className="text-xs text-purple-600">{enabledCount} field{enabledCount !== 1 ? 's' : ''} selected</span>
                     </div>
                   </div>
                 );
@@ -3558,7 +3558,7 @@ export function PayrollPage() {
                 <p className="text-sm text-gray-500">Total 13th Month Pay</p>
               </div>
               <div className="card text-center">
-                <p className="text-2xl font-bold text-green-600">
+                <p className="text-2xl font-bold text-purple-600">
                   {thirteenthMonthRecords.filter(r => r.is_released).length} / {thirteenthMonthRecords.length}
                 </p>
                 <p className="text-sm text-gray-500">Released</p>
@@ -4100,7 +4100,7 @@ export function PayrollPage() {
                       <div className="font-medium">{dayjs(run.period_start).format('MMM D')} - {dayjs(run.period_end).format('MMM D, YYYY')}</div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
-                      <span className={`px-2 py-1 text-xs font-medium rounded ${run.cutoff === 1 ? 'bg-blue-100 text-blue-800' : 'bg-green-100 text-green-800'}`}>
+                      <span className={`px-2 py-1 text-xs font-medium rounded ${run.cutoff === 1 ? 'bg-blue-100 text-blue-800' : 'bg-purple-100 text-purple-800'}`}>
                         {run.cutoff === 1 ? '1st' : '2nd'}
                       </span>
                     </td>
