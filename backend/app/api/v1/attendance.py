@@ -373,15 +373,8 @@ async def preview_employees_from_file(
         existing_employees = []
 
         for (name, bio_id), emp_data in unique_employees.items():
-            # Check by biometric ID first
-            existing = None
-            if bio_id:
-                existing = db.query(Employee).filter(Employee.biometric_id == bio_id).first()
-
-            # Check by name if not found
-            if not existing:
-                from app.services.attendance_import import find_employee_by_name
-                existing = find_employee_by_name(db, name)
+            from app.services.attendance_import import find_employee_for_import
+            existing = find_employee_for_import(db, name, bio_id)
 
             if existing:
                 existing_employees.append({

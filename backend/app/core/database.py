@@ -4,7 +4,7 @@ Database Configuration
 SQLAlchemy database setup and session management.
 """
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from .config import settings
@@ -43,6 +43,20 @@ def init_db():
     """Initialize database tables."""
     from app.models import user, employee, attendance, payroll, audit
     Base.metadata.create_all(bind=engine)
+    ensure_schema_updates()
+
+
+def ensure_schema_updates():
+    """Apply small additive schema updates for existing local databases."""
+    inspector = inspect(engine)
+    table_names = inspector.get_table_names()
+    if "employees" not in table_names:
+        return
+
+    employee_columns = {column["name"] for column in inspector.get_columns("employees")}
+    if "birth_date" not in employee_columns:
+        with engine.begin() as connection:
+            connection.execute(text("ALTER TABLE employees ADD COLUMN birth_date DATE"))
 
 
 def seed_contribution_tables():

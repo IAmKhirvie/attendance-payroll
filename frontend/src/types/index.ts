@@ -55,6 +55,7 @@ export interface Employee {
   full_name?: string;
   email?: string;
   phone?: string;
+  birth_date?: string;
   hire_date: string;
   end_date?: string;  // Contract end date or resignation date
   position?: string;

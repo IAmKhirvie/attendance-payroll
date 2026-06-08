@@ -48,6 +48,7 @@ class EmployeeBase(BaseModel):
     middle_name: Optional[str] = Field(None, max_length=100)
     email: Optional[EmailStr] = None
     phone: Optional[str] = Field(None, max_length=100)
+    birth_date: Optional[date] = None
 
 
 class EmployeeCreate(EmployeeBase):
@@ -118,6 +119,7 @@ class EmployeeUpdate(BaseModel):
     middle_name: Optional[str] = Field(None, max_length=100)
     email: Optional[EmailStr] = None
     phone: Optional[str] = Field(None, max_length=100)
+    birth_date: Optional[date] = None
     department_id: Optional[int] = None
     position: Optional[str] = None
     employment_type: Optional[str] = None
@@ -185,6 +187,7 @@ class EmployeeResponse(EmployeeBase):
     department: Optional[DepartmentResponse] = None
     position: Optional[str]
     employment_type: str
+    birth_date: Optional[date] = None
     hire_date: Optional[date]
     end_date: Optional[date] = None  # Contract end date or resignation date
     shift_id: Optional[int]

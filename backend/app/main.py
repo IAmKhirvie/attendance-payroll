@@ -13,7 +13,7 @@ import logging
 import os
 
 from app.core.config import settings
-from app.core.database import engine, Base, SessionLocal, seed_contribution_tables
+from app.core.database import engine, Base, SessionLocal, seed_contribution_tables, ensure_schema_updates
 from app.api.v1 import api_router
 from app.models.user import User, Role, UserStatus
 from app.models.settings import SystemSettings
@@ -37,6 +37,7 @@ async def lifespan(app: FastAPI):
 
     # Create database tables
     Base.metadata.create_all(bind=engine)
+    ensure_schema_updates()
     logger.info("Database tables created")
 
     # Create default admin user if none exists

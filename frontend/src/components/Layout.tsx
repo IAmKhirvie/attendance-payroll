@@ -122,6 +122,16 @@ export function Layout() {
   const navigate = useNavigate();
 
   const navItems = user?.role === 'admin' ? adminNavItems : employeeNavItems;
+  const workflowStep = location.pathname.startsWith('/admin/attendance')
+    ? 1
+    : location.pathname.startsWith('/admin/payroll')
+    ? 2
+    : 0;
+  const workflowItems = [
+    { step: 1, label: 'Import Attendance', href: '/admin/attendance' },
+    { step: 2, label: 'Review Payroll', href: '/admin/payroll' },
+    { step: 3, label: 'Print Payslips', href: '/admin/payroll' },
+  ];
 
   // Check for employees with passed end dates (admin only)
   useEffect(() => {
@@ -164,39 +174,21 @@ export function Layout() {
         />
       )}
 
-      {/* Sidebar - Maximalist Light Design */}
+      {/* Sidebar */}
       <aside
-        className={`fixed inset-y-0 left-0 z-30 w-72 transform transition-all duration-300 ease-in-out lg:translate-x-0 ${
+        className={`fixed inset-y-0 left-0 z-30 w-64 transform border-r border-gray-200 bg-white transition-all duration-300 ease-in-out lg:translate-x-0 ${
           sidebarOpen ? 'translate-x-0' : '-translate-x-full'
         }`}
-        style={{
-          background: 'linear-gradient(180deg, #ffffff 0%, #faf9f6 100%)',
-          borderRight: '2px solid var(--border)',
-          boxShadow: 'var(--shadow-xl)',
-        }}
       >
         <div className="flex flex-col h-screen overflow-hidden">
-          {/* Logo/Brand - Premium Header */}
-          <div
-            className="flex items-center justify-between px-6 py-5"
-            style={{
-              background: 'linear-gradient(135deg, #166534 0%, #15803d 50%, #16a34a 100%)',
-            }}
-          >
-            <div className="flex items-center gap-4">
-              <div
-                className="h-12 w-12 rounded-xl flex items-center justify-center shadow-lg"
-                style={{
-                  background: 'rgba(255, 255, 255, 0.2)',
-                  backdropFilter: 'blur(10px)',
-                  border: '2px solid rgba(255, 255, 255, 0.3)',
-                }}
-              >
+          <div className="flex items-center justify-between border-b border-gray-200 px-4 py-5">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-md border border-teal-100 bg-teal-50">
                 <img src="/logo.png" alt="ICAN" className="h-8 w-8 object-contain" />
               </div>
               <div>
-                <span className="text-xl font-bold text-white tracking-tight">ICAN</span>
-                <p className="text-xs text-white/80 font-medium">Attendance & Payroll</p>
+                <span className="text-xl font-bold tracking-tight text-gray-900">ICAN</span>
+                <p className="text-xs font-medium text-gray-500">Attendance & Payroll</p>
               </div>
             </div>
             <button
@@ -207,14 +199,8 @@ export function Layout() {
             </button>
           </div>
 
-          {/* Decorative divider */}
-          <div className="h-1" style={{ background: 'linear-gradient(90deg, #166534, #16a34a, #166534)' }}></div>
-
           {/* Navigation */}
-          <nav className="flex-1 px-4 py-6 space-y-2 overflow-y-auto">
-            <p className="px-4 text-xs font-bold uppercase tracking-widest text-gray-400 mb-4">
-              Navigation
-            </p>
+          <nav className="flex-1 space-y-2 overflow-y-auto px-2 py-5">
             {navItems.map((item) => {
               const isActive = location.pathname === item.href;
               const Icon = item.icon;
@@ -232,45 +218,25 @@ export function Layout() {
             })}
           </nav>
 
-          {/* User info and logout - Premium footer */}
-          <div
-            className="p-5"
-            style={{
-              borderTop: '2px solid var(--border)',
-              background: 'linear-gradient(180deg, #faf9f6 0%, #f0efe9 100%)',
-            }}
-          >
+          <div className="border-t border-gray-200 bg-gray-50 p-4">
             <div className="flex items-center mb-4">
-              <div className="avatar-ring">
-                <div
-                  className="w-11 h-11 rounded-full flex items-center justify-center"
-                  style={{ background: 'linear-gradient(135deg, #166534 0%, #15803d 100%)' }}
-                >
-                  <span className="text-white font-bold text-sm">
-                    {user?.first_name?.charAt(0)}{user?.last_name?.charAt(0)}
-                  </span>
-                </div>
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-emerald-50">
+                <span className="text-sm font-bold text-emerald-800">
+                  {user?.first_name?.charAt(0)}{user?.last_name?.charAt(0)}
+                </span>
               </div>
               <div className="ml-3">
-                <p className="text-sm font-bold" style={{ color: 'var(--text-primary)' }}>
+                <p className="text-sm font-bold text-gray-800">
                   {user?.first_name} {user?.last_name}
                 </p>
-                <p
-                  className="text-xs font-semibold uppercase tracking-wider"
-                  style={{ color: 'var(--primary)' }}
-                >
+                <p className="text-xs capitalize text-gray-500">
                   {user?.role}
                 </p>
               </div>
             </div>
             <button
               onClick={handleLogout}
-              className="w-full flex items-center px-4 py-3 rounded-xl font-semibold transition-all duration-300"
-              style={{
-                background: 'linear-gradient(135deg, #fee2e2 0%, #fecaca 100%)',
-                color: '#991b1b',
-                border: '2px solid #f87171',
-              }}
+              className="flex w-full items-center rounded-md border border-red-200 bg-white px-4 py-3 font-semibold text-red-700 transition-colors hover:bg-red-50"
             >
               <LogoutIcon />
               Logout
@@ -280,38 +246,19 @@ export function Layout() {
       </aside>
 
       {/* Main content - offset for fixed sidebar on desktop */}
-      <div className="flex-1 flex flex-col min-h-screen lg:ml-72">
-        {/* Top bar - Maximalist Header */}
-        <header
-          className="h-20 flex items-center justify-between px-6 lg:px-10 sticky top-0 z-40"
-          style={{
-            background: '#ffffff',
-            borderBottom: '2px solid var(--border)',
-            boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)',
-          }}
-        >
+      <div className="flex-1 flex flex-col min-h-screen lg:ml-64">
+        <header className="sticky top-0 z-40 flex h-16 items-center justify-between border-b border-gray-200 bg-white px-6">
           <div className="flex items-center">
             <button
               onClick={() => setSidebarOpen(true)}
-              className="lg:hidden p-3 rounded-xl transition-all duration-300"
-              style={{
-                background: 'var(--bg-accent)',
-                border: '2px solid var(--border)',
-                color: 'var(--text-primary)',
-              }}
+              className="rounded-md border border-gray-200 p-2 text-gray-700 transition-colors hover:bg-gray-50 lg:hidden"
             >
               <MenuIcon />
             </button>
             <div className="ml-4 lg:ml-0">
-              <h1
-                className="text-2xl font-bold"
-                style={{ color: 'var(--text-primary)' }}
-              >
+              <h1 className="text-xl font-bold text-gray-900">
                 {navItems.find((item) => item.href === location.pathname)?.name || 'Dashboard'}
               </h1>
-              <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
-                Welcome back, {user?.first_name}
-              </p>
             </div>
           </div>
 
@@ -319,11 +266,7 @@ export function Layout() {
           {isUploading && (
             <Link
               to="/admin/attendance"
-              className="flex items-center gap-3 px-5 py-3 rounded-xl text-sm font-bold text-white transition-all uppercase tracking-wide"
-              style={{
-                background: 'linear-gradient(135deg, #166534 0%, #15803d 100%)',
-                boxShadow: 'var(--shadow-md), 0 4px 20px rgba(79, 70, 229, 0.3)',
-              }}
+              className="flex items-center gap-2 rounded-md bg-emerald-700 px-4 py-2 text-sm font-semibold text-white"
             >
               <div className="animate-spin rounded-full h-5 w-5 border-3 border-white border-t-transparent"></div>
               <span>{uploadProgress || 'Importing...'}</span>
@@ -334,11 +277,7 @@ export function Layout() {
           {!isUploading && importResult && location.pathname !== '/admin/attendance' && (
             <Link
               to="/admin/attendance"
-              className="flex items-center gap-3 px-5 py-3 rounded-xl text-sm font-bold text-white transition-all uppercase tracking-wide"
-              style={{
-                background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
-                boxShadow: 'var(--shadow-md), 0 4px 20px rgba(16, 185, 129, 0.3)',
-              }}
+              className="flex items-center gap-2 rounded-md bg-emerald-600 px-4 py-2 text-sm font-semibold text-white"
             >
               <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
@@ -348,13 +287,47 @@ export function Layout() {
           )}
         </header>
 
+        {user?.role === 'admin' && (
+          <div className="border-b border-gray-200 bg-white px-6">
+            <nav className="flex h-14 items-center gap-4 overflow-x-auto text-sm font-medium text-gray-600">
+              {workflowItems.map((item, index) => {
+                const isActive = workflowStep === item.step;
+                return (
+                  <div key={item.step} className="flex items-center gap-4">
+                    <Link
+                      to={item.href}
+                      className={`flex items-center gap-2 rounded-lg px-3 py-2 transition-colors ${
+                        isActive
+                          ? 'border border-primary-200 bg-primary-50 text-primary-800'
+                          : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+                      }`}
+                    >
+                      <span
+                        className={`flex h-7 w-7 items-center justify-center rounded-full text-sm font-bold ${
+                          isActive ? 'bg-primary-700 text-white' : 'bg-gray-100 text-gray-600'
+                        }`}
+                      >
+                        {item.step}
+                      </span>
+                      <span className="whitespace-nowrap">{item.label}</span>
+                    </Link>
+                    {index < workflowItems.length - 1 && (
+                      <span className="text-gray-300">/</span>
+                    )}
+                  </div>
+                );
+              })}
+            </nav>
+          </div>
+        )}
+
         {/* Page content with right sidebar */}
         <div className="flex-1 flex">
-          <main className="flex-1 p-6 lg:p-10 overflow-auto">
+          <main className="flex-1 overflow-auto p-4 lg:p-5">
             <Outlet />
           </main>
           {/* Right sidebar - hidden on mobile, sticky */}
-          <div className="hidden xl:block p-4 pr-6 sticky top-20 self-start h-fit">
+          <div className="sticky top-16 hidden h-fit w-72 shrink-0 self-start p-3 pl-0 xl:block">
             <RightSidebar />
           </div>
         </div>

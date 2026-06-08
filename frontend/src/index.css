@@ -520,6 +520,182 @@ select.form-input {
   @apply relative;
 }
 
+/* Screenshot-matched clean admin UI overrides */
+:root {
+  --bg-primary: #f3f6fa;
+  --bg-secondary: #ffffff;
+  --bg-card: #ffffff;
+  --bg-hover: #eef7f4;
+  --bg-accent: #f8fafc;
+  --primary: #2f6f63;
+  --primary-light: #3f8376;
+  --primary-dark: #24584f;
+  --primary-gradient: linear-gradient(135deg, #2f6f63 0%, #2f6f63 100%);
+  --text-primary: #1f2937;
+  --text-secondary: #4b5563;
+  --text-muted: #8b95a5;
+  --border: #dfe5ec;
+  --border-decorative: #dfe5ec;
+  --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.05);
+  --shadow-md: 0 2px 6px rgba(15, 23, 42, 0.07);
+  --shadow-lg: 0 2px 8px rgba(15, 23, 42, 0.08);
+  --shadow-xl: 0 8px 24px rgba(15, 23, 42, 0.10);
+}
+
+body {
+  background: var(--bg-primary);
+  background-image: none;
+  color: var(--text-primary);
+}
+
+.card,
+.card-premium,
+.stats-card {
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  box-shadow: var(--shadow-sm);
+  padding: 1.25rem;
+  overflow: hidden;
+}
+
+.card::before,
+.card-premium::before,
+.stats-card::before {
+  display: none;
+}
+
+.form-input {
+  min-height: 2.35rem;
+  border-radius: 6px;
+  border: 1px solid #d7dee8;
+  background: #ffffff;
+  padding: 0.5rem 0.75rem;
+  color: #263142;
+  font-weight: 400;
+  box-shadow: none;
+}
+
+.form-input:focus {
+  border-color: #2f6f63;
+  box-shadow: 0 0 0 3px rgba(47, 111, 99, 0.12);
+  background: #ffffff;
+}
+
+.form-label {
+  margin-bottom: 0.35rem;
+  color: #657083;
+  font-size: 0.85rem;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.btn {
+  border-radius: 6px;
+  padding: 0.55rem 0.95rem;
+  font-size: 0.9rem;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: none;
+  box-shadow: none;
+}
+
+.btn::before {
+  display: none;
+}
+
+.btn-primary {
+  background: #2f6f63;
+  box-shadow: none;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: #275e54;
+  transform: none;
+  box-shadow: none;
+}
+
+.btn-secondary {
+  background: #ffffff;
+  border: 1px solid #d7dee8;
+  color: #344054;
+  box-shadow: none;
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background: #f8fafc;
+  border-color: #cbd5e1;
+  color: #1f2937;
+  transform: none;
+  box-shadow: none;
+}
+
+.sidebar-link {
+  border-radius: 6px;
+  padding: 0.65rem 0.85rem;
+  color: #5f6b7a;
+  font-size: 0.95rem;
+  font-weight: 700;
+  transform: none;
+}
+
+.sidebar-link:hover {
+  background: #eef7f4;
+  color: #2f6f63;
+  transform: none;
+}
+
+.sidebar-link.active {
+  background: #e7f3ef;
+  color: #2f6f63;
+  box-shadow: inset 4px 0 0 #2f6f63;
+}
+
+.sidebar-link.active::before {
+  display: none;
+}
+
+table {
+  border-radius: 0;
+  border: 0;
+  box-shadow: none;
+}
+
+table thead {
+  background: #f8fafc !important;
+  border-bottom: 1px solid var(--border);
+}
+
+table thead th {
+  padding: 0.85rem 1rem;
+  color: #657083 !important;
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+}
+
+table tbody tr {
+  border-bottom: 1px solid #e5eaf0;
+}
+
+table tbody tr:hover {
+  filter: none;
+  transform: none;
+  background: #f8fafc !important;
+}
+
+table tbody td {
+  padding: 0.8rem 1rem;
+  color: #263142 !important;
+  font-weight: 500;
+}
+
+.modal-overlay {
+  background: rgba(17, 24, 39, 0.5);
+  backdrop-filter: none;
+}
+
 .input-group-icon {
   @apply absolute left-4 top-1/2 -translate-y-1/2;
   color: var(--primary);
@@ -630,6 +806,55 @@ a.link:hover {
   @apply h-full rounded-full;
   background: var(--primary-gradient);
   transition: width 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Dashboard chart motion */
+.payroll-bar {
+  transform-origin: bottom;
+  animation: payroll-bar-grow 0.72s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.payroll-pie {
+  animation: payroll-pie-reveal 0.8s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.payroll-fade-in {
+  animation: payroll-fade-in 0.48s ease-out both;
+}
+
+@keyframes payroll-bar-grow {
+  from {
+    opacity: 0;
+    transform: scaleY(0.05);
+  }
+  to {
+    opacity: 1;
+    transform: scaleY(1);
+  }
+}
+
+@keyframes payroll-pie-reveal {
+  from {
+    opacity: 0;
+    transform: rotate(-18deg) scale(0.82);
+    filter: saturate(0.6);
+  }
+  to {
+    opacity: 1;
+    transform: rotate(0deg) scale(1);
+    filter: saturate(1);
+  }
+}
+
+@keyframes payroll-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 /* Avatar */

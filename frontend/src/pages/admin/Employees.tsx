@@ -1,9 +1,58 @@
-import { useState, useEffect, useCallback, memo } from 'react';
+import { useState, useEffect, useCallback, memo, useRef } from 'react';
 import { employeesApi } from '../../api/client';
 import type { Employee, Department, EmployeeStatus } from '../../types';
 import api from '../../api/client';
 import { CreatableSelect } from '../../components/CreatableSelect';
 import { formatTime12Hour } from '../../utils/format';
+import { findNotionEmployeeAsset, getNotionEmployeeBirthday, getNotionEmployeePhotoUrl } from '../../data/notionEmployeeAssets';
+
+interface EmployeePhotoData {
+  url: string;
+  x: number;
+  y: number;
+  scale: number;
+}
+
+const defaultEmployeePhoto: EmployeePhotoData = {
+  url: '',
+  x: 0,
+  y: 0,
+  scale: 1,
+};
+
+const employeePhotoKey = (employeeNo: string) => `ican_employee_photo_${employeeNo}`;
+
+const getStoredEmployeePhoto = (employeeNo?: string | null): EmployeePhotoData => {
+  if (!employeeNo) return defaultEmployeePhoto;
+
+  try {
+    const stored = localStorage.getItem(employeePhotoKey(employeeNo));
+    if (!stored) return defaultEmployeePhoto;
+    const parsed = JSON.parse(stored);
+    return {
+      url: typeof parsed.url === 'string' ? parsed.url : '',
+      x: Number.isFinite(Number(parsed.x)) ? Number(parsed.x) : 0,
+      y: Number.isFinite(Number(parsed.y)) ? Number(parsed.y) : 0,
+      scale: Number.isFinite(Number(parsed.scale)) ? Number(parsed.scale) : 1,
+    };
+  } catch {
+    return defaultEmployeePhoto;
+  }
+};
+
+const storeEmployeePhoto = (employeeNo: string, photo: EmployeePhotoData) => {
+  if (!employeeNo) return;
+
+  try {
+    if (!photo.url) {
+      localStorage.removeItem(employeePhotoKey(employeeNo));
+      return;
+    }
+    localStorage.setItem(employeePhotoKey(employeeNo), JSON.stringify(photo));
+  } catch {
+    // Local profile photos are optional UI data.
+  }
+};
 
 // Helper function to convert 12-hour time to 24-hour format (specific signature for TimePicker)
 const convertTo24Hour = (hour: string, minute: string, ampm: string): string => {
@@ -171,11 +220,13 @@ const TimePicker12Hour = ({
 
 interface EmployeeFormData {
   employee_no: string;
+  photo: EmployeePhotoData;
   first_name: string;
   middle_name: string;
   last_name: string;
   email: string;
   phone: string;
+  birth_date: string;
   department_id: string;
   position: string;
   employment_type: string;
@@ -212,11 +263,13 @@ interface EmployeeFormData {
 
 const emptyForm: EmployeeFormData = {
   employee_no: '',
+  photo: defaultEmployeePhoto,
   first_name: '',
   middle_name: '',
   last_name: '',
   email: '',
   phone: '',
+  birth_date: '',
   department_id: '',
   position: '',
   employment_type: 'Fixed Term - Full Time',
@@ -351,144 +404,307 @@ const EmployeeForm = memo(function EmployeeForm({
     }));
   }, [setFormData, formData.daily_rate]);
 
+  const initials = `${formData.first_name?.[0] || ''}${formData.last_name?.[0] || ''}`.toUpperCase() || 'IC';
+  const [photoEditorOpen, setPhotoEditorOpen] = useState(false);
+  const [photoDraft, setPhotoDraft] = useState<EmployeePhotoData>(formData.photo || defaultEmployeePhoto);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const dragStartRef = useRef<{ pointerId: number; startX: number; startY: number; photoX: number; photoY: number } | null>(null);
+
+  useEffect(() => {
+    setPhotoDraft(formData.photo || defaultEmployeePhoto);
+  }, [formData.photo]);
+
+  const photoTransform = (photo: EmployeePhotoData) => ({
+    transform: `translate(${photo.x}px, ${photo.y}px) scale(${photo.scale})`,
+  });
+
+  const handlePhotoFile = useCallback((file?: File) => {
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      const url = typeof reader.result === 'string' ? reader.result : '';
+      if (!url) return;
+      setPhotoDraft({ url, x: 0, y: 0, scale: 1 });
+    };
+    reader.readAsDataURL(file);
+  }, []);
+
+  const savePhotoDraft = useCallback(() => {
+    setFormData(prev => ({ ...prev, photo: photoDraft }));
+    storeEmployeePhoto(formData.employee_no, photoDraft);
+    setPhotoEditorOpen(false);
+  }, [formData.employee_no, photoDraft, setFormData]);
+
+  const removePhoto = useCallback(() => {
+    setPhotoDraft(defaultEmployeePhoto);
+    setFormData(prev => ({ ...prev, photo: defaultEmployeePhoto }));
+    storeEmployeePhoto(formData.employee_no, defaultEmployeePhoto);
+    setPhotoEditorOpen(false);
+  }, [formData.employee_no, setFormData]);
+
   return (
-    <form onSubmit={onSubmit} className="space-y-4">
+    <form onSubmit={onSubmit} className="flex h-[calc(100vh-8.25rem)] min-h-0 flex-col">
       {error && (
-        <div className="p-3 bg-red-50 text-red-700 rounded text-sm">{error}</div>
+        <div className="mb-3 rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>
       )}
 
-      {/* Row 1: Employee No, Biometric ID, First Name, Middle Name */}
-      <div className="grid grid-cols-4 gap-4">
-        <div>
-          <label className="form-label">Employee No *</label>
-          <input
-            type="text"
-            value={formData.employee_no}
-            onChange={(e) => handleFieldChange('employee_no', e.target.value)}
-            className="form-input"
-            required
-          />
-        </div>
-        <div>
-          <label className="form-label">Biometric ID</label>
-          <input
-            type="text"
-            value={formData.biometric_id}
-            onChange={(e) => handleFieldChange('biometric_id', e.target.value)}
-            className="form-input"
-          />
-        </div>
-        <div>
-          <label className="form-label">First Name *</label>
-          <input
-            type="text"
-            value={formData.first_name}
-            onChange={(e) => handleFieldChange('first_name', e.target.value)}
-            className="form-input"
-            required
-          />
-        </div>
-        <div>
-          <label className="form-label">Middle Name</label>
-          <input
-            type="text"
-            value={formData.middle_name}
-            onChange={(e) => handleFieldChange('middle_name', e.target.value)}
-            className="form-input"
-          />
-        </div>
-      </div>
+      <div className="min-h-0 flex-1 overflow-hidden rounded-md border border-gray-200">
+        <div className="grid h-full min-h-0 grid-cols-1 xl:grid-cols-[20%_1fr]">
+          <aside className="min-w-[220px] border-r border-gray-200 bg-white p-2.5">
+            <div className="space-y-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setPhotoDraft(formData.photo || defaultEmployeePhoto);
+                  setPhotoEditorOpen(true);
+                }}
+                className="group relative flex aspect-square w-full items-center justify-center overflow-hidden rounded-lg border border-gray-200 bg-gray-50"
+                aria-label="Edit employee profile photo"
+              >
+                {formData.photo?.url ? (
+                  <img
+                    src={formData.photo.url}
+                    alt=""
+                    className="h-full w-full object-cover"
+                    style={photoTransform(formData.photo)}
+                  />
+                ) : (
+                  <span className="text-3xl font-semibold text-primary-700">{initials}</span>
+                )}
+                <span className="absolute inset-x-0 bottom-0 bg-black/45 px-2 py-1 text-[11px] font-medium text-white opacity-0 transition-opacity group-hover:opacity-100">
+                  Edit photo
+                </span>
+              </button>
+              <div className="grid grid-cols-1 gap-2">
+                <div>
+                  <label className="form-label">First Name *</label>
+                  <input type="text" value={formData.first_name} onChange={(e) => handleFieldChange('first_name', e.target.value)} className="form-input" required />
+                </div>
+                <div>
+                  <label className="form-label">Middle Name</label>
+                  <input type="text" value={formData.middle_name} onChange={(e) => handleFieldChange('middle_name', e.target.value)} className="form-input" />
+                </div>
+                <div>
+                  <label className="form-label">Last Name *</label>
+                  <input type="text" value={formData.last_name} onChange={(e) => handleFieldChange('last_name', e.target.value)} className="form-input" required />
+                </div>
+                <div>
+                  <label className="form-label">Employee No *</label>
+                  <input type="text" value={formData.employee_no} onChange={(e) => handleFieldChange('employee_no', e.target.value)} className="form-input" required />
+                </div>
+                <div>
+                  <label className="form-label">Biometric ID</label>
+                  <input type="text" value={formData.biometric_id} onChange={(e) => handleFieldChange('biometric_id', e.target.value)} className="form-input" />
+                </div>
+                <div>
+                  <label className="form-label">Email</label>
+                  <input type="email" value={formData.email} onChange={(e) => handleFieldChange('email', e.target.value)} className="form-input" />
+                </div>
+              </div>
+            </div>
+          </aside>
 
-      {/* Row 2: Last Name, Email, Phone, Department */}
-      <div className="grid grid-cols-4 gap-4">
-        <div>
-          <label className="form-label">Last Name *</label>
-          <input
-            type="text"
-            value={formData.last_name}
-            onChange={(e) => handleFieldChange('last_name', e.target.value)}
-            className="form-input"
-            required
-          />
-        </div>
-        <div>
-          <label className="form-label">Email</label>
-          <input
-            type="email"
-            value={formData.email}
-            onChange={(e) => handleFieldChange('email', e.target.value)}
-            className="form-input"
-          />
-        </div>
-        <div>
-          <label className="form-label">Phone</label>
-          <input
-            type="text"
-            value={formData.phone}
-            onChange={(e) => handleFieldChange('phone', e.target.value)}
-            className="form-input"
-          />
-        </div>
-        <div>
-          <label className="form-label">Department</label>
-          <CreatableSelect
-            options={departments.map((dept) => ({ id: dept.id, name: dept.name }))}
-            value={formData.department_id}
-            onChange={(value) => handleFieldChange('department_id', value)}
-            onCreateNew={onCreateDepartment}
-            placeholder="Select..."
-          />
-        </div>
-      </div>
+          {photoEditorOpen && (
+            <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4">
+              <div className="w-full max-w-md overflow-hidden rounded-lg bg-white shadow-xl">
+                <div className="flex items-center justify-between border-b border-gray-200 px-4 py-3">
+                  <h3 className="text-base font-semibold text-gray-900">Profile Photo</h3>
+                  <button
+                    type="button"
+                    onClick={() => setPhotoEditorOpen(false)}
+                    className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700"
+                    aria-label="Close photo editor"
+                  >
+                    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
 
-      {/* Row 3: Position, Employment Type, Hire Date, End Date */}
-      <div className="grid grid-cols-4 gap-4">
-        <div>
-          <label className="form-label">Position</label>
-          <input
-            type="text"
-            value={formData.position}
-            onChange={(e) => handleFieldChange('position', e.target.value)}
-            className="form-input"
-          />
-        </div>
-        <div>
-          <label className="form-label">Employment Type</label>
-          <select
-            value={formData.employment_type}
-            onChange={(e) => handleFieldChange('employment_type', e.target.value)}
-            className="form-input"
-          >
-            <option value="Regular - Full Time">Regular - Full Time</option>
-            <option value="Regular - Part Time">Regular - Part Time</option>
-            <option value="Fixed Term - Full Time">Fixed Term - Full Time</option>
-            <option value="Fixed Term - Part Time">Fixed Term - Part Time</option>
-          </select>
-        </div>
-        <div>
-          <label className="form-label">Hire Date</label>
-          <input
-            type="date"
-            value={formData.hire_date}
-            onChange={(e) => handleFieldChange('hire_date', e.target.value)}
-            className="form-input"
-          />
-        </div>
-        <div>
-          <label className="form-label">End Date</label>
-          <input
-            type="date"
-            value={formData.end_date}
-            onChange={(e) => handleFieldChange('end_date', e.target.value)}
-            className="form-input"
-          />
-        </div>
-      </div>
+                <div className="space-y-4 p-4">
+                  <div
+                    className="mx-auto flex h-72 w-72 touch-none items-center justify-center overflow-hidden rounded-lg border border-gray-200 bg-gray-50"
+                    onPointerDown={(e) => {
+                      if (!photoDraft.url) return;
+                      dragStartRef.current = {
+                        pointerId: e.pointerId,
+                        startX: e.clientX,
+                        startY: e.clientY,
+                        photoX: photoDraft.x,
+                        photoY: photoDraft.y,
+                      };
+                      e.currentTarget.setPointerCapture(e.pointerId);
+                    }}
+                    onPointerMove={(e) => {
+                      const drag = dragStartRef.current;
+                      if (!drag || drag.pointerId !== e.pointerId) return;
+                      setPhotoDraft(prev => ({
+                        ...prev,
+                        x: drag.photoX + e.clientX - drag.startX,
+                        y: drag.photoY + e.clientY - drag.startY,
+                      }));
+                    }}
+                    onPointerUp={(e) => {
+                      if (dragStartRef.current?.pointerId === e.pointerId) {
+                        dragStartRef.current = null;
+                      }
+                    }}
+                  >
+                    {photoDraft.url ? (
+                      <img
+                        src={photoDraft.url}
+                        alt=""
+                        className="h-full w-full cursor-move object-cover"
+                        style={photoTransform(photoDraft)}
+                        draggable={false}
+                      />
+                    ) : (
+                      <span className="text-5xl font-semibold text-primary-700">{initials}</span>
+                    )}
+                  </div>
 
-      {/* Salary Rates */}
-      <div className="pt-4 border-t">
-        <h4 className="font-semibold text-gray-700 mb-3">Salary Rates</h4>
-        <div className="grid grid-cols-4 gap-4">
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={(e) => handlePhotoFile(e.target.files?.[0])}
+                  />
+
+                  <div>
+                    <label className="form-label">Zoom</label>
+                    <input
+                      type="range"
+                      min="1"
+                      max="2.4"
+                      step="0.05"
+                      value={photoDraft.scale}
+                      onChange={(e) => setPhotoDraft(prev => ({ ...prev, scale: Number(e.target.value) }))}
+                      className="w-full accent-primary-600"
+                      disabled={!photoDraft.url}
+                    />
+                  </div>
+
+                  <div className="flex flex-wrap justify-between gap-2">
+                    <div className="flex gap-2">
+                      <button type="button" className="btn-secondary" onClick={() => fileInputRef.current?.click()}>
+                        {photoDraft.url ? 'Select New Photo' : 'Select Photo'}
+                      </button>
+                      {photoDraft.url && (
+                        <button type="button" className="btn-secondary" onClick={removePhoto}>
+                          Remove
+                        </button>
+                      )}
+                    </div>
+                    <button type="button" className="btn-primary" onClick={savePhotoDraft}>
+                      Save Photo
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          <div className="min-h-0 overflow-hidden bg-white">
+            <section className="border-b border-gray-200 bg-gray-50/40 p-2.5">
+              <h4 className="mb-2 border-b border-gray-200 pb-1.5 text-sm font-semibold text-gray-800">Employee Details</h4>
+              <div className="grid grid-cols-1 gap-2.5 md:grid-cols-3">
+                <div>
+                  <label className="form-label">Birth Date</label>
+                  <input type="date" value={formData.birth_date} onChange={(e) => handleFieldChange('birth_date', e.target.value)} className="form-input" />
+                </div>
+                <div>
+                  <label className="form-label">Phone</label>
+                  <input type="text" value={formData.phone} onChange={(e) => handleFieldChange('phone', e.target.value)} className="form-input" />
+                </div>
+                <div>
+                  <label className="form-label">Department</label>
+                  <CreatableSelect
+                    options={departments.map((dept) => ({ id: dept.id, name: dept.name }))}
+                    value={formData.department_id}
+                    onChange={(value) => handleFieldChange('department_id', value)}
+                    onCreateNew={onCreateDepartment}
+                    placeholder="Select..."
+                  />
+                </div>
+                <div>
+                  <label className="form-label">Position</label>
+                  <input type="text" value={formData.position} onChange={(e) => handleFieldChange('position', e.target.value)} className="form-input" />
+                </div>
+                <div>
+                  <label className="form-label">Employment Type</label>
+                  <select value={formData.employment_type} onChange={(e) => handleFieldChange('employment_type', e.target.value)} className="form-input">
+                    <option value="Regular - Full Time">Regular - Full Time</option>
+                    <option value="Regular - Part Time">Regular - Part Time</option>
+                    <option value="Fixed Term - Full Time">Fixed Term - Full Time</option>
+                    <option value="Fixed Term - Part Time">Fixed Term - Part Time</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="form-label">Hire Date</label>
+                  <input type="date" value={formData.hire_date} onChange={(e) => handleFieldChange('hire_date', e.target.value)} className="form-input" />
+                </div>
+                <div>
+                  <label className="form-label">End Date</label>
+                  <input type="date" value={formData.end_date} onChange={(e) => handleFieldChange('end_date', e.target.value)} className="form-input" />
+                </div>
+              </div>
+            </section>
+
+            <section className="border-b border-gray-200 bg-gray-50/40 p-2.5">
+              <h4 className="mb-2 border-b border-gray-200 pb-1.5 text-sm font-semibold text-gray-800">Schedule</h4>
+              <div className="grid grid-cols-2 gap-2.5 xl:grid-cols-4">
+                <div>
+                  <label className="form-label">Call Time</label>
+                  <TimePicker12Hour value={formData.call_time} onChange={(value) => handleFieldChange('call_time', value)} />
+                </div>
+                <div>
+                  <label className="form-label">Time Out</label>
+                  <TimePicker12Hour value={formData.time_out} onChange={(value) => handleFieldChange('time_out', value)} />
+                </div>
+                <div>
+                  <label className="form-label">Buffer (mins)</label>
+                  <input type="number" min="0" max="60" value={formData.buffer_minutes} onChange={(e) => handleFieldChange('buffer_minutes', e.target.value)} className="form-input w-24" placeholder="10" />
+                </div>
+                <div>
+                  <label className="form-label">Schedule Type</label>
+                  <div className="flex h-8 items-center gap-2">
+                    <button type="button" onClick={() => setFormData(prev => ({ ...prev, is_flexible: false }))} className={`rounded px-3 py-1.5 text-sm font-medium ${!formData.is_flexible ? 'bg-primary-600 text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>Regular</button>
+                    <button type="button" onClick={() => setFormData(prev => ({ ...prev, is_flexible: true }))} className={`rounded px-3 py-1.5 text-sm font-medium ${formData.is_flexible ? 'bg-primary-600 text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>Flexible</button>
+                  </div>
+                </div>
+                {formData.is_flexible && (
+                  <div>
+                    <label className="form-label">Adjusted Call Time</label>
+                    <TimePicker12Hour value={formData.adjusted_call_time} onChange={(value) => setFormData(prev => ({ ...prev, adjusted_call_time: value }))} />
+                  </div>
+                )}
+                <div className="xl:col-span-3">
+                  <h5 className="form-label">Working Days</h5>
+                  <div className="grid grid-cols-4 gap-1.5 sm:grid-cols-7">
+                    {[
+                      { key: 'work_monday', label: 'Mon' },
+                      { key: 'work_tuesday', label: 'Tue' },
+                      { key: 'work_wednesday', label: 'Wed' },
+                      { key: 'work_thursday', label: 'Thu' },
+                      { key: 'work_friday', label: 'Fri' },
+                      { key: 'work_saturday', label: 'Sat' },
+                      { key: 'work_sunday', label: 'Sun' },
+                    ].map(day => (
+                      <label key={day.key} className="flex items-center justify-center gap-1 rounded border border-gray-200 px-2 py-1 hover:bg-gray-50">
+                        <input type="checkbox" checked={formData[day.key as keyof EmployeeFormData] as boolean} onChange={(e) => setFormData(prev => ({ ...prev, [day.key]: e.target.checked }))} className="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500" />
+                        <span className="whitespace-nowrap text-xs text-gray-600">{day.label}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <section className="border-b border-gray-200 bg-gray-50/40 p-2.5">
+              <h4 className="mb-2 border-b border-gray-200 pb-1.5 text-sm font-semibold text-gray-800">Salary Rates</h4>
+              <div className="grid grid-cols-2 gap-2.5 xl:grid-cols-4">
           <div>
             <label className="form-label">Basic Salary (Monthly)</label>
             <input
@@ -534,13 +750,8 @@ const EmployeeForm = memo(function EmployeeForm({
               <option value="8">8 hours</option>
             </select>
           </div>
-        </div>
-      </div>
-
-      {/* Incentives */}
-      <div className="grid grid-cols-3 gap-4">
-        <div className="flex flex-col">
-          <label className="form-label h-10 flex items-end">Allowance (Monthly)</label>
+                <div>
+          <label className="form-label">Allowance (Monthly)</label>
           <input
             type="number"
             step="0.01"
@@ -550,8 +761,8 @@ const EmployeeForm = memo(function EmployeeForm({
             placeholder="0.00"
           />
         </div>
-        <div className="flex flex-col">
-          <label className="form-label h-10 flex items-end">Productivity Incentive</label>
+                <div>
+          <label className="form-label">Productivity Incentive</label>
           <input
             type="number"
             step="0.01"
@@ -561,8 +772,8 @@ const EmployeeForm = memo(function EmployeeForm({
             placeholder="0.00"
           />
         </div>
-        <div className="flex flex-col">
-          <label className="form-label h-10 flex items-end">Language Incentive</label>
+                <div>
+          <label className="form-label">Language Incentive</label>
           <input
             type="number"
             step="0.01"
@@ -572,12 +783,12 @@ const EmployeeForm = memo(function EmployeeForm({
             placeholder="0.00"
           />
         </div>
-      </div>
+              </div>
+            </section>
 
-      {/* Government Contributions */}
-      <div className="pt-4 border-t">
-        <h4 className="font-semibold text-gray-700 mb-3">Government Contributions (Monthly)</h4>
-        <div className="grid grid-cols-4 gap-4">
+            <section className="bg-gray-50/40 p-2.5">
+              <h4 className="mb-2 border-b border-gray-200 pb-1.5 text-sm font-semibold text-gray-800">Gov't Deductions</h4>
+              <div className="grid grid-cols-2 gap-2.5 xl:grid-cols-4">
           <div>
             <label className="form-label">SSS</label>
             <input
@@ -622,117 +833,15 @@ const EmployeeForm = memo(function EmployeeForm({
               placeholder="0.00"
             />
           </div>
+              </div>
+            </section>
+          </div>
         </div>
       </div>
 
-      {/* Schedule Settings */}
-      <div className="pt-4 border-t">
-        <h4 className="font-semibold text-gray-700 mb-3">Schedule Settings</h4>
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <label className="form-label">Call Time</label>
-            <TimePicker12Hour
-              value={formData.call_time}
-              onChange={(value) => handleFieldChange('call_time', value)}
-            />
-          </div>
-          <div>
-            <label className="form-label">Time Out</label>
-            <TimePicker12Hour
-              value={formData.time_out}
-              onChange={(value) => handleFieldChange('time_out', value)}
-            />
-          </div>
-          <div>
-            <label className="form-label">Buffer (mins)</label>
-            <input
-              type="number"
-              min="0"
-              max="60"
-              value={formData.buffer_minutes}
-              onChange={(e) => handleFieldChange('buffer_minutes', e.target.value)}
-              className="form-input w-24"
-              placeholder="10"
-            />
-          </div>
-          <div>
-            <label className="form-label">Schedule Type</label>
-            <div className="flex items-center h-10 gap-2">
-              <button
-                type="button"
-                onClick={() => setFormData(prev => ({ ...prev, is_flexible: false }))}
-                className={`px-3 py-1.5 rounded text-sm font-medium ${
-                  !formData.is_flexible
-                    ? 'bg-primary-600 text-white'
-                    : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
-                }`}
-              >
-                Regular
-              </button>
-              <button
-                type="button"
-                onClick={() => setFormData(prev => ({ ...prev, is_flexible: true }))}
-                className={`px-3 py-1.5 rounded text-sm font-medium ${
-                  formData.is_flexible
-                    ? 'bg-amber-500 text-white'
-                    : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
-                }`}
-              >
-                Flexible
-              </button>
-            </div>
-          </div>
-        </div>
-        {formData.is_flexible && (
-          <div className="mt-4">
-            <div className="w-1/3">
-              <label className="form-label">Adjusted Call Time</label>
-              <TimePicker12Hour
-                value={formData.adjusted_call_time}
-                onChange={(value) => setFormData(prev => ({ ...prev, adjusted_call_time: value }))}
-              />
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Working Days */}
-      <div className="border-t pt-4">
-        <h4 className="font-semibold text-gray-700 mb-3">Working Days</h4>
-        <div className="grid grid-cols-7 gap-2">
-          {[
-            { key: 'work_monday', label: 'Mon' },
-            { key: 'work_tuesday', label: 'Tue' },
-            { key: 'work_wednesday', label: 'Wed' },
-            { key: 'work_thursday', label: 'Thu' },
-            { key: 'work_friday', label: 'Fri' },
-            { key: 'work_saturday', label: 'Sat' },
-            { key: 'work_sunday', label: 'Sun' },
-          ].map(day => (
-            <label key={day.key} className="flex flex-col items-center gap-1 cursor-pointer p-2 border rounded hover:bg-gray-50">
-              <input
-                type="checkbox"
-                checked={formData[day.key as keyof EmployeeFormData] as boolean}
-                onChange={(e) => setFormData(prev => ({ ...prev, [day.key]: e.target.checked }))}
-                className="w-5 h-5 text-primary-600 border-gray-300 rounded focus:ring-primary-500"
-              />
-              <span className="text-xs text-gray-600">{day.label}</span>
-            </label>
-          ))}
-        </div>
-      </div>
-
-      <div className="flex gap-2 justify-end pt-4">
-        <button
-          type="button"
-          onClick={onCancel}
-          className="btn-secondary"
-        >
-          Cancel
-        </button>
-        <button type="submit" disabled={saving} className="btn-primary">
-          {saving ? 'Saving...' : submitText}
-        </button>
+      <div className="mt-2 flex shrink-0 justify-end gap-2 border-t border-gray-200 bg-white pt-2">
+        <button type="button" onClick={onCancel} className="btn-secondary">Cancel</button>
+        <button type="submit" disabled={saving} className="btn-primary">{saving ? 'Saving...' : submitText}</button>
       </div>
     </form>
   );
@@ -765,6 +874,7 @@ export function EmployeesPage() {
   // Bulk selection state
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [bulkActionLoading, setBulkActionLoading] = useState(false);
+  const [actionMenuId, setActionMenuId] = useState<number | null>(null);
 
   // Modal states
   const [showAddModal, setShowAddModal] = useState(false);
@@ -864,16 +974,23 @@ export function EmployeesPage() {
   };
 
   const handleEditEmployee = (emp: Employee) => {
-    // Debug: log employee data to check is_flexible value
-    console.log('handleEditEmployee - emp.is_flexible:', emp.is_flexible, 'type:', typeof emp.is_flexible);
+    const notionAsset = findNotionEmployeeAsset(emp);
+    const storedPhoto = getStoredEmployeePhoto(emp.employee_no);
+
     setSelectedEmployee(emp);
     setFormData({
       employee_no: emp.employee_no || '',
+      photo: storedPhoto.url
+        ? storedPhoto
+        : notionAsset?.photoUrl
+          ? { url: notionAsset.photoUrl, x: 0, y: 0, scale: 1 }
+          : defaultEmployeePhoto,
       first_name: emp.first_name || '',
       middle_name: emp.middle_name || '',
       last_name: emp.last_name || '',
       email: emp.email || '',
       phone: emp.phone || '',
+      birth_date: emp.birth_date || '',
       department_id: emp.department_id?.toString() || '',
       position: emp.position || '',
       employment_type: emp.employment_type || 'regular',
@@ -1059,20 +1176,6 @@ export function EmployeesPage() {
   const isAllSelected = employees.length > 0 && selectedIds.size === employees.length;
   const isSomeSelected = selectedIds.size > 0 && selectedIds.size < employees.length;
 
-  const handleDeleteEmployee = async (emp: Employee) => {
-    if (!confirm(`Are you sure you want to delete "${emp.full_name || emp.first_name + ' ' + emp.last_name}"?\n\nThis will deactivate the employee record.`)) {
-      return;
-    }
-
-    try {
-      await api.delete(`/employees/${emp.id}`);
-      loadEmployees();
-    } catch (error: any) {
-      console.error('Failed to delete employee:', error);
-      alert(error.response?.data?.detail || 'Failed to delete employee');
-    }
-  };
-
   const handleSubmitAdd = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
@@ -1086,6 +1189,7 @@ export function EmployeesPage() {
         last_name: formData.last_name,
         email: formData.email || undefined,
         phone: formData.phone || undefined,
+        birth_date: formData.birth_date || undefined,
         department_id: formData.department_id ? parseInt(formData.department_id) : undefined,
         position: formData.position || undefined,
         employment_type: formData.employment_type as any,
@@ -1118,6 +1222,7 @@ export function EmployeesPage() {
         work_saturday: formData.work_saturday,
         work_sunday: formData.work_sunday,
       } as any);
+      storeEmployeePhoto(formData.employee_no, formData.photo);
       setShowAddModal(false);
       loadEmployees();
     } catch (err: any) {
@@ -1143,6 +1248,7 @@ export function EmployeesPage() {
         last_name: formData.last_name,
         email: formData.email || undefined,
         phone: formData.phone || undefined,
+        birth_date: formData.birth_date || undefined,
         department_id: formData.department_id ? parseInt(formData.department_id) : undefined,
         position: formData.position || undefined,
         employment_type: formData.employment_type as any,
@@ -1175,6 +1281,7 @@ export function EmployeesPage() {
         work_saturday: formData.work_saturday,
         work_sunday: formData.work_sunday,
       } as any);
+      storeEmployeePhoto(formData.employee_no, formData.photo);
       setShowEditModal(false);
       await loadEmployees();
     } catch (err: any) {
@@ -1205,6 +1312,34 @@ export function EmployeesPage() {
     return <span className="px-2 py-1 text-xs font-medium rounded bg-green-100 text-green-800">Active</span>;
   };
 
+  const getInitials = (emp: Employee) =>
+    `${emp.first_name?.[0] || ''}${emp.last_name?.[0] || ''}`.toUpperCase() || 'IC';
+
+  const getEmployeePhoto = (emp: Employee) => {
+    const storedPhoto = getStoredEmployeePhoto(emp.employee_no);
+    if (storedPhoto.url) return storedPhoto;
+
+    const notionPhotoUrl = getNotionEmployeePhotoUrl(emp);
+    return notionPhotoUrl ? { url: notionPhotoUrl, x: 0, y: 0, scale: 1 } : defaultEmployeePhoto;
+  };
+
+  const getEmployeeBirthday = (emp: Employee) => getNotionEmployeeBirthday(emp);
+
+  const getRowTint = (emp: Employee) => {
+    if (emp.status === 'pending') return 'bg-amber-50';
+    if (emp.status === 'terminated') return 'bg-red-50';
+    if (emp.status === 'inactive' || !emp.is_active) return 'bg-gray-50';
+    return 'bg-white';
+  };
+
+  const getStatusSelectClass = (emp: Employee) => {
+    const base = 'w-28 rounded border px-2 py-1 text-xs font-medium capitalize focus:border-primary-500 focus:ring-1 focus:ring-primary-500';
+    if (emp.status === 'pending') return `${base} border-amber-200 bg-amber-50 text-amber-800`;
+    if (emp.status === 'terminated') return `${base} border-red-200 bg-red-50 text-red-700`;
+    if (emp.status === 'inactive' || !emp.is_active) return `${base} border-gray-200 bg-gray-50 text-gray-600`;
+    return `${base} border-emerald-200 bg-emerald-50 text-emerald-700`;
+  };
+
   const pendingCount = employees.filter(e => e.status === 'pending').length;
 
   // Memoized cancel handler for Add modal
@@ -1218,45 +1353,45 @@ export function EmployeesPage() {
   }, []);
 
   return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <h1 className="text-2xl font-bold text-gray-900">Employee Management</h1>
-        <div className="flex gap-2">
-          {statusFilter === 'pending' && pendingCount > 0 && (
-            <button onClick={handleVerifyAll} className="btn-secondary">
-              Verify All ({pendingCount})
-            </button>
-          )}
-          <button onClick={handleAddEmployee} className="btn-primary">Add Employee</button>
-        </div>
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h1 className="text-xl font-semibold text-gray-900">Employee Management</h1>
+        {statusFilter === 'pending' && pendingCount > 0 && (
+          <button onClick={handleVerifyAll} className="btn-secondary">
+            Verify All ({pendingCount})
+          </button>
+        )}
       </div>
 
       {/* Status Filter Tabs */}
-      <div className="flex gap-2">
-        {[
-          { key: 'all', label: 'All' },
-          { key: 'pending', label: 'Pending' },
-          { key: 'active', label: 'Active' },
-          { key: 'terminated', label: 'Terminated' },
-          { key: 'inactive', label: 'Inactive' },
-        ].map((tab) => (
-          <button
-            key={tab.key}
-            onClick={() => setStatusFilter(tab.key)}
-            className={`px-4 py-2 rounded-md text-sm font-medium ${
-              statusFilter === tab.key
-                ? 'bg-primary-600 text-white'
-                : 'bg-white text-gray-700 hover:bg-gray-50'
-            }`}
-          >
-            {tab.label}
-            {tab.key === 'pending' && pendingCount > 0 && (
-              <span className="ml-2 bg-yellow-400 text-yellow-900 px-2 py-0.5 rounded-full text-xs">
-                {pendingCount}
-              </span>
-            )}
-          </button>
-        ))}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex gap-2">
+          {[
+            { key: 'all', label: 'All' },
+            { key: 'pending', label: 'Pending' },
+            { key: 'active', label: 'Active' },
+            { key: 'terminated', label: 'Terminated' },
+            { key: 'inactive', label: 'Inactive' },
+          ].map((tab) => (
+            <button
+              key={tab.key}
+              onClick={() => setStatusFilter(tab.key)}
+              className={`rounded-md px-3 py-1.5 text-sm font-medium ${
+                statusFilter === tab.key
+                  ? 'bg-primary-600 text-white'
+                  : 'bg-white text-gray-700 ring-1 ring-gray-200 hover:bg-gray-50'
+              }`}
+            >
+              {tab.label}
+              {tab.key === 'pending' && pendingCount > 0 && (
+                <span className="ml-2 rounded-full bg-yellow-400 px-2 py-0.5 text-xs text-yellow-900">
+                  {pendingCount}
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
+        <button onClick={handleAddEmployee} className="btn-primary">Add Employee</button>
       </div>
 
       {/* Info Banner for Pending */}
@@ -1279,7 +1414,7 @@ export function EmployeesPage() {
       )}
 
       {/* Search */}
-      <div className="relative max-w-md">
+      <div className="relative max-w-lg">
         <input
           type="text"
           placeholder="Search employees..."
@@ -1307,7 +1442,7 @@ export function EmployeesPage() {
 
       {/* Bulk Action Bar */}
       {selectedIds.size > 0 && (
-        <div className="bg-primary-50 border border-primary-200 rounded-lg p-4 flex items-center justify-between">
+        <div className="flex items-center justify-between rounded-lg border border-primary-200 bg-primary-50 p-4">
           <div className="flex items-center gap-2">
             <span className="font-medium text-primary-700">
               {selectedIds.size} employee{selectedIds.size > 1 ? 's' : ''} selected
@@ -1319,7 +1454,40 @@ export function EmployeesPage() {
               Clear selection
             </button>
           </div>
-          <div className="flex gap-2">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => alert('Mass update dialog will be connected after the layout rebuild.')}
+              disabled={bulkActionLoading}
+              className="rounded border border-primary-200 bg-white px-3 py-1.5 text-sm font-medium text-primary-700 hover:bg-primary-50 disabled:opacity-50"
+            >
+              Mass Update
+            </button>
+            <select
+              value=""
+              onChange={async (e) => {
+                if (e.target.value) {
+                  setBulkActionLoading(true);
+                  try {
+                    await Promise.all(Array.from(selectedIds).map((id) => api.post(`/employees/${id}/set-status?new_status=${e.target.value}`)));
+                    await loadEmployees();
+                  } catch (err: any) {
+                    console.error('Failed to update selected statuses:', err);
+                    alert(err.response?.data?.detail || 'Failed to update selected statuses');
+                  } finally {
+                    setBulkActionLoading(false);
+                  }
+                  clearSelection();
+                }
+              }}
+              disabled={bulkActionLoading}
+              className="rounded border border-primary-200 bg-white px-3 py-1.5 text-sm font-medium text-primary-700 disabled:opacity-50"
+            >
+              <option value="">Mark as...</option>
+              <option value="active">Active</option>
+              <option value="pending">Pending</option>
+              <option value="terminated">Terminated</option>
+              <option value="inactive">Inactive</option>
+            </select>
             {statusFilter === 'pending' && (
               <button
                 onClick={handleBulkVerify}
@@ -1347,15 +1515,13 @@ export function EmployeesPage() {
                 {bulkActionLoading ? 'Processing...' : 'Move to Inactive'}
               </button>
             )}
-            {statusFilter !== 'inactive' && (
-              <button
-                onClick={handleBulkDelete}
-                disabled={bulkActionLoading}
-                className="px-3 py-1.5 bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50 text-sm font-medium"
-              >
-                {bulkActionLoading ? 'Processing...' : 'Delete Selected'}
-              </button>
-            )}
+            <button
+              onClick={handleBulkDelete}
+              disabled={bulkActionLoading}
+              className="rounded bg-red-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50"
+            >
+              {bulkActionLoading ? 'Processing...' : 'Delete'}
+            </button>
           </div>
         </div>
       )}
@@ -1379,10 +1545,14 @@ export function EmployeesPage() {
         ) : (
           <>
           <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200">
+            <table className="min-w-full table-fixed divide-y divide-gray-200">
               <thead className="bg-gray-50">
                 <tr>
-                  <th className="px-3 py-3">
+                  <th className="w-10 px-2 py-3 text-center">
+                    <span className="sr-only">Actions</span>
+                    <span className="inline-flex h-5 w-5 items-center justify-center text-gray-400">...</span>
+                  </th>
+                  <th className="w-10 px-2 py-3 text-center">
                     <input
                       type="checkbox"
                       checked={isAllSelected}
@@ -1390,11 +1560,34 @@ export function EmployeesPage() {
                         if (input) input.indeterminate = isSomeSelected;
                       }}
                       onChange={(e) => handleSelectAll(e.target.checked)}
-                      className="w-4 h-4 text-primary-600 border-gray-300 rounded focus:ring-primary-500"
+                      className="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
                     />
                   </th>
                   <th
-                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase cursor-pointer hover:bg-gray-100 select-none"
+                    className="w-28 cursor-pointer select-none px-3 py-3 text-left text-xs font-medium uppercase text-gray-500 hover:bg-gray-100"
+                    onClick={() => handleSort('first_name')}
+                  >
+                    <div className="flex items-center gap-1">
+                      First Name
+                      {sortBy === 'first_name' && (
+                        <span>{sortOrder === 'asc' ? '↑' : '↓'}</span>
+                      )}
+                    </div>
+                  </th>
+                  <th
+                    className="w-28 cursor-pointer select-none px-3 py-3 text-left text-xs font-medium uppercase text-gray-500 hover:bg-gray-100"
+                    onClick={() => handleSort('last_name')}
+                  >
+                    <div className="flex items-center gap-1">
+                      Last Name
+                      {sortBy === 'last_name' && (
+                        <span>{sortOrder === 'asc' ? '↑' : '↓'}</span>
+                      )}
+                    </div>
+                  </th>
+                  <th className="w-16 px-3 py-3 text-left text-xs font-medium uppercase text-gray-500">Photo</th>
+                  <th
+                    className="w-28 cursor-pointer select-none px-3 py-3 text-left text-xs font-medium uppercase text-gray-500 hover:bg-gray-100"
                     onClick={() => handleSort('employee_no')}
                   >
                     <div className="flex items-center gap-1">
@@ -1405,18 +1598,7 @@ export function EmployeesPage() {
                     </div>
                   </th>
                   <th
-                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase cursor-pointer hover:bg-gray-100 select-none"
-                    onClick={() => handleSort('name')}
-                  >
-                    <div className="flex items-center gap-1">
-                      Name
-                      {sortBy === 'name' && (
-                        <span>{sortOrder === 'asc' ? '↑' : '↓'}</span>
-                      )}
-                    </div>
-                  </th>
-                  <th
-                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase cursor-pointer hover:bg-gray-100 select-none"
+                    className="w-24 cursor-pointer select-none px-3 py-3 text-left text-xs font-medium uppercase text-gray-500 hover:bg-gray-100"
                     onClick={() => handleSort('biometric_id')}
                   >
                     <div className="flex items-center gap-1">
@@ -1427,7 +1609,7 @@ export function EmployeesPage() {
                     </div>
                   </th>
                   <th
-                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase cursor-pointer hover:bg-gray-100 select-none"
+                    className="w-40 cursor-pointer select-none px-3 py-3 text-left text-xs font-medium uppercase text-gray-500 hover:bg-gray-100"
                     onClick={() => handleSort('department')}
                   >
                     <div className="flex items-center gap-1">
@@ -1438,7 +1620,7 @@ export function EmployeesPage() {
                     </div>
                   </th>
                   <th
-                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase cursor-pointer hover:bg-gray-100 select-none"
+                    className="w-44 cursor-pointer select-none px-3 py-3 text-left text-xs font-medium uppercase text-gray-500 hover:bg-gray-100"
                     onClick={() => handleSort('position')}
                   >
                     <div className="flex items-center gap-1">
@@ -1448,108 +1630,108 @@ export function EmployeesPage() {
                       )}
                     </div>
                   </th>
-                  <th
-                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase cursor-pointer hover:bg-gray-100 select-none"
-                    onClick={() => handleSort('status')}
-                  >
-                    <div className="flex items-center gap-1">
-                      Status
-                      {sortBy === 'status' && (
-                        <span>{sortOrder === 'asc' ? '↑' : '↓'}</span>
-                      )}
-                    </div>
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
+                  <th className="w-32 px-3 py-3 text-left text-xs font-medium uppercase text-gray-500">Status</th>
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
-                {employees.map((emp) => (
+                {employees.map((emp, index) => {
+                  const openMenuUpward = employees.length - index <= 3;
+
+                  return (
                   <tr
                     key={emp.id}
-                    style={{
-                      backgroundColor:
-                        emp.status === 'active' ? '#bbf7d0' :
-                        emp.status === 'pending' ? '#fef08a' :
-                        emp.status === 'terminated' ? '#fecaca' :
-                        emp.status === 'inactive' ? '#d1d5db' : '#ffffff'
-                    }}
-                    className={`hover:brightness-95 ${
+                    className={`${getRowTint(emp)} hover:bg-emerald-50/50 ${
                       selectedIds.has(emp.id) ? 'ring-2 ring-primary-500 ring-inset' : ''
                     }`}>
-                    <td className="px-3 py-4">
+                    <td className="relative px-2 py-3 text-center">
+                      <button
+                        type="button"
+                        onClick={() => setActionMenuId(actionMenuId === emp.id ? null : emp.id)}
+                        className="inline-flex h-8 w-8 items-center justify-center rounded hover:bg-gray-100"
+                        aria-label={`Actions for ${emp.first_name} ${emp.last_name}`}
+                      >
+                        <svg className="h-4 w-4 text-gray-500" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                          <path d="M10 6a1.5 1.5 0 110-3 1.5 1.5 0 010 3zM10 11.5a1.5 1.5 0 110-3 1.5 1.5 0 010 3zM10 17a1.5 1.5 0 110-3 1.5 1.5 0 010 3z" />
+                        </svg>
+                      </button>
+                      {actionMenuId === emp.id && (
+                        <div
+                          className={`absolute left-2 z-50 w-32 rounded-md border border-gray-200 bg-white py-1 text-left shadow-lg ${
+                            openMenuUpward ? 'bottom-10' : 'top-10'
+                          }`}
+                        >
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setActionMenuId(null);
+                              handleViewEmployee(emp);
+                            }}
+                            className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs hover:bg-gray-50"
+                          >
+                            View
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setActionMenuId(null);
+                              handleEditEmployee(emp);
+                            }}
+                            className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs hover:bg-gray-50"
+                          >
+                            Edit
+                          </button>
+                        </div>
+                      )}
+                    </td>
+                    <td className="px-2 py-3 text-center">
                       <input
                         type="checkbox"
                         checked={selectedIds.has(emp.id)}
                         onChange={(e) => handleSelectOne(emp.id, e.target.checked)}
-                        className="w-4 h-4 text-primary-600 border-gray-300 rounded focus:ring-primary-500"
+                        className="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
                       />
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap font-medium">{emp.employee_no}</td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      {emp.full_name || `${emp.first_name} ${emp.middle_name ? emp.middle_name + ' ' : ''}${emp.last_name}`}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-gray-500">{emp.biometric_id || '-'}</td>
-                    <td className="px-6 py-4 whitespace-nowrap text-gray-500">{emp.department?.name || '-'}</td>
-                    <td className="px-6 py-4 whitespace-nowrap text-gray-500">{emp.position || '-'}</td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      {getStatusBadge(emp.status, emp.is_active)}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="flex gap-2 items-center">
-                        {emp.status === 'pending' && (
-                          <button
-                            onClick={() => handleVerifyEmployee(emp)}
-                            className="text-green-600 hover:text-green-800 text-sm font-medium"
-                          >
-                            Verify
-                          </button>
+                    <td className="truncate px-3 py-3 font-medium text-gray-900">{emp.first_name || '-'}</td>
+                    <td className="truncate px-3 py-3 text-gray-700">{emp.last_name || '-'}</td>
+                    <td className="px-3 py-3">
+                      <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary-100 text-xs font-semibold text-primary-700">
+                        {getEmployeePhoto(emp).url ? (
+                          <img
+                            src={getEmployeePhoto(emp).url}
+                            alt=""
+                            className="h-full w-full rounded-full object-cover"
+                            style={{
+                              transform: `translate(${getEmployeePhoto(emp).x * 0.12}px, ${getEmployeePhoto(emp).y * 0.12}px) scale(${getEmployeePhoto(emp).scale})`,
+                            }}
+                          />
+                        ) : (
+                          getInitials(emp)
                         )}
-                        {emp.status === 'terminated' && (
-                          <>
-                            <button
-                              onClick={() => handleSetStatus(emp.id, 'active')}
-                              className="text-green-600 hover:text-green-800 text-sm font-medium"
-                            >
-                              Reactivate
-                            </button>
-                            <span className="text-gray-300">|</span>
-                          </>
-                        )}
-                        <button
-                          onClick={() => handleViewEmployee(emp)}
-                          className="text-primary-600 hover:text-primary-800 text-sm font-medium"
-                        >
-                          View
-                        </button>
-                        <button
-                          onClick={() => handleEditEmployee(emp)}
-                          className="text-blue-600 hover:text-blue-800 text-sm font-medium"
-                        >
-                          Edit
-                        </button>
-                        {emp.status !== 'inactive' && (
-                          <button
-                            onClick={() => handleDeleteEmployee(emp)}
-                            className="text-red-600 hover:text-red-800 text-sm font-medium"
-                          >
-                            Delete
-                          </button>
-                        )}
-                        {/* Status dropdown for manual changes */}
-                        <select
-                          className="text-xs border border-gray-300 rounded px-1 py-0.5 text-gray-600 capitalize"
-                          value={emp.status || 'active'}
-                          onChange={(e) => handleSetStatus(emp.id, e.target.value)}
-                        >
-                          <option value="active">Active</option>
-                          <option value="pending">Pending</option>
-                          <option value="terminated">Terminated</option>
-                          <option value="inactive">Inactive</option>
-                        </select>
                       </div>
                     </td>
+                    <td className="truncate px-3 py-3 font-medium text-gray-700">{emp.employee_no}</td>
+                    <td className="truncate px-3 py-3 text-gray-500">{emp.biometric_id || '-'}</td>
+                    <td className="truncate px-3 py-3 text-gray-500" title={emp.department?.name || '-'}>
+                      {emp.department?.name || '-'}
+                    </td>
+                    <td className="truncate px-3 py-3 text-gray-500" title={emp.position || '-'}>
+                      {emp.position || '-'}
+                    </td>
+                    <td className="px-3 py-3">
+                      <select
+                        className={getStatusSelectClass(emp)}
+                        value={emp.status || 'active'}
+                        onChange={(e) => handleSetStatus(emp.id, e.target.value)}
+                      >
+                        <option value="active">Active</option>
+                        <option value="pending">Pending</option>
+                        <option value="terminated">Terminated</option>
+                        <option value="inactive">Inactive</option>
+                      </select>
+                    </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -1641,9 +1823,21 @@ export function EmployeesPage() {
 
       {/* Add Employee Modal */}
       {showAddModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-            <h2 className="text-lg font-semibold mb-4">Add New Employee</h2>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-5">
+          <div className="flex max-h-[92vh] w-[min(98vw,96rem)] flex-col overflow-hidden rounded-lg bg-white p-4 shadow-xl">
+            <div className="mb-3 flex items-center justify-between border-b border-gray-200 pb-3">
+              <h2 className="text-lg font-semibold text-gray-900">Add New Employee</h2>
+              <button
+                type="button"
+                onClick={handleCancelAdd}
+                className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700"
+                aria-label="Close"
+              >
+                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
             <EmployeeForm
               formData={formData}
               setFormData={setFormData}
@@ -1661,9 +1855,21 @@ export function EmployeesPage() {
 
       {/* Edit Employee Modal */}
       {showEditModal && selectedEmployee && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-            <h2 className="text-lg font-semibold mb-4">Edit Employee</h2>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-5">
+          <div className="flex max-h-[92vh] w-[min(98vw,96rem)] flex-col overflow-hidden rounded-lg bg-white p-4 shadow-xl">
+            <div className="mb-3 flex items-center justify-between border-b border-gray-200 pb-3">
+              <h2 className="text-lg font-semibold text-gray-900">Edit Employee</h2>
+              <button
+                type="button"
+                onClick={handleCancelEdit}
+                className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700"
+                aria-label="Close"
+              >
+                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
             <EmployeeForm
               formData={formData}
               setFormData={setFormData}
@@ -1698,10 +1904,21 @@ export function EmployeesPage() {
             <div className="space-y-6">
               {/* Header */}
               <div className="flex items-center gap-4 pb-4 border-b">
-                <div className="w-16 h-16 bg-primary-100 rounded-full flex items-center justify-center">
-                  <span className="text-primary-700 font-bold text-xl">
-                    {selectedEmployee.first_name[0]}{selectedEmployee.last_name[0]}
-                  </span>
+                <div className="w-16 h-16 overflow-hidden bg-primary-100 rounded-full flex items-center justify-center">
+                  {getEmployeePhoto(selectedEmployee).url ? (
+                    <img
+                      src={getEmployeePhoto(selectedEmployee).url}
+                      alt=""
+                      className="h-full w-full object-cover"
+                      style={{
+                        transform: `translate(${getEmployeePhoto(selectedEmployee).x * 0.25}px, ${getEmployeePhoto(selectedEmployee).y * 0.25}px) scale(${getEmployeePhoto(selectedEmployee).scale})`,
+                      }}
+                    />
+                  ) : (
+                    <span className="text-primary-700 font-bold text-xl">
+                      {selectedEmployee.first_name[0]}{selectedEmployee.last_name[0]}
+                    </span>
+                  )}
                 </div>
                 <div>
                   <h3 className="text-xl font-bold">
@@ -1746,6 +1963,10 @@ export function EmployeesPage() {
                 <div>
                   <p className="text-sm text-gray-500">Phone</p>
                   <p className="font-medium">{selectedEmployee.phone || '-'}</p>
+                </div>
+                <div>
+                  <p className="text-sm text-gray-500">Birth Date</p>
+                  <p className="font-medium">{getEmployeeBirthday(selectedEmployee) || '-'}</p>
                 </div>
                 <div>
                   <p className="text-sm text-gray-500">Biometric ID</p>

@@ -46,6 +46,7 @@ class Employee(Base):
     middle_name = Column(String(100), nullable=True)
     email = Column(String(255), nullable=True)
     phone = Column(String(20), nullable=True)
+    birth_date = Column(Date, nullable=True)
 
     # Employment Info
     department_id = Column(Integer, ForeignKey("departments.id"), nullable=True)
