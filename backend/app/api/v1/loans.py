@@ -11,7 +11,7 @@ from typing import Optional, List
 from datetime import date, datetime
 from decimal import Decimal
 
-from app.api.deps import get_db, get_current_admin
+from app.api.deps import get_db, get_current_admin, get_current_user
 from app.models.user import User
 from app.models.employee import Employee
 from app.models.loan import LoanTypeConfig, Loan, LoanDeduction, LoanStatus
@@ -565,12 +565,19 @@ async def delete_loan_deduction(
 @router.get("/employee/{employee_id}/active-deductions")
 async def get_employee_active_deductions(
     employee_id: int,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
     Get all active loan deductions for an employee.
     Used by payroll calculator to apply loan deductions.
     """
+    if current_user.role != Role.ADMIN and current_user.employee_id != employee_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to view this employee's loan deductions"
+        )
+
     loans = db.query(Loan).filter(
         Loan.employee_id == employee_id,
         Loan.status == LoanStatus.ACTIVE
