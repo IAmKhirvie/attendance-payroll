@@ -9,7 +9,14 @@ import logging
 from collections import defaultdict
 from dataclasses import dataclass
 from threading import Lock
-from typing import Dict, Optional, Tuple
+from typing import Callable, Dict, Optional, Tuple
+
+from fastapi import Request, Response
+from fastapi.responses import JSONResponse
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.types import ASGIApp
+
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -248,3 +255,74 @@ login_rate_limiter = LoginRateLimiter(
 )
 
 api_rate_limiter = APIRateLimiter()
+
+
+class RateLimitMiddleware(BaseHTTPMiddleware):
+    """
+    Global API rate limiter.
+
+    This is intentionally in-process because the current deployment is one
+    backend process. For multiple backend instances, replace this with Redis or
+    an edge/WAF limiter so counters are shared across nodes.
+    """
+
+    def __init__(self, app: ASGIApp):
+        super().__init__(app)
+        self.enabled = settings.RATE_LIMIT_ENABLED
+        self.default_limiter = SlidingWindowRateLimiter(
+            RateLimitConfig(
+                max_requests=settings.RATE_LIMIT_DEFAULT_MAX_REQUESTS,
+                window_seconds=settings.RATE_LIMIT_DEFAULT_WINDOW_SECONDS,
+                block_seconds=300,
+            )
+        )
+        self.auth_limiter = SlidingWindowRateLimiter(
+            RateLimitConfig(
+                max_requests=settings.RATE_LIMIT_AUTH_MAX_REQUESTS,
+                window_seconds=settings.RATE_LIMIT_AUTH_WINDOW_SECONDS,
+                block_seconds=900,
+            )
+        )
+        self.import_limiter = SlidingWindowRateLimiter(
+            RateLimitConfig(
+                max_requests=settings.RATE_LIMIT_IMPORT_MAX_REQUESTS,
+                window_seconds=settings.RATE_LIMIT_IMPORT_WINDOW_SECONDS,
+                block_seconds=300,
+            )
+        )
+
+    def _client_key(self, request: Request) -> str:
+        forwarded_for = request.headers.get("x-forwarded-for")
+        if forwarded_for:
+            return forwarded_for.split(",")[0].strip()
+        real_ip = request.headers.get("x-real-ip")
+        if real_ip:
+            return real_ip
+        return request.client.host if request.client else "unknown"
+
+    def _limiter_for_path(self, path: str) -> SlidingWindowRateLimiter:
+        if path.startswith("/api/v1/auth/"):
+            return self.auth_limiter
+        if "/import" in path or "/export" in path or "/download" in path:
+            return self.import_limiter
+        return self.default_limiter
+
+    async def dispatch(self, request: Request, call_next: Callable) -> Response:
+        if not self.enabled or not request.url.path.startswith("/api/"):
+            return await call_next(request)
+
+        limiter = self._limiter_for_path(request.url.path)
+        key = f"{self._client_key(request)}:{request.url.path}"
+        allowed, retry_after = limiter.check_rate_limit(key)
+
+        if not allowed:
+            logger.warning("Rate limit blocked %s %s", self._client_key(request), request.url.path)
+            return JSONResponse(
+                status_code=429,
+                content={"detail": "Too many requests. Please try again later."},
+                headers={"Retry-After": str(retry_after or 60)},
+            )
+
+        response = await call_next(request)
+        response.headers["X-RateLimit-Remaining"] = str(limiter.get_remaining(key))
+        return response

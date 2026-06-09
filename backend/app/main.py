@@ -11,6 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
 import logging
 import os
+from logging.handlers import RotatingFileHandler
 
 from app.core.config import settings
 from app.core.database import engine, Base, SessionLocal, seed_contribution_tables, ensure_schema_updates
@@ -22,9 +23,22 @@ from app.core.security_middleware import (
     SecurityHeadersMiddleware,
     RequestValidationMiddleware,
 )
+from app.core.rate_limiter import RateLimitMiddleware
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
+LOG_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), settings.LOG_DIR))
+os.makedirs(LOG_DIR, exist_ok=True)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+    handlers=[
+        logging.StreamHandler(),
+        RotatingFileHandler(
+            os.path.join(LOG_DIR, "app.log"),
+            maxBytes=10 * 1024 * 1024,
+            backupCount=10,
+        ),
+    ],
+)
 logger = logging.getLogger(__name__)
 
 
@@ -108,6 +122,9 @@ app.add_middleware(
 
 # Request validation middleware - detects SQL injection and XSS
 app.add_middleware(RequestValidationMiddleware)
+
+# Global API rate limiting
+app.add_middleware(RateLimitMiddleware)
 
 # CORS middleware - configurable via CORS_ORIGINS env var
 # For local network: CORS_ORIGINS="*"

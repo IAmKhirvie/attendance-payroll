@@ -27,6 +27,10 @@ EXTERNAL_BACKUP_DIR=""
 # Set to "true" to enable offsite backups
 CLOUD_BACKUP_ENABLED=false
 
+# Set true in production after EXTERNAL_BACKUP_DIR and cloud/offsite are configured.
+# When true, backup fails if the external or offsite copy cannot be created.
+STRICT_321=false
+
 # GitHub backup repository (optional)
 # Format: https://github.com/username/repo.git
 # Leave empty to disable GitHub backup
@@ -42,8 +46,8 @@ GITHUB_BACKUP_REPO=""
 # -----------------------------------------------------------------------------
 
 # Primary database file location
-# Default: SQLite database in backend/app/
-DATABASE_PATH="./backend/app/attendance_payroll.db"
+# Default: SQLite database in backend/
+DATABASE_PATH="./backend/attendance_payroll.db"
 
 # Environment file location
 ENV_FILE="./backend/.env"

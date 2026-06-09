@@ -58,6 +58,21 @@ def ensure_schema_updates():
         with engine.begin() as connection:
             connection.execute(text("ALTER TABLE employees ADD COLUMN birth_date DATE"))
 
+    index_statements = [
+        "CREATE INDEX IF NOT EXISTS ix_processed_attendance_employee_date ON processed_attendance (employee_id, date)",
+        "CREATE INDEX IF NOT EXISTS ix_processed_attendance_date_status ON processed_attendance (date, status)",
+        "CREATE INDEX IF NOT EXISTS ix_payslips_run_employee ON payslips (payroll_run_id, employee_id)",
+        "CREATE INDEX IF NOT EXISTS ix_payslips_employee_released ON payslips (employee_id, is_released)",
+        "CREATE INDEX IF NOT EXISTS ix_payroll_runs_period_status ON payroll_runs (period_start, period_end, status)",
+        "CREATE INDEX IF NOT EXISTS ix_users_status_role ON users (status, role)",
+        "CREATE INDEX IF NOT EXISTS ix_loans_employee_status ON loans (employee_id, status)",
+        "CREATE INDEX IF NOT EXISTS ix_leave_requests_employee_status ON leave_requests (employee_id, status)",
+        "CREATE INDEX IF NOT EXISTS ix_audit_logs_resource ON audit_logs (resource_type, resource_id)",
+    ]
+    with engine.begin() as connection:
+        for statement in index_statements:
+            connection.execute(text(statement))
+
 
 def seed_contribution_tables():
     """

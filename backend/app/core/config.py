@@ -25,9 +25,10 @@ class Settings(BaseSettings):
 
     # App Info
     APP_NAME: str = "Attendance & Payroll Management"
-    APP_VERSION: str = "1.0.0"
+    APP_VERSION: str = "1.1.0"
     DEBUG: bool = True
     ENVIRONMENT: str = "development"  # development, staging, production
+    LOG_DIR: str = "../logs"
 
     # Server - Accessible from network
     HOST: str = "0.0.0.0"  # Bind to all interfaces
@@ -63,6 +64,12 @@ class Settings(BaseSettings):
                 UserWarning
             )
 
+        if self.ENVIRONMENT == "production" and self.CORS_ORIGINS == "*":
+            raise ValueError(
+                "CORS_ORIGINS must not be '*' in production. "
+                "Set explicit origins such as https://admin.example.com."
+            )
+
     # Password Policy Defaults (HR can change these)
     PASSWORD_MIN_LENGTH: int = 8
     PASSWORD_REQUIRE_UPPERCASE: bool = True
@@ -73,6 +80,15 @@ class Settings(BaseSettings):
     # CORS Settings
     CORS_ORIGINS: str = "*"  # Comma-separated origins, or "*" for all (local network)
     CORS_ALLOW_CREDENTIALS: bool = True
+
+    # Rate limiting
+    RATE_LIMIT_ENABLED: bool = True
+    RATE_LIMIT_DEFAULT_MAX_REQUESTS: int = 240
+    RATE_LIMIT_DEFAULT_WINDOW_SECONDS: int = 60
+    RATE_LIMIT_AUTH_MAX_REQUESTS: int = 20
+    RATE_LIMIT_AUTH_WINDOW_SECONDS: int = 300
+    RATE_LIMIT_IMPORT_MAX_REQUESTS: int = 20
+    RATE_LIMIT_IMPORT_WINDOW_SECONDS: int = 60
 
     # File Upload
     MAX_UPLOAD_SIZE_MB: int = 50

@@ -8,6 +8,8 @@
 # =============================================================================
 
 set -e
+export LC_ALL=C
+export LANG=C
 
 # Configuration
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -23,7 +25,8 @@ BACKUP_DIR="${BACKUP_DIR:-$SCRIPT_DIR/backups}"
 EXTERNAL_BACKUP_DIR="${EXTERNAL_BACKUP_DIR:-}"
 CLOUD_BACKUP_ENABLED="${CLOUD_BACKUP_ENABLED:-false}"
 GITHUB_BACKUP_REPO="${GITHUB_BACKUP_REPO:-}"
-DATABASE_PATH="${DATABASE_PATH:-$SCRIPT_DIR/backend/app/attendance_payroll.db}"
+STRICT_321="${STRICT_321:-false}"
+DATABASE_PATH="${DATABASE_PATH:-$SCRIPT_DIR/backend/attendance_payroll.db}"
 ENV_FILE="${ENV_FILE:-$SCRIPT_DIR/backend/.env}"
 RETENTION_DAYS="${RETENTION_DAYS:-30}"
 RETENTION_LOCAL="${RETENTION_LOCAL:-7}"
@@ -58,6 +61,25 @@ log_warning() {
 
 log_error() {
     echo -e "${RED}[ERROR]${NC} $1"
+}
+
+checksum_file() {
+    local file="$1"
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$file"
+    else
+        shasum -a 256 "$file"
+    fi
+}
+
+verify_checksum_file() {
+    local checksum_file="$1"
+    local backup_path="$2"
+    if command -v sha256sum >/dev/null 2>&1; then
+        (cd "$backup_path" && sha256sum -c "$(basename "$checksum_file")" --quiet)
+    else
+        (cd "$backup_path" && shasum -a 256 -c "$(basename "$checksum_file")" >/dev/null)
+    fi
 }
 
 # =============================================================================
@@ -180,11 +202,15 @@ $(ls -la "$backup_path" | tail -n +2)
 ================================================================================
 BACKUP CHECKSUMS (SHA256):
 EOF
-    
+
+    local checksum_file="$backup_path/checksums.sha256"
+    : > "$checksum_file"
+
     # Generate checksums for all files
-    find "$backup_path" -type f -name "*.gz" -o -name "*.tar.gz" -o -name "*.conf" | while read file; do
-        sha256sum "$file" >> "$manifest_file"
+    find "$backup_path" -type f \( -name "*.gz" -o -name "*.tar.gz" -o -name "*.conf" \) | while read file; do
+        checksum_file "$file" | sed "s|$backup_path/||" >> "$checksum_file"
     done
+    cat "$checksum_file" >> "$manifest_file"
     
     echo "" >> "$manifest_file"
     echo "================================================================================" >> "$manifest_file"
@@ -210,6 +236,10 @@ copy_2_external() {
         create_full_backup "$EXTERNAL_BACKUP_DIR"
         log_success "External backup completed"
     else
+        if [ "$STRICT_321" = "true" ]; then
+            log_error "STRICT_321=true but EXTERNAL_BACKUP_DIR is not configured or not mounted"
+            return 1
+        fi
         # If no external drive configured, create in separate local location
         log_warning "No external backup directory configured"
         log_info "Creating secondary backup in local external folder..."
@@ -244,6 +274,10 @@ copy_3_offsite() {
             log_success "Cloud storage upload completed"
         fi
     else
+        if [ "$STRICT_321" = "true" ]; then
+            log_error "STRICT_321=true but CLOUD_BACKUP_ENABLED=false"
+            return 1
+        fi
         log_warning "Cloud backup disabled. Set CLOUD_BACKUP_ENABLED=true in backup.conf"
     fi
 }
@@ -303,11 +337,11 @@ verify_backup() {
     # Verify checksums
     local checksum_file="$backup_path/checksums.sha256"
     if [ -f "$checksum_file" ]; then
-        cd "$backup_path"
-        if sha256sum -c "$checksum_file" --quiet 2>/dev/null; then
+        if verify_checksum_file "$checksum_file" "$backup_path" 2>/dev/null; then
             log_success "All checksums verified"
         else
-            log_warning "Some checksums failed verification"
+            log_error "Some checksums failed verification"
+            return 1
         fi
     fi
     

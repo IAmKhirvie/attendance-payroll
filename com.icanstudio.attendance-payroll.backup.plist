@@ -10,12 +10,12 @@
     <key>ProgramArguments</key>
     <array>
         <string>/bin/bash</string>
-        <string>/Users/icanstudio2/attendance-payroll/backup-321.sh</string>
+        <string>/Users/icanacademy/attendance-payroll/backup-321.sh</string>
     </array>
     
     <!-- Working directory -->
     <key>WorkingDirectory</key>
-    <string>/Users/icanstudio2/attendance-payroll</string>
+    <string>/Users/icanacademy/attendance-payroll</string>
     
     <!-- Run daily at 2:00 AM -->
     <key>StartCalendarInterval</key>
@@ -32,15 +32,15 @@
     
     <!-- Standard output and error logs -->
     <key>StandardOutPath</key>
-    <string>/Users/icanstudio2/attendance-payroll/logs/backup-stdout.log</string>
+    <string>/Users/icanacademy/attendance-payroll/logs/backup-stdout.log</string>
     <key>StandardErrorPath</key>
-    <string>/Users/icanstudio2/attendance-payroll/logs/backup-stderr.log</string>
+    <string>/Users/icanacademy/attendance-payroll/logs/backup-stderr.log</string>
     
     <!-- Environment variables -->
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>
-        <string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
     </dict>
 </dict>
 </plist>
