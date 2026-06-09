@@ -22,15 +22,20 @@ export function RightSidebar() {
   const [monthlyHolidays, setMonthlyHolidays] = useState<Holiday[]>([]);
   const [loading, setLoading] = useState(true);
   const [viewMode, setViewMode] = useState<'date' | 'calendar'>('date');
-  const [hoveredHoliday, setHoveredHoliday] = useState<Holiday | null>(null);
+  const [calendarOffset, setCalendarOffset] = useState(0);
+  const [hoveredCalendarCell, setHoveredCalendarCell] = useState<number | null>(null);
 
   // Current date info
   const now = new Date();
+  const visibleDate = new Date(now.getFullYear(), now.getMonth() + calendarOffset, 1);
   const monthName = now.toLocaleString('default', { month: 'long' });
   const dayName = now.toLocaleString('default', { weekday: 'long' });
   const dateNumber = now.getDate();
-  const year = now.getFullYear();
-  const currentMonth = now.getMonth();
+  const todayYear = now.getFullYear();
+  const todayMonth = now.getMonth();
+  const year = visibleDate.getFullYear();
+  const currentMonth = visibleDate.getMonth();
+  const calendarMonthName = visibleDate.toLocaleString('default', { month: 'long' });
 
   // Get days in current month
   const daysInMonth = new Date(year, currentMonth + 1, 0).getDate();
@@ -143,6 +148,8 @@ export function RightSidebar() {
     return `linear-gradient(45deg, ${stops.join(', ')})`;
   };
 
+  const mixWithWhite = (hex: string, percent = 82) => `color-mix(in srgb, ${hex} ${100 - percent}%, white ${percent}%)`;
+
   return (
     <div className="w-full flex-shrink-0">
       <div className="space-y-3">
@@ -164,73 +171,219 @@ export function RightSidebar() {
               <div className="flex h-[calc(100%-52px)] flex-col items-center justify-center">
                 <p className="text-sm font-semibold text-gray-500">{dayName}</p>
                 <p className="my-1 text-6xl font-bold leading-none text-gray-900">{dateNumber}</p>
-                <p className="text-base font-medium text-gray-600">{monthName} {year}</p>
+                <p className="text-base font-medium text-gray-600">{monthName} {todayYear}</p>
               </div>
             </div>
 
-            <div className="absolute inset-0 overflow-hidden rounded-lg border border-gray-200 bg-white text-left shadow-sm [backface-visibility:hidden] [transform:rotateY(180deg)]">
+            <div className="absolute inset-0 overflow-visible rounded-lg border border-gray-200 bg-white text-left shadow-sm [backface-visibility:hidden] [transform:rotateY(180deg)]">
               <div className="flex h-full flex-col p-2.5">
               <div className="mb-1.5 flex items-center justify-between">
                 <h3 className="text-sm font-bold text-[#087568]">Calendar</h3>
-                <span className="text-xs font-bold text-gray-900">{monthName} {year}</span>
+                <span className="flex items-center gap-1 text-xs font-bold text-gray-900">
+                  <span
+                    role="button"
+                    tabIndex={0}
+                    className="rounded px-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setCalendarOffset((offset) => offset - 1);
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        setCalendarOffset((offset) => offset - 1);
+                      }
+                    }}
+                    aria-label="Previous month"
+                  >
+                    ‹
+                  </span>
+                  {calendarMonthName} {year}
+                  <span
+                    role="button"
+                    tabIndex={0}
+                    className="rounded px-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setCalendarOffset((offset) => offset + 1);
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        setCalendarOffset((offset) => offset + 1);
+                      }
+                    }}
+                    aria-label="Next month"
+                  >
+                    ›
+                  </span>
+                </span>
               </div>
               <div className="grid grid-cols-7 gap-0.5 text-center text-[10px] font-semibold text-gray-400">
                 {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((day, i) => (
                   <div key={i}>{day}</div>
                 ))}
               </div>
-              <div className="relative mt-1 grid grid-cols-7 gap-0.5 text-center text-[11px] text-gray-600">
-                {calendarDays.map((day, i) => {
-                  const holiday = day ? holidayMap.get(day) : null;
-                  const isToday = day === dateNumber;
+              <div className="relative mt-1 grid flex-1 grid-cols-7 auto-rows-fr gap-x-0 gap-y-0.5 text-center text-[11px] text-gray-600">
+	                {calendarDays.map((day, i) => {
+	                  const holiday = day ? holidayMap.get(day) : null;
+	                  const dayOfWeek = day ? new Date(year, currentMonth, day).getDay() : -1;
+	                  const thursdayHoliday = day
+	                    ? dayOfWeek === 5
+	                      ? holidayMap.get(day - 1)
+	                      : dayOfWeek === 6
+	                        ? holidayMap.get(day - 2)
+	                        : dayOfWeek === 0
+	                          ? holidayMap.get(day - 3)
+	                          : null
+	                    : null;
+	                  const fridayHoliday = day
+	                    ? dayOfWeek === 6
+	                      ? holidayMap.get(day - 1)
+	                      : dayOfWeek === 0
+	                        ? holidayMap.get(day - 2)
+	                        : null
+	                    : null;
+	                  const mondayHoliday = day ? holidayMap.get(day + 1) || holidayMap.get(day + 2) : null;
+	                  const longWeekendHoliday = !holiday && dayOfWeek === 6
+	                    ? fridayHoliday || thursdayHoliday || mondayHoliday || null
+	                    : !holiday && dayOfWeek === 0
+	                      ? fridayHoliday || thursdayHoliday || mondayHoliday || null
+	                      : !holiday && dayOfWeek === 5
+	                        ? thursdayHoliday || null
+	                      : null;
+                  const holidayMarker = holiday || longWeekendHoliday;
+                  const isToday = day === dateNumber && currentMonth === todayMonth && year === todayYear;
                   const isCutoffStart = day === 11 || day === 26;
                   const isCutoffEnd = day === 10 || day === 25;
-                  const isPayday = day === 15 || day === 26;
+                  const hasPayrollMarker = isCutoffStart || isCutoffEnd;
+	                  const holidayColor = holidayMarker ? getHolidayMarkerColor(holidayMarker.holiday_type) : '';
+	                  const isHolidayRangeStart = Boolean(
+	                    (holiday && (dayOfWeek === 4 || (dayOfWeek === 5 && !thursdayHoliday))) ||
+	                    (!holiday && dayOfWeek === 6 && mondayHoliday && !fridayHoliday && !thursdayHoliday)
+	                  );
+	                  const isHolidayRangeMiddle = Boolean(
+	                    (dayOfWeek === 5 && thursdayHoliday) ||
+	                    (dayOfWeek === 6 && (thursdayHoliday || fridayHoliday)) ||
+	                    (!holiday && dayOfWeek === 0 && mondayHoliday)
+	                  );
+	                  const isHolidayRangeEnd = Boolean(
+	                    (!holiday && dayOfWeek === 0 && (fridayHoliday || thursdayHoliday) && !mondayHoliday) ||
+	                    (holiday && dayOfWeek === 1)
+	                  );
+                  const hasHolidayRange = Boolean(isHolidayRangeStart || isHolidayRangeMiddle || isHolidayRangeEnd || longWeekendHoliday);
+                  const isPlainCutoffStart = Boolean(isCutoffStart && !holidayMarker && !isCutoffEnd);
+                  const tooltipAlignClass = i % 7 >= 5
+                    ? 'right-0 translate-x-0'
+                    : i % 7 <= 1
+                      ? 'left-0 translate-x-0'
+                      : 'left-1/2 -translate-x-1/2';
                   const markers = [
-                    ...(holiday ? [{ label: holiday.name, color: getHolidayMarkerColor(holiday.holiday_type) }] : []),
-                    ...(isCutoffStart ? [{ label: 'Cutoff start', color: '#8b5cf6' }] : []),
-                    ...(isCutoffEnd ? [{ label: 'Cutoff end', color: '#6d28d9' }] : []),
-                    ...(isPayday ? [{ label: 'Payday', color: '#059669' }] : []),
+                    ...(holidayMarker ? [{
+                      kind: 'holiday',
+                      label: holiday ? holiday.name : `${longWeekendHoliday?.name || 'Holiday'} long weekend`,
+                      color: holidayColor,
+                    }] : []),
+                    ...(isCutoffStart ? [{
+                      kind: 'cutoff-start',
+                      label: day === 11 ? '2nd Cutoff Start' : '1st Cutoff Start',
+                      color: '#8b5cf6',
+                    }] : []),
+                    ...(isCutoffEnd ? [{
+                      kind: 'cutoff-end',
+                      label: day === 10 ? '1st Cutoff End' : '2nd Cutoff End',
+                      color: '#6d28d9',
+                    }] : []),
                   ];
-                  const markerBackground = getMarkerBackground(markers.map((marker) => marker.color));
+	                  const visualMarkers = isPlainCutoffStart
+	                    ? markers.filter((marker) => marker.kind !== 'cutoff-start' && !(isHolidayRangeMiddle && marker.kind === 'holiday'))
+	                    : markers.filter((marker) => {
+	                        if (isHolidayRangeMiddle && !holiday && !hasPayrollMarker && marker.kind === 'holiday') {
+	                          return false;
+	                        }
+	                        if (hasPayrollMarker && marker.kind === 'holiday') {
+	                          return false;
+	                        }
+	                        return true;
+	                      });
+	                  const markerBackground = getMarkerBackground(visualMarkers.map((marker) => marker.color));
+	                  const rangeBackground = hasPayrollMarker && holidayColor
+	                    ? getMarkerBackground([
+	                        holidayColor,
+	                        ...markers.filter((marker) => marker.kind !== 'holiday').map((marker) => marker.color),
+	                      ])
+	                    : holidayColor;
+	                  const holidayPaleBackground = isHolidayRangeMiddle && holidayColor ? mixWithWhite(holidayColor) : undefined;
 
                   return (
                     <div
                       key={i}
-                      className={`
-                        mx-auto flex h-[23px] w-[25px] items-center justify-center rounded-md border text-[11px] transition-transform hover:scale-110
-                        ${isToday && !markerBackground ? 'border-teal-500 bg-teal-100 text-[#087568] font-bold' : ''}
-                        ${markerBackground ? 'border-white font-bold text-white shadow-sm' : 'border-transparent'}
-                        ${isToday && markerBackground ? 'ring-2 ring-teal-300 ring-offset-1' : ''}
-                      `}
-                      style={markerBackground ? { background: markerBackground } : undefined}
+                      className="relative flex min-h-0 items-center justify-center"
                       title={markers.map((marker) => marker.label).join(' / ')}
-                      onMouseEnter={() => holiday && setHoveredHoliday(holiday)}
-                      onMouseLeave={() => setHoveredHoliday(null)}
+                      onMouseEnter={() => day && setHoveredCalendarCell(i)}
+                      onMouseLeave={() => setHoveredCalendarCell((current) => (current === i ? null : current))}
                     >
-                      {day}
+                      {day && hasHolidayRange && holidayColor && (
+	                        <span
+	                          className={`
+	                            absolute top-1/2 h-6 -translate-y-1/2 opacity-[0.22]
+	                            ${isHolidayRangeStart ? 'left-1/2 right-0 rounded-l-md' : ''}
+	                            ${isHolidayRangeMiddle ? 'left-0 right-0' : ''}
+	                            ${isHolidayRangeEnd ? 'left-0 right-1/2 rounded-r-md' : ''}
+	                          `}
+	                          style={{ background: rangeBackground }}
+	                        />
+                      )}
+                      {day && (
+                        <span
+	                          className={`
+	                            relative z-10 flex h-6 w-6 items-center justify-center rounded-md border text-[11px] transition-transform hover:scale-110
+	                            ${isToday && !markerBackground && !isPlainCutoffStart ? 'border-teal-500 bg-teal-100 text-[#087568] font-bold' : ''}
+	                            ${isHolidayRangeMiddle && !markerBackground ? 'border-transparent bg-transparent font-semibold shadow-none' : ''}
+	                            ${markerBackground ? 'border-white font-bold text-white shadow-sm' : 'border-transparent'}
+                            ${holidayPaleBackground || isPlainCutoffStart || isHolidayRangeMiddle ? 'font-bold' : ''}
+                            ${isToday && (markerBackground || isPlainCutoffStart) ? 'ring-2 ring-teal-300 ring-offset-1' : ''}
+                          `}
+                          style={markerBackground
+                            ? { background: markerBackground }
+                            : isPlainCutoffStart
+                              ? { background: '#f5f3ff', borderColor: '#8b5cf6', color: '#6d28d9' }
+                              : isHolidayRangeMiddle
+                                ? { background: 'transparent', borderColor: 'transparent', color: holidayColor }
+                              : holidayPaleBackground
+                                ? { background: holidayPaleBackground, color: holidayColor }
+                                : undefined
+                          }
+                        >
+                          {day}
+                        </span>
+                      )}
+                      {day && markers.length > 0 && hoveredCalendarCell === i && (
+                        <div
+                          className={`
+                            pointer-events-none absolute z-[200] min-w-36 max-w-44 rounded-md border border-gray-200 bg-white px-2.5 py-2 text-left text-[10px] font-semibold text-gray-800 shadow-2xl
+                            ${i < 14 ? 'top-full mt-1' : 'bottom-full mb-1'}
+                            ${tooltipAlignClass}
+                          `}
+                        >
+                          <div className="space-y-1 whitespace-normal break-words">
+                            {markers.map((marker) => (
+                              <div key={`${marker.kind}-${marker.label}`} className="flex items-center gap-1.5">
+                                <span
+                                  className="h-2 w-2 shrink-0 rounded-full"
+                                  style={{ backgroundColor: marker.color }}
+                                />
+                                <span className="text-gray-700">{marker.label}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   );
                 })}
-                {hoveredHoliday && (
-                  <div className="absolute left-1/2 top-0 z-50 -translate-x-1/2 -translate-y-full rounded bg-gray-900 px-2 py-1 text-xs text-white shadow">
-                    {hoveredHoliday.name}
-                  </div>
-                )}
-              </div>
-              <div className="mt-auto border-t border-gray-200 pt-1.5">
-                <div className="mb-1 grid grid-cols-2 gap-1.5 text-[9px] font-bold uppercase tracking-wide text-gray-400">
-                  <span>Holidays</span>
-                  <span>Payroll</span>
-                </div>
-                <div className="grid grid-cols-2 gap-x-1.5 gap-y-1 text-[9px] font-medium leading-none text-gray-600">
-                  <span className="flex min-w-0 items-center gap-1 rounded bg-gray-50 px-1.5 py-1"><span className="h-1.5 w-1.5 shrink-0 rounded-full bg-red-500" />Regular</span>
-                  <span className="flex min-w-0 items-center gap-1 rounded bg-gray-50 px-1.5 py-1"><span className="h-1.5 w-1.5 shrink-0 rounded-full border border-violet-500" />Start</span>
-                  <span className="flex min-w-0 items-center gap-1 rounded bg-gray-50 px-1.5 py-1"><span className="h-1.5 w-1.5 shrink-0 rounded-full bg-blue-500" />SNWH</span>
-                  <span className="flex min-w-0 items-center gap-1 rounded bg-gray-50 px-1.5 py-1"><span className="h-1.5 w-1.5 shrink-0 rounded-full bg-violet-600" />End</span>
-                  <span className="flex min-w-0 items-center gap-1 rounded bg-gray-50 px-1.5 py-1"><span className="h-1.5 w-1.5 shrink-0 rounded-full bg-amber-500" />SWH</span>
-                  <span className="flex min-w-0 items-center gap-1 rounded bg-gray-50 px-1.5 py-1"><span className="h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-600" />Payday</span>
-                </div>
               </div>
             </div>
             </div>

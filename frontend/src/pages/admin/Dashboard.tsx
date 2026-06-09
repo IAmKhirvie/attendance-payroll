@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import api, { employeesApi, leaveApi, loansApi } from '../../api/client';
+import api, { employeesApi, leaveApi, loansApi, payrollApi } from '../../api/client';
 import dayjs from 'dayjs';
+import type { Payslip } from '../../types';
 import { getNotionEmployeeBirthday } from '../../data/notionEmployeeAssets';
 
 interface DashboardStats {
@@ -35,6 +36,134 @@ interface ImportHistoryItem {
   created_at: string;
 }
 
+interface DoughnutItem {
+  title: string;
+  value: number;
+  color: string;
+}
+
+function polarToCartesian(center: number, radius: number, angleInDegrees: number) {
+  const angleInRadians = ((angleInDegrees - 90) * Math.PI) / 180;
+  return {
+    x: center + radius * Math.cos(angleInRadians),
+    y: center + radius * Math.sin(angleInRadians),
+  };
+}
+
+function describeDoughnutArc(center: number, outerRadius: number, innerRadius: number, startAngle: number, endAngle: number) {
+  const largeArcFlag = endAngle - startAngle <= 180 ? '0' : '1';
+  const outerStart = polarToCartesian(center, outerRadius, endAngle);
+  const outerEnd = polarToCartesian(center, outerRadius, startAngle);
+  const innerStart = polarToCartesian(center, innerRadius, startAngle);
+  const innerEnd = polarToCartesian(center, innerRadius, endAngle);
+
+  return [
+    'M', outerStart.x, outerStart.y,
+    'A', outerRadius, outerRadius, 0, largeArcFlag, 0, outerEnd.x, outerEnd.y,
+    'L', innerStart.x, innerStart.y,
+    'A', innerRadius, innerRadius, 0, largeArcFlag, 1, innerEnd.x, innerEnd.y,
+    'Z',
+  ].join(' ');
+}
+
+function PayrollDoughnutChart({
+  data,
+  total,
+  formatCurrency,
+}: {
+  data: DoughnutItem[];
+  total: number;
+  formatCurrency: (amount: number) => string;
+}) {
+  const [tooltip, setTooltip] = useState<{ x: number; y: number; item: DoughnutItem } | null>(null);
+  const size = 210;
+  const center = size / 2;
+  const outerRadius = 92;
+  const innerRadius = 66;
+  const visibleData = data.filter((item) => item.value > 0);
+  const segments = visibleData.reduce<Array<{ item: DoughnutItem; startAngle: number; segmentAngle: number }>>(
+    (acc, item) => {
+      const startAngle = acc.reduce((sum, segment) => sum + segment.segmentAngle, 0);
+      const segmentAngle = total > 0 ? (item.value / total) * 360 : 0;
+      acc.push({ item, startAngle, segmentAngle });
+      return acc;
+    },
+    []
+  );
+
+  return (
+    <div className="relative mx-auto h-[230px] w-full max-w-[250px]">
+      <svg className="h-full w-full overflow-visible" viewBox={`0 0 ${size} ${size}`} role="img" aria-label="Latest payroll doughnut chart">
+        <path
+          d={describeDoughnutArc(center, outerRadius + 5, innerRadius - 5, 0, 359.99)}
+          fill="rgba(15, 118, 110, 0.08)"
+        />
+        <g>
+          {segments.map(({ item, startAngle, segmentAngle }) => {
+            const endAngle = Math.min(359.99, startAngle + segmentAngle);
+
+            return (
+              <path
+                key={item.title}
+                d={describeDoughnutArc(center, outerRadius, innerRadius, startAngle, endAngle)}
+                fill={item.color}
+                stroke="#ffffff"
+                strokeWidth={1.5}
+                className="cursor-pointer drop-shadow-sm transition-opacity duration-200 hover:opacity-65"
+                style={{ transformOrigin: `${center}px ${center}px` }}
+                onMouseEnter={(event) => {
+                  const rect = event.currentTarget.ownerSVGElement?.getBoundingClientRect();
+                  if (!rect) return;
+                  setTooltip({
+                    x: event.clientX - rect.left,
+                    y: event.clientY - rect.top,
+                    item,
+                  });
+                }}
+                onMouseMove={(event) => {
+                  const rect = event.currentTarget.ownerSVGElement?.getBoundingClientRect();
+                  if (!rect) return;
+                  setTooltip({
+                    x: event.clientX - rect.left,
+                    y: event.clientY - rect.top,
+                    item,
+                  });
+                }}
+                onMouseLeave={() => setTooltip(null)}
+              />
+            );
+          })}
+        </g>
+      </svg>
+
+      <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center text-center">
+        <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">Total</span>
+        <span className="mt-1 text-lg font-bold text-gray-900">{formatCurrency(total)}</span>
+      </div>
+
+      {tooltip && (
+        <div
+          className="pointer-events-none absolute z-30 min-w-36 rounded-lg border border-gray-200 bg-white px-3 py-2 text-center text-xs font-semibold text-gray-800 shadow-xl"
+          style={{
+            left: tooltip.x,
+            top: tooltip.y,
+            transform: 'translate(-50%, -115%)',
+          }}
+        >
+          <div className="mb-1 flex items-center justify-center gap-1.5">
+            <span
+              className="h-2.5 w-2.5 rounded-full"
+              style={{ backgroundColor: tooltip.item.color }}
+            />
+            <p className="uppercase tracking-wide text-gray-500">{tooltip.item.title}</p>
+          </div>
+          <p className="text-sm text-gray-900">{formatCurrency(tooltip.item.value)}</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function AdminDashboard() {
   const [stats, setStats] = useState<DashboardStats>({
     totalEmployees: 0,
@@ -44,6 +173,8 @@ export function AdminDashboard() {
   const [latestPayroll, setLatestPayroll] = useState<PayrollRunSummary | null>(null);
   const [latestImport, setLatestImport] = useState<ImportHistoryItem | null>(null);
   const [payrollRuns, setPayrollRuns] = useState<PayrollRunSummary[]>([]);
+  const [latestPayrollPayslips, setLatestPayrollPayslips] = useState<Payslip[]>([]);
+  const [showDoughnutAdditions, setShowDoughnutAdditions] = useState(false);
   const [leaveSummary, setLeaveSummary] = useState({ pending: 0, upcoming: 0, next: null as any });
   const [loanSummary, setLoanSummary] = useState({ active: 0, balance: 0, monthly: 0, next: null as any });
   const [birthdays, setBirthdays] = useState<any[]>([]);
@@ -82,8 +213,16 @@ export function AdminDashboard() {
       });
 
       if (payrollData.data.items.length > 0) {
-        setLatestPayroll(payrollData.data.items[0]);
+        const latestRun = payrollData.data.items[0];
+        setLatestPayroll(latestRun);
         setPayrollRuns(payrollData.data.items);
+
+        const latestPayslipData = await payrollApi.listPayslips({
+          page: 1,
+          page_size: 100,
+          payroll_run_id: latestRun.id,
+        }).catch(() => ({ items: [] }));
+        setLatestPayrollPayslips(latestPayslipData.items || []);
       }
 
       if (importData.data.items.length > 0) {
@@ -120,6 +259,7 @@ export function AdminDashboard() {
           return {
             ...employee,
             next_birthday: nextDate.format('YYYY-MM-DD'),
+            birthday_display: nextDate.format('MMMM D'),
             days_until: nextDate.startOf('day').diff(dayjs().startOf('day'), 'day'),
           };
         })
@@ -172,37 +312,43 @@ export function AdminDashboard() {
       return [totals.gross, totals.net, totals.deductions];
     })
   );
-  const pieColors = ['#3b82f6', '#22c55e', '#ef4444', '#8b5cf6', '#f59e0b', '#14b8a6'];
-  const yearlyPayroll = Object.values(
-    sortedPayrollRuns.reduce((acc, run) => {
-      const year = dayjs(run.period_end).year();
-      const { gross, net, deductions } = getRunTotals(run);
-      if (!acc[year]) {
-        acc[year] = { year, gross: 0, net: 0, deductions: 0, count: 0 };
-      }
-      acc[year].gross += gross;
-      acc[year].net += net;
-      acc[year].deductions += deductions;
-      acc[year].count += 1;
-      return acc;
-    }, {} as Record<number, { year: number; gross: number; net: number; deductions: number; count: number }>)
-  ).sort((a, b) => a.year - b.year);
-  const yearlyGrossTotal = yearlyPayroll.reduce((sum, item) => sum + item.gross, 0);
-  let pieCursor = 0;
-  const yearlyPieGradient = yearlyPayroll.length > 0 && yearlyGrossTotal > 0
-    ? `conic-gradient(${yearlyPayroll.map((item, index) => {
-        const start = pieCursor;
-        const share = (item.gross / yearlyGrossTotal) * 100;
-        pieCursor += share;
-        return `${pieColors[index % pieColors.length]} ${start}% ${pieCursor}%`;
-      }).join(', ')})`
-    : '#f3f4f6';
-  const comparisonYear = yearlyPayroll.find((item) => item.year === new Date().getFullYear()) || yearlyPayroll[yearlyPayroll.length - 1];
-  const previousYear = comparisonYear ? yearlyPayroll.find((item) => item.year === comparisonYear.year - 1) : undefined;
-  const comparisonShare = comparisonYear && yearlyGrossTotal > 0 ? (comparisonYear.gross / yearlyGrossTotal) * 100 : 0;
-  const comparisonChange = comparisonYear && previousYear && previousYear.gross > 0
-    ? ((comparisonYear.gross - previousYear.gross) / previousYear.gross) * 100
-    : null;
+  const latestRunTotals = latestPayroll ? getRunTotals(latestPayroll) : { gross: 0, net: 0, deductions: 0 };
+  const sumPayslipEarning = (...fields: string[]) => latestPayrollPayslips.reduce(
+    (sum, payslip) => sum + fields.reduce((fieldSum, field) => fieldSum + toAmount(payslip.earnings?.[field]), 0),
+    0
+  );
+  const latestBasePayTotal = sumPayslipEarning('basic_semi');
+  const latestAllowanceTotal = latestPayrollPayslips.reduce(
+    (sum, payslip) => sum + toAmount(payslip.earnings?.allowance_semi ?? (payslip.earnings as any)?.allowance ?? 0),
+    0
+  );
+  const latestIncentiveTotal = sumPayslipEarning(
+    'productivity_incentive_semi',
+    'language_incentive_semi',
+    'regular_holiday',
+    'regular_holiday_ot',
+    'snwh',
+    'snwh_ot',
+    'overtime',
+    'overtime_pay'
+  );
+  const latestAdditionTotal = latestPayrollPayslips.reduce(
+    (sum, payslip) => sum + toAmount((payslip as any).additional_amount ?? (payslip.adjustments as any)?.additional_amount ?? 0),
+    0
+  );
+  const hasPayslipBreakdown = latestPayrollPayslips.length > 0;
+  const fallbackOtherEarnings = hasPayslipBreakdown ? Math.max(
+    0,
+    latestRunTotals.gross - latestBasePayTotal - latestAllowanceTotal - latestIncentiveTotal
+  ) : 0;
+  const doughnutItems: DoughnutItem[] = [
+    { title: 'Base Pay', value: latestBasePayTotal, color: '#3b82f6' },
+    { title: 'Allowance', value: latestAllowanceTotal, color: '#14b8a6' },
+    { title: 'Incentives / OT', value: latestIncentiveTotal + fallbackOtherEarnings, color: '#8b5cf6' },
+    { title: 'Deductions', value: latestRunTotals.deductions, color: '#ef4444' },
+    ...(showDoughnutAdditions ? [{ title: 'Additions', value: latestAdditionTotal, color: '#f59e0b' }] : []),
+  ];
+  const doughnutTotal = doughnutItems.reduce((sum, item) => sum + item.value, 0);
 
   return (
     <div className="space-y-4">
@@ -314,14 +460,14 @@ export function AdminDashboard() {
               {recentPayrollRuns.length > 0 ? (
                 <div className="overflow-x-auto overflow-y-visible pt-12">
                   <div className="min-w-[620px] space-y-4">
-                    <div className="flex h-56 items-end gap-4 rounded-lg border border-gray-200 bg-gray-50 p-4">
+                    <div className="flex h-[22rem] items-end gap-4 rounded-lg border border-gray-200 bg-gray-50 p-4">
                       {recentPayrollRuns.map((run, runIndex) => {
                         const { gross, net, deductions } = getRunTotals(run);
                         const periodLabel = formatPayrollLabel(run);
 
                         return (
                           <div key={run.id} className="flex h-full min-w-[100px] flex-1 flex-col items-center gap-3">
-                            <div className="flex h-40 w-full items-end justify-center gap-2">
+                            <div className="flex min-h-0 w-full flex-1 items-end justify-center gap-2">
                               <div
                                 className="payroll-bar group relative w-5 rounded-t-lg bg-blue-500 shadow-sm transition-transform duration-300 hover:-translate-y-1"
                                 style={{
@@ -382,66 +528,55 @@ export function AdminDashboard() {
               )}
             </div>
 
-            {/* Yearly Comparison */}
+            {/* Latest Payroll Doughnut */}
             <div className="card">
               <div className="mb-4 flex items-start justify-between gap-3">
                 <div>
-                  <h2 className="text-base font-semibold text-gray-900">Yearly Comparison</h2>
-                  <p className="text-sm text-gray-500">Gross payroll share by year.</p>
+                  <h2 className="text-base font-semibold text-gray-900">Latest Payroll Breakdown</h2>
+                  <p className="text-sm text-gray-500">
+                    {latestPayroll ? formatPayrollLabel(latestPayroll) : 'No payroll selected'}
+                  </p>
                 </div>
-                {comparisonYear && (
-                  <span className="rounded-full bg-primary-50 px-2.5 py-1 text-xs font-medium text-primary-700">
-                    {comparisonShare.toFixed(1)}%
-                  </span>
-                )}
+                <button
+                  type="button"
+                  onClick={() => setShowDoughnutAdditions((value) => !value)}
+                  className={`rounded-full px-2.5 py-1 text-xs font-medium transition-colors ${
+                    showDoughnutAdditions
+                      ? 'bg-amber-100 text-amber-700'
+                      : 'bg-primary-50 text-primary-700 hover:bg-primary-100'
+                  }`}
+                >
+                  {showDoughnutAdditions ? 'Hide additions' : 'Show additions'}
+                </button>
               </div>
 
-              {yearlyPayroll.length > 0 && yearlyGrossTotal > 0 ? (
+              {latestPayroll && doughnutTotal > 0 ? (
                 <div className="space-y-4">
-                  <div className="flex items-center justify-center">
-                    <div
-                      className="payroll-pie relative h-40 w-40 rounded-full shadow-inner"
-                      style={{ background: yearlyPieGradient }}
-                      role="img"
-                      aria-label="Yearly payroll gross comparison pie chart"
-                    >
-                      <div className="absolute inset-7 flex flex-col items-center justify-center rounded-full bg-white text-center shadow-sm">
-                        <span className="text-xs font-medium text-gray-500">Total</span>
-                        <span className="text-sm font-bold text-gray-900">{formatCurrency(yearlyGrossTotal)}</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  {comparisonYear && (
-                    <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
-                      <p className="text-sm font-semibold text-gray-900">{comparisonYear.year}</p>
-                      <p className="mt-1 text-xs text-gray-600">
-                        {comparisonChange === null
-                          ? `${comparisonShare.toFixed(1)}% of loaded yearly payroll.`
-                          : `${Math.abs(comparisonChange).toFixed(1)}% ${comparisonChange >= 0 ? 'higher' : 'lower'} than ${previousYear?.year}.`}
-                      </p>
-                    </div>
-                  )}
+                  <PayrollDoughnutChart
+                    data={doughnutItems}
+                    total={doughnutTotal}
+                    formatCurrency={formatCurrency}
+                  />
 
                   <div className="space-y-2">
-                    {yearlyPayroll.map((item, index) => {
-                      const share = yearlyGrossTotal > 0 ? (item.gross / yearlyGrossTotal) * 100 : 0;
+                    {doughnutItems.filter((item) => item.value > 0).map((item, index) => {
+                      const share = doughnutTotal > 0 ? (item.value / doughnutTotal) * 100 : 0;
                       return (
                         <div
-                          key={item.year}
+                          key={item.title}
                           className="payroll-fade-in flex items-center justify-between rounded-lg border border-gray-200 bg-white px-3 py-2"
                           style={{ animationDelay: `${index * 80}ms` }}
                         >
                           <div className="flex min-w-0 items-center gap-2">
                             <span
                               className="h-3 w-3 shrink-0 rounded-full"
-                              style={{ backgroundColor: pieColors[index % pieColors.length] }}
+                              style={{ backgroundColor: item.color }}
                             />
-                            <p className="text-sm font-semibold text-gray-900">{item.year}</p>
+                            <p className="text-sm font-semibold text-gray-900">{item.title}</p>
                           </div>
                           <div className="text-right">
-                            <p className="text-sm font-semibold text-gray-900">{share.toFixed(1)}%</p>
-                            <p className="text-xs text-gray-500">{item.count} runs</p>
+                            <p className="text-sm font-semibold text-gray-900">{formatCurrency(item.value)}</p>
+                            <p className="text-xs text-gray-500">{share.toFixed(1)}%</p>
                           </div>
                         </div>
                       );
@@ -450,7 +585,7 @@ export function AdminDashboard() {
                 </div>
               ) : (
                 <div className="rounded-lg border border-dashed border-gray-200 bg-gray-50 px-4 py-8 text-center text-sm text-gray-500">
-                  No yearly payroll data available yet.
+                  No latest payroll breakdown available yet.
                 </div>
               )}
             </div>
@@ -526,7 +661,7 @@ export function AdminDashboard() {
                         {employee.full_name || `${employee.first_name || ''} ${employee.last_name || ''}`.trim()}
                       </span>
                       <span className="shrink-0 text-xs text-gray-500">
-                        {employee.days_until === 0 ? 'Today' : `in ${employee.days_until}d`}
+                        {employee.days_until === 0 ? 'Today' : `in ${employee.days_until}d`}, {employee.birthday_display}
                       </span>
                     </div>
                   ))

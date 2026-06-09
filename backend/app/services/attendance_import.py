@@ -547,11 +547,13 @@ def find_employee_by_name(db: Session, name: str) -> Optional[Employee]:
         emp_full = normalize_name(emp.full_name)
         emp_full_nospace = emp_full.replace(' ', '')
         emp_last = normalize_name(emp.last_name) if emp.last_name else ''
+        emp_last_token = emp_last.split()[-1] if emp_last else ''
 
         # Check last name (also try without spaces for "De Jesus" vs "Dejesus")
         last_name_match = (emp_last == last_name or
                           emp_last.replace(' ', '') == last_name or
-                          emp_last == last_name.replace(' ', ''))
+                          emp_last == last_name.replace(' ', '') or
+                          emp_last_token == last_name)
 
         if not last_name_match:
             continue
@@ -576,11 +578,13 @@ def find_employee_by_name(db: Session, name: str) -> Optional[Employee]:
             emp_first_nospace = emp_first.replace(' ', '')
             emp_middle = normalize_name(emp.middle_name) if emp.middle_name else ''
             emp_last = normalize_name(emp.last_name) if emp.last_name else ''
+            emp_last_token = emp_last.split()[-1] if emp_last else ''
 
             # Check last name match (with space variations)
             last_match = (emp_last == last_name or
                          emp_last.replace(' ', '') == last_name or
-                         emp_last == last_name.replace(' ', ''))
+                         emp_last == last_name.replace(' ', '') or
+                         emp_last_token == last_name)
 
             if not last_match:
                 continue
@@ -604,12 +608,14 @@ def find_employee_by_name(db: Session, name: str) -> Optional[Employee]:
             emp_first = normalize_name(emp.first_name) if emp.first_name else ''
             emp_middle = normalize_name(emp.middle_name) if emp.middle_name else ''
             emp_last = normalize_name(emp.last_name) if emp.last_name else ''
+            emp_last_token = emp_last.split()[-1] if emp_last else ''
             emp_full = normalize_name(emp.full_name)
 
             # Check last name match
             last_match = (emp_last == last_name or
                          emp_last.replace(' ', '') == last_name or
-                         emp_last == last_name.replace(' ', ''))
+                         emp_last == last_name.replace(' ', '') or
+                         emp_last_token == last_name)
 
             if not last_match:
                 continue
@@ -626,7 +632,8 @@ def find_employee_by_name(db: Session, name: str) -> Optional[Employee]:
     # Strategy 6: Last name only match (if only one employee with that last name)
     matching_last = [emp for emp in prioritized_employees
                      if normalize_name(emp.last_name or '') == last_name or
-                        normalize_name(emp.last_name or '').replace(' ', '') == last_name]
+                        normalize_name(emp.last_name or '').replace(' ', '') == last_name or
+                        (normalize_name(emp.last_name or '').split()[-1] if normalize_name(emp.last_name or '') else '') == last_name]
     if len(matching_last) == 1:
         return matching_last[0]
 
@@ -645,6 +652,34 @@ def find_employee_by_name(db: Session, name: str) -> Optional[Employee]:
     return None
 
 
+def find_employee_for_import(db: Session, name: str, biometric_id: Optional[str] = None) -> Optional[Employee]:
+    """
+    Find the canonical employee for an attendance import row.
+
+    Biometric ID is the strongest signal from the time clock, so prefer it over
+    fuzzy name matching. This handles cases where the device name is shortened
+    or missing particles such as "De" in "De Galicia".
+    """
+    if biometric_id:
+        normalized_bio_id = str(biometric_id).strip()
+        if normalized_bio_id:
+            matches = db.query(Employee).filter(
+                Employee.biometric_id == normalized_bio_id,
+                Employee.is_active == True
+            ).all()
+
+            if matches:
+                matches.sort(key=lambda emp: (
+                    0 if (emp.status or '').lower() == 'active' else 1,
+                    0 if (emp.employee_no or '').startswith('ICN') else 1,
+                    -float(emp.basic_salary or 0),
+                    emp.id,
+                ))
+                return matches[0]
+
+    return find_employee_by_name(db, name)
+
+
 def import_time_report(
     db: Session,
     file_path: str,
@@ -654,8 +689,8 @@ def import_time_report(
     Import attendance data from a time report file.
     Automatically creates employees and fixes misaligned time entries.
 
-    Employee matching: By NAME only (fuzzy matching).
-    Creates new employee only if no name match found.
+    Employee matching: biometric ID first, then fuzzy name matching.
+    Creates new employee only if no existing employee matches.
     """
     parser = TimeReportParser(file_path)
     records = parser.parse()
@@ -683,12 +718,11 @@ def import_time_report(
         if key not in unique_employees:
             unique_employees[key] = r['employee_name']
 
-    # Process each unique employee - match by NAME only
+    # Process each unique employee - match biometric ID first, then fuzzy name.
     for (emp_name, bio_id), name in unique_employees.items():
         employee = None
 
-        # Match by name (fuzzy matching)
-        employee = find_employee_by_name(db, emp_name)
+        employee = find_employee_for_import(db, emp_name, bio_id)
 
         if employee:
             # Update biometric_id if provided (for reference only)

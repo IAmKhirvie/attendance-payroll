@@ -525,7 +525,7 @@ async def list_deleted_payroll_runs(
         # Get deleted by user info
         deleted_by_user = None
         if run.deleted_by:
-            user = db.query(UserModel).filter(UserModel.id == run.deleted_by).first()
+            user = db.query(User).filter(User.id == run.deleted_by).first()
             if user:
                 deleted_by_user = {"id": user.id, "email": user.email}
 
@@ -2340,7 +2340,7 @@ def generate_payslip_png(payslip: Payslip, company_name: str = "I CAN LANGUAGE C
     """
     from PIL import Image, ImageDraw, ImageFont
 
-    # Calculate height: base 520 + extra rows for loans, optional earnings, and prorate
+    # Calculate height: base 560 + extra rows for loans, optional earnings, and prorate
     earnings_data = payslip.earnings or {}
     cutoff = payslip.payroll_run.cutoff if payslip.payroll_run else 1
     deductions_data = sanitize_deductions_for_cutoff(payslip.deductions, cutoff)
@@ -2352,7 +2352,7 @@ def generate_payslip_png(payslip: Payslip, company_name: str = "I CAN LANGUAGE C
     prorate_data = earnings_data.get('_prorate_info')
     if prorate_data and isinstance(prorate_data, list) and len(prorate_data) >= 2:
         extra_rows += 0  # Compact prorate fits in base height
-    width, height = 400, 520 + (extra_rows * 14)
+    width, height = 400, 560 + (extra_rows * 14)
     scale = 4
     img = Image.new('RGB', (width * scale, height * scale), 'white')
 
@@ -2745,13 +2745,15 @@ def generate_payslip_png(payslip: Payslip, company_name: str = "I CAN LANGUAGE C
 
     draw.line([(sig_col1, y), (sig_col1 + 100, y)], fill='black', width=1)
     draw.line([(sig_col2, y), (sig_col2 + 100, y)], fill='black', width=1)
-    y += 18
+    draw.text((sig_col1, y + 12), "Gemma Termulo", fill='black', font=font_small)
+    draw.text((sig_col2, y + 12), "Lee Hyunsoo", fill='black', font=font_small)
+    y += 42
 
     draw.text((sig_col1, y), "Received by:", fill='black', font=font_small)
-    y += 25
+    y += 30
 
     draw.line([(sig_col1, y), (sig_col1 + 100, y)], fill='black', width=1)
-    draw.text((sig_col1, y + 3), emp_name, fill='black', font=font_small)
+    draw.text((sig_col1, y + 12), emp_name, fill='black', font=font_small)
 
     # Border
     draw.rectangle([(0, 0), (width - 1, height - 1)], outline='black', width=1)

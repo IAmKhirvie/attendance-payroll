@@ -13,5 +13,8 @@ if [ ! -x "$APP_DIR/node_modules/.bin/vite" ] || ! /opt/homebrew/bin/npx vite --
   npm install
 fi
 
-echo "$LOG_PREFIX starting vite on 0.0.0.0:4500"
-exec /opt/homebrew/bin/npx vite --host 0.0.0.0 --port 4500
+echo "$LOG_PREFIX building frontend"
+npm run build
+
+echo "$LOG_PREFIX starting vite preview on 0.0.0.0:4500"
+exec npm run preview -- --host 0.0.0.0 --port 4500 --strictPort

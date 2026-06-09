@@ -335,6 +335,34 @@ def record_loan_deductions(
     return round(total_deducted, 2)
 
 
+def reverse_loan_deductions_for_payslips(db: Session, payslip_ids: List[int]) -> None:
+    """
+    Reverse loan balance changes for deductions tied to payslips that are about to be deleted.
+    This keeps reprocessing a payroll run from charging the same loan installment twice.
+    """
+    if not payslip_ids:
+        return
+
+    deductions = db.query(LoanDeduction).filter(
+        LoanDeduction.payslip_id.in_(payslip_ids)
+    ).all()
+
+    for deduction in deductions:
+        loan = deduction.loan
+        if not loan:
+            continue
+
+        loan.remaining_balance = Decimal(str(loan.remaining_balance or 0)) + Decimal(str(deduction.amount or 0))
+        loan.total_paid = max(
+            Decimal("0"),
+            Decimal(str(loan.total_paid or 0)) - Decimal(str(deduction.amount or 0))
+        )
+
+        if loan.remaining_balance > 0 and loan.status == LoanStatus.PAID:
+            loan.status = LoanStatus.ACTIVE
+            loan.actual_end_date = None
+
+
 def calculate_bir_withholding_tax(monthly_taxable: float) -> dict:
     """
     Calculate withholding tax based on BIR TRAIN Law 2023-2026 brackets.
@@ -1113,6 +1141,7 @@ def process_payroll(db: Session, payroll_run: PayrollRun) -> Dict[str, Any]:
     # First delete orphan loan deductions linked to these payslips
     existing_payslip_ids = [p.id for p in db.query(Payslip.id).filter(Payslip.payroll_run_id == payroll_run.id).all()]
     if existing_payslip_ids:
+        reverse_loan_deductions_for_payslips(db, existing_payslip_ids)
         db.query(LoanDeduction).filter(LoanDeduction.payslip_id.in_(existing_payslip_ids)).delete(synchronize_session='fetch')
     db.query(Payslip).filter(Payslip.payroll_run_id == payroll_run.id).delete()
 

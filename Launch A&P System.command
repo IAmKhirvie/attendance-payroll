@@ -49,32 +49,16 @@ if [ ! -d "$SCRIPT_DIR/frontend/node_modules" ]; then
     exit 1
 fi
 
-# Kill any existing processes on the ports
-echo "Cleaning up old processes..."
-lsof -ti:$BACKEND_PORT | xargs kill -9 2>/dev/null
-lsof -ti:$FRONTEND_PORT | xargs kill -9 2>/dev/null
-sleep 2
+"$SCRIPT_DIR/start-servers.sh"
+START_STATUS=$?
 
-# Start Backend
-echo "Starting Backend API..."
-cd "$SCRIPT_DIR/backend"
-source venv/bin/activate
-nohup uvicorn app.main:app --host 0.0.0.0 --port $BACKEND_PORT > /tmp/payroll-backend.log 2>&1 &
-BACKEND_PID=$!
-echo "  Backend started (PID: $BACKEND_PID)"
-
-# Wait for backend to be ready
-sleep 3
-
-# Start Frontend
-echo "Starting Frontend..."
-cd "$SCRIPT_DIR/frontend"
-npm run build > /dev/null 2>&1
-nohup npm run preview -- --host 0.0.0.0 --port $FRONTEND_PORT > /tmp/payroll-frontend.log 2>&1 &
-FRONTEND_PID=$!
-echo "  Frontend started (PID: $FRONTEND_PID)"
-
-sleep 3
+if [ "$START_STATUS" -ne 0 ]; then
+    echo ""
+    echo "ERROR: Failed to start the system."
+    echo "Press any key to exit..."
+    read -n 1
+    exit "$START_STATUS"
+fi
 
 echo ""
 echo "=============================================="
