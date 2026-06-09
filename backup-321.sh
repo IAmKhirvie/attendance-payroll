@@ -25,6 +25,7 @@ BACKUP_DIR="${BACKUP_DIR:-$SCRIPT_DIR/backups}"
 EXTERNAL_BACKUP_DIR="${EXTERNAL_BACKUP_DIR:-}"
 CLOUD_BACKUP_ENABLED="${CLOUD_BACKUP_ENABLED:-false}"
 GITHUB_BACKUP_REPO="${GITHUB_BACKUP_REPO:-}"
+OFFSITE_BACKUP_DIR="${OFFSITE_BACKUP_DIR:-}"
 STRICT_321="${STRICT_321:-false}"
 DATABASE_PATH="${DATABASE_PATH:-$SCRIPT_DIR/backend/attendance_payroll.db}"
 ENV_FILE="${ENV_FILE:-$SCRIPT_DIR/backend/.env}"
@@ -252,7 +253,10 @@ copy_3_offsite() {
     # Offsite backup (cloud/GitHub)
     log_info "=== COPY 3: Offsite/Cloud Backup ==="
     
-    if [ "$CLOUD_BACKUP_ENABLED" = "true" ]; then
+    if [ -n "$OFFSITE_BACKUP_DIR" ] && [ -d "$OFFSITE_BACKUP_DIR" ]; then
+        create_full_backup "$OFFSITE_BACKUP_DIR"
+        log_success "Offsite directory backup completed"
+    elif [ "$CLOUD_BACKUP_ENABLED" = "true" ]; then
         # Create compressed archive for cloud upload
         local cloud_archive="$BACKUP_DIR/cloud/${BACKUP_NAME}_full.tar.gz"
         
@@ -275,10 +279,10 @@ copy_3_offsite() {
         fi
     else
         if [ "$STRICT_321" = "true" ]; then
-            log_error "STRICT_321=true but CLOUD_BACKUP_ENABLED=false"
+            log_error "STRICT_321=true but OFFSITE_BACKUP_DIR is missing and CLOUD_BACKUP_ENABLED=false"
             return 1
         fi
-        log_warning "Cloud backup disabled. Set CLOUD_BACKUP_ENABLED=true in backup.conf"
+        log_warning "Offsite/cloud backup disabled. Set OFFSITE_BACKUP_DIR or CLOUD_BACKUP_ENABLED=true in backup.conf"
     fi
 }
 
@@ -420,8 +424,10 @@ main() {
     fi
     if [ "$CLOUD_BACKUP_ENABLED" = "true" ]; then
         echo "  Cloud:       $BACKUP_DIR/cloud/${BACKUP_NAME}_full.tar.gz"
+    elif [ -n "$OFFSITE_BACKUP_DIR" ]; then
+        echo "  Offsite:     $OFFSITE_BACKUP_DIR/$BACKUP_NAME"
     else
-        echo "  Cloud:       Disabled"
+        echo "  Offsite:     Disabled"
     fi
     echo "=============================================="
     echo ""

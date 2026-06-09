@@ -19,6 +19,10 @@ BACKUP_DIR="./backups"
 # Example: /mnt/external/backups/attendance-payroll
 EXTERNAL_BACKUP_DIR=""
 
+# Offsite backup directory (cloud-mounted drive, network share, or remote-sync target)
+# Example: /Volumes/CompanyCloud/Backups/attendance-payroll
+OFFSITE_BACKUP_DIR=""
+
 # -----------------------------------------------------------------------------
 # CLOUD BACKUP SETTINGS
 # -----------------------------------------------------------------------------
@@ -27,7 +31,7 @@ EXTERNAL_BACKUP_DIR=""
 # Set to "true" to enable offsite backups
 CLOUD_BACKUP_ENABLED=false
 
-# Set true in production after EXTERNAL_BACKUP_DIR and cloud/offsite are configured.
+# Set true in production after EXTERNAL_BACKUP_DIR and offsite/cloud are configured.
 # When true, backup fails if the external or offsite copy cannot be created.
 STRICT_321=false
 
